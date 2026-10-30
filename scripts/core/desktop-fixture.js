@@ -20,6 +20,82 @@ function install({ appRoot }) {
   global.__smokeWalletMode = "ready";
   global.__smokeLegacyMode = "ready";
   global.__smokeLegacyReads = 0;
+  // Keep registry verification and PluginManager real while supplying only
+  // ephemeral signed test packages. No published keys or packages are loaded.
+  const crypto = require("node:crypto");
+  const registryModule = require(path.join(appRoot, "core/lib/plugins/registry.js"));
+  const packageModule = require(path.join(appRoot, "core/lib/plugins/package.js"));
+  const managerModule = require(path.join(appRoot, "core/lib/plugins/manager.js"));
+  const registryKey = crypto.generateKeyPairSync("ed25519"), publisherKey = crypto.generateKeyPairSync("ed25519"), otherKey = crypto.generateKeyPairSync("ed25519");
+  const keyText = key => key.publicKey.export({ format: "der", type: "spki" }).toString("base64");
+  const fingerprint = key => registryModule.fingerprint(key.publicKey);
+  const ids = ["smoke.update-enabled", "smoke.update-disabled", "smoke.update-blocked", "smoke.equal", "smoke.newer-installed", "smoke.changed-publisher", "smoke.not-installed"];
+  const names = ["Synthetic Ready Plugin", "Synthetic Disabled Plugin", "Synthetic Core Upgrade", "Synthetic Current Plugin", "Synthetic Ahead Plugin", "Synthetic Other Publisher", "Synthetic New Plugin"];
+  const packageFor = (id, version, key = publisherKey) => {
+    const manifest = { schema: 1, apiVersion: 1, id, version, name: names[ids.indexOf(id)], description: "Synthetic catalog update fixture without runtime permissions.", entry: "index.html", permissions: [] };
+    const files = { "index.html": "<!doctype html><html><body>Synthetic plugin fixture</body></html>" };
+    return { manifest, files, publicKey: keyText(key), signature: crypto.sign(null, Buffer.from(packageModule.canonical({ manifest, files })), key.privateKey).toString("base64") };
+  };
+  let catalogSequence = 1, signedCatalog;
+  const packages = new Map();
+  const publishCatalog = () => {
+    const plugins = ids.map((id, index) => {
+      const version = catalogSequence > 1 && [0, 1, 2, 5, 6].includes(index) ? "2.0.0" : "1.0.0";
+      const pkg = packageFor(id, version), repository = "synthetic-kai-tests/" + id.replaceAll(".", "-");
+      const url = `https://github.com/${repository}/releases/download/v${version}/synthetic.kaiplugin`;
+      packages.set(url, pkg);
+      return { id, name: pkg.manifest.name, description: pkg.manifest.description, version, apiVersion: 1, minCoreVersion: index === 2 && catalogSequence > 1 ? "99.0.0" : "0.1.0", repository, url, publicKey: pkg.publicKey, fingerprint: fingerprint(publisherKey), sha256: registryModule.packageDigest(pkg), permissions: [] };
+    });
+    const catalog = { schema: 1, version: `1.0.${catalogSequence - 1}`, sequence: catalogSequence, generatedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString(), plugins };
+    signedCatalog = { catalog, publicKey: keyText(registryKey), signature: crypto.sign(null, Buffer.from(registryModule.canonical(catalog)), registryKey.privateKey).toString("base64") };
+  };
+  publishCatalog();
+  global.__smokeCatalogReads = 0; global.__smokePackageReads = 0; global.__smokeCatalogMode = "ready"; global.__smokeApprovePlugin = false;
+  global.__smokePublishPluginUpdates = () => { catalogSequence++; publishCatalog(); };
+  const BaseManager = managerModule.PluginManager;
+  managerModule.PluginManager = class extends BaseManager {
+    constructor(dataDir) {
+      super(dataDir);
+      if (!this.list().length) {
+        for (let i = 0; i < 6; i++) this.install(packageFor(ids[i], i === 4 ? "2.0.0" : "1.0.0", i === 5 ? otherKey : publisherKey));
+        this.change(ids[1], "disable");
+      }
+      global.__smokePluginManager = this;
+    }
+  };
+  const BaseRegistry = registryModule.RegistryClient;
+  registryModule.RegistryClient = class extends BaseRegistry {
+    constructor(options) {
+      super({ ...options, trustedFingerprint: fingerprint(registryKey), download: async (_source, { signal }) => {
+        signal.throwIfAborted(); global.__smokeCatalogReads++;
+        if (global.__smokeCatalogMode === "unavailable") throw Error("Synthetic catalog temporarily unavailable");
+        return structuredClone(signedCatalog);
+      } });
+    }
+  };
+  const downloadModule = require(path.join(appRoot, "core/lib/plugins/download.js"));
+  downloadModule.downloadPackage = async (url, { signal } = {}) => {
+    signal?.throwIfAborted(); global.__smokePackageReads++;
+    if (!packages.has(url)) throw Error("Synthetic fixture forbids unknown plugin downloads");
+    return packageModule.verifyPackage(packages.get(url));
+  };
+  const catalogModule = require(path.join(appRoot, "electron/core-plugin-catalog.js")), createMonitor = catalogModule.createCatalogMonitor;
+  catalogModule.createCatalogMonitor = options => {
+    let clockOffset = 0;
+    const timers = new Map();
+    const monitor = createMonitor({ ...options, now: () => Date.now() + clockOffset,
+      setTimer(fn, delay) { const timer = setTimeout(() => { timers.delete(timer); fn(); }, delay); timers.set(timer, { fn, delay }); return timer; },
+      clearTimer(timer) { timers.delete(timer); clearTimeout(timer); },
+    });
+    global.__smokePluginCatalog = monitor;
+    global.__smokePluginCatalogTick = async () => {
+      const next = [...timers].filter(([, entry]) => entry.delay >= 60000).sort((a, b) => a[1].delay - b[1].delay)[0];
+      if (!next) throw Error("No automatic plugin catalog check was scheduled");
+      clearTimeout(next[0]); timers.delete(next[0]); clockOffset += next[1].delay + 1;
+      await next[1].fn();
+    };
+    return monitor;
+  };
   // Native wallet presentation uses the production scoped broker and sender
   // checks. Only chain data and OS side effects are synthetic. A mistaken Send
   // can never reach a chain provider: all native reviews cancel and transfer
@@ -47,7 +123,7 @@ function install({ appRoot }) {
   desktop.dialog.showMessageBox = async (_parent, options) => {
     const value = options || _parent;
     global.__smokeWalletReviews.push({ title: value.title, message: value.message, detail: value.detail, buttons: value.buttons, defaultId: value.defaultId, cancelId: value.cancelId });
-    return { response: value.cancelId ?? 0, checkboxChecked: false };
+    return { response: value.title === "Install plugin" && global.__smokeApprovePlugin ? 1 : value.cancelId ?? 0, checkboxChecked: false };
   };
   let clipboard = "";
   desktop.clipboard.writeText = value => { clipboard = String(value); };

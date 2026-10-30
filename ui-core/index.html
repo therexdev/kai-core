@@ -18,7 +18,7 @@
     <nav id="nav" aria-label="Main navigation">
       <button class="nav-item selected" data-page="chat" aria-label="Chat with KAI" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v12H9l-4 4Z"/></svg><span>Chat with KAI</span></button>
       <button class="nav-item" data-page="models" aria-label="Model library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg><span>Model library</span></button>
-      <button class="nav-item" data-page="plugins" aria-label="Plugins"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v3a2 2 0 1 0 4 0V4h6v6h-3a2 2 0 1 0 0 4h3v6h-6v-3a2 2 0 1 0-4 0v3H4v-6h3a2 2 0 1 0 0-4H4Z"/></svg><span>Plugins</span></button>
+      <button id="plugin-nav" class="nav-item" data-page="plugins" aria-label="Plugins"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v3a2 2 0 1 0 4 0V4h6v6h-3a2 2 0 1 0 0 4h3v6h-6v-3a2 2 0 1 0-4 0v3H4v-6h3a2 2 0 1 0 0-4H4Z"/></svg><span>Plugins</span><span id="plugin-update-count" class="plugin-update-badge" aria-hidden="true" hidden></span></button>
       <div class="nav-divider" role="separator"></div>
       <button class="nav-item" data-page="wallet" aria-label="Wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5l13-2v4M4 7h16v14H4ZM16 12h4v5h-4Z"/></svg><span>Wallet</span></button>
       <button class="nav-item" data-page="credits" aria-label="Credits and Usage"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="10" cy="5" rx="6" ry="3"/><path d="M4 5v5c0 4 12 4 12 0V5M4 10v5c0 2 4 3 7 3M16 12h5v9h-9v-6M16 16v2"/></svg><span>Credits and Usage</span></button>
@@ -43,6 +43,7 @@
       </section>
       <section data-panel="plugins" class="page" hidden>
         <div class="page-head"><div><h1>Plugins</h1><p>Add the capabilities you want in your workspace.</p></div></div>
+        <section id="plugin-updates" class="plugin-updates-summary" role="status" aria-live="polite" aria-atomic="true" hidden><span id="plugin-updates-count" class="plugin-update-badge" aria-hidden="true"></span><div><h2 id="plugin-updates-title"></h2><p id="plugin-updates-detail"></p></div></section>
         <h2 class="section-heading">Your installed plugins</h2><div id="plugins" class="cards plugin-cards"></div>
         <div class="marketplace-head"><h2>Marketplace</h2><button id="refresh-registry">Refresh catalog</button></div>
         <p id="registry-status" class="catalog-note" role="status"></p>

@@ -7,13 +7,13 @@ const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 const { channelConfig, configureDesktop, configureUpdater } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, features, payments, coreChat, coreWallet, updater, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
+let core, win, pluginHost, features, payments, coreChat, coreWallet, catalogMonitor, updater, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
 const { trustedMainDocument, protectNavigation } = require("./window-security");
 function stop() {
   if (!stopping) stopping = (async () => {
     pluginDownload?.abort(); const errors = [];
     // Finish every cleanup even if an earlier service cannot stop normally.
-    for (const dispose of [() => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
+    for (const dispose of [() => catalogMonitor?.dispose(), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
       try { await dispose(); } catch (error) { errors.push(error); }
     }
     desktopTray?.dispose();
@@ -62,10 +62,21 @@ async function start() {
   function catalog() {
     const state = registry.status();
     const entries = state.available && !state.expired ? registry.list() : !state.present ? firstParty.map(p => ({ ...p, compatible: true })) : [];
-    return entries.map(({ id, name, description, version, compatible, compatibilityReason, repository, minCoreVersion }) =>
-      ({ id, name, description, version, compatible, compatibilityReason, repository, minCoreVersion, official: firstParty.some(p => p.id === id) }));
+    return entries.map(({ id, name, description, version, compatible, compatibilityReason, repository, minCoreVersion, fingerprint }) =>
+      ({ id, name, description, version, compatible, compatibilityReason, repository, minCoreVersion, fingerprint, official: firstParty.some(p => p.id === id && p.fingerprint === fingerprint) }));
   }
-  let updateBusy = false, registryBusy = false;
+  catalogMonitor = require("./core-plugin-catalog").createCatalogMonitor({ registry,
+    isLocalOnly: () => core.gateway.network.status().privacyMode === "local-only",
+    isBusy: () => installBusy || shuttingDown,
+    onChange: () => {
+      if (!shuttingDown && trustedMainDocument({ sender: win?.webContents, senderFrame: win?.webContents?.mainFrame }, win, origin))
+        win.webContents.send("kai-core:plugin-catalog-changed");
+    }
+  });
+  const wakeCatalog = () => { if (!shuttingDown) void catalogMonitor.wake(); };
+  win.on("focus", wakeCatalog); win.on("show", wakeCatalog);
+  electron.powerMonitor.on("resume", wakeCatalog);
+  let updateBusy = false;
   features = new (require("./plugin-services").FeatureServices)({ dataDir, core, electron,
     getWindow: () => win, localInference: (input, signal) => pluginHost.runLocal(input, signal),
     onDisposeError: async id => {
@@ -91,17 +102,21 @@ async function start() {
     switch (method) {
       case "chat.local": return coreChat.send(input);
       case "chat.stop": return coreChat.stop();
-      case "status": return { version: app.getVersion(), desktop: { trayAvailable: desktopTray.available }, profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
-        models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null, plugins: manager.list(), catalog: catalog(), registry: registry.status() };
-      case "plugins.registry.refresh": {
-        if (registryBusy || installBusy) throw Error("Finish the current plugin operation first");
-        registryBusy = true; pluginDownload = new AbortController();
-        try { await registry.refresh({ localOnly: core.gateway.network.status().privacyMode === "local-only", signal: AbortSignal.any([pluginDownload.signal, AbortSignal.timeout(30000)]) }); return registry.status(); }
-        finally { registryBusy = false; pluginDownload = null; }
+      case "status": {
+        const installed = manager.list(), entries = catalog();
+        return { version: app.getVersion(), desktop: { trayAvailable: desktopTray.available }, profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
+          models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null,
+          plugins: installed, catalog: entries, registry: registry.status(), pluginUpdates: require("../core/lib/plugins/updates").pluginUpdates(installed, entries), catalogCheck: catalogMonitor.status() };
       }
+      case "plugins.registry.refresh": {
+        await catalogMonitor.refresh(); return registry.status();
+      }
+      case "plugins.registry.check": await catalogMonitor.wake(); return registry.status();
       case "plugins.install": {
-        if (installBusy || registryBusy) throw Error("Finish the current plugin operation first"); installBusy = true;
+        if (installBusy) throw Error("Finish the current plugin operation first"); installBusy = true;
         try {
+          await catalogMonitor.waitForIdle();
+          if (shuttingDown) throw Error("Plugin installation stopped because Core is closing");
           let verified;
           const registryState = registry.status();
           const listed = input?.id && registryState.present ? registry.entry(input.id) : null;
@@ -134,6 +149,7 @@ async function start() {
       case "privacy": {
         const state = core.gateway.network.configure({ privacyMode: input.mode });
         if (state.privacyMode === "local-only") pluginDownload?.abort();
+        catalogMonitor.privacyChanged();
         coreWallet.privacyChanged(state.privacyMode);
         await features.privacyChanged(state.privacyMode); return state;
       }
@@ -184,4 +200,5 @@ async function start() {
     }
   });
   await win.loadURL(origin + "/");
+  if (!shuttingDown) catalogMonitor.start();
 }

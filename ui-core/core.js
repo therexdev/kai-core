@@ -42,6 +42,7 @@ function showPage(next) {
   if (next === "earning") window.KaiCoreEarning?.enter();
   if (next === "network") window.KaiCoreNetwork?.enter();
   if (next === "wallet") window.KaiCoreWallet?.enter();
+  if (next === "plugins") void checkPluginCatalog();
   if (next === "credits") { renderCredits(); void refreshCreditActivity(); }
   if (next === "buy-credits") void price();
 }
@@ -74,33 +75,77 @@ async function refresh() {
       : s.importError || "", { error: modelError, dismissible: !modelBusy });
     text("download", s.download ? `Downloading · ${Math.round(s.download.pct || 0)}%` : s.runtime.activeAlias ? `Loaded: ${s.runtime.activeAlias}` : "");
     html("models", s.models.map(m => `<article><div class="row"><h2>${esc(m.label || m.alias)}</h2><span class="pill">${esc(m.status)}</span></div><p>${esc(m.alias)}</p><button data-model="${esc(m.alias)}">${m.status === "ready" ? "Load model" : "Download & load"}</button></article>`).join(""));
-    html("plugins", s.plugins.length ? s.plugins.map(p => {
-      const display = window.KaiPluginPresentation.get(p.id, p);
-      return `<article class="plugin-card"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted">Version ${esc(p.version)}</p><div class="actions">${p.enabled ? `<button data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></article>`;
-    }).join("") : "<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a plugin below to add the tools you need.</p></article>");
+    renderInstalledPlugins();
     window.KaiCoreChat?.update(s);
     renderCatalog();
     if (noticeSource === "refresh") globalNotice.clear();
   } catch (e) { notify(e.message, true, { background: true }); } finally { refreshing = false; }
 }
+// Counts and publisher matching come from the native catalog snapshot. Rendering
+// additionally binds each entry to the installed and catalog versions in it.
+function pluginVersionOrder(left, right) {
+  const valid = /^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$/;
+  if (!valid.test(left) || !valid.test(right)) return null;
+  const a = left.split(".").map(Number), b = right.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+  return 0;
+}
+function pluginUpdates() {
+  const updates = new Map();
+  for (const item of snapshot?.pluginUpdates?.updates || []) {
+    const installed = snapshot.plugins.find(p => p.id === item.id), listed = snapshot.catalog?.find(p => p.id === item.id);
+    if (installed && listed && (!installed.fingerprint || !listed.fingerprint || installed.fingerprint === listed.fingerprint) && installed.version === item.installedVersion && listed.version === item.version && pluginVersionOrder(item.version, item.installedVersion) === 1) updates.set(item.id, item);
+  }
+  return updates;
+}
+function renderInstalledPlugins() {
+  const s = snapshot, updates = pluginUpdates(), count = updates.size;
+  text("plugin-update-count", count > 99 ? "99+" : String(count)); $("plugin-update-count").hidden = !count;
+  const label = count ? `Plugins, ${count} ${count === 1 ? "update" : "updates"} available` : "Plugins";
+  $("plugin-nav").setAttribute("aria-label", label); $("plugin-nav").setAttribute("title", label);
+  $("plugin-updates").hidden = !count; text("plugin-updates-count", count);
+  text("plugin-updates-title", `${count} plugin ${count === 1 ? "update" : "updates"} available`);
+  const blocked = [...updates.values()].filter(item => item.compatible === false).length;
+  text("plugin-updates-detail", blocked ? `${blocked} ${blocked === 1 ? "update needs" : "updates need"} a newer Core version. Review available updates below.` : "Review and install the new versions below.");
+  html("plugins", s.plugins.length ? s.plugins.map(p => {
+    const display = window.KaiPluginPresentation.get(p.id, p), update = updates.get(p.id), blocked = update?.compatible === false;
+    const updateLabel = update ? `<span class="pill plugin-update-label">${blocked ? "Core update required" : "Update available"}</span>` : "";
+    const version = update ? `Version ${esc(p.version)} <span aria-hidden="true">→</span><span class="sr-only"> to </span> <strong>${esc(update.version)}</strong>` : `Version ${esc(p.version)}`;
+    const updateButton = update ? `<button class="primary" data-install-plugin="${esc(p.id)}" ${blocked ? "disabled" : ""}>${blocked ? "Requires newer Core" : "Review update"}</button>` : "";
+    return `<article class="plugin-card${update ? " plugin-update-available" : ""}" data-installed-plugin="${esc(p.id)}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><div class="pills"><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span>${updateLabel}</div></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted plugin-version">${version}</p>${blocked ? `<p class="muted">${esc(update.compatibilityReason || `Requires KAI Core ${update.minCoreVersion || "a newer version"}.`)}</p>` : ""}<div class="actions">${updateButton}${p.enabled ? `<button data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></article>`;
+  }).join("") : "<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a plugin below to add the tools you need.</p></article>");
+}
 function renderCatalog() {
   if (!snapshot || !$("plugin-catalog")) return;
-  const s = snapshot, query = ($("plugin-search")?.value || "").trim().toLowerCase();
+  const s = snapshot, updates = pluginUpdates(), query = ($("plugin-search")?.value || "").trim().toLowerCase();
   const rows = (s.catalog || []).filter(p => { const display = window.KaiPluginPresentation.get(p.id, p); return `${display.name} ${display.description} ${p.id}`.toLowerCase().includes(query); });
   html("plugin-catalog", rows.length ? rows.map(p => {
-    const display = window.KaiPluginPresentation.get(p.id, p);
-    const installed = s.plugins.some(x => x.id === p.id && x.version === p.version), blocked = p.compatible === false;
-    const older = s.plugins.some(x => x.id === p.id);
-    return `<article class="plugin-card"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><span class="pill">${p.official ? "KAI" : "Community"}</span></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted">Version ${esc(p.version)}${p.minCoreVersion ? ` · Core ${esc(p.minCoreVersion)}+` : ""}</p>${blocked ? `<p>${esc(p.compatibilityReason || "Update Core to use this plugin.")}</p>` : ""}<button data-install-plugin="${esc(p.id)}" ${installed || blocked ? "disabled" : ""}>${installed ? "Installed" : blocked ? "Requires newer Core" : older ? "Review update" : "Install"}</button></article>`;
+    const display = window.KaiPluginPresentation.get(p.id, p), installed = s.plugins.find(x => x.id === p.id), update = updates.get(p.id), blocked = p.compatible === false;
+    const differentPublisher = installed && installed.fingerprint && p.fingerprint && installed.fingerprint !== p.fingerprint;
+    const label = differentPublisher ? "Different publisher" : update ? blocked ? "Requires newer Core" : "Review update" : installed ? pluginVersionOrder(installed.version, p.version) === 1 ? "Newer version installed" : "Installed" : blocked ? "Requires newer Core" : "Install";
+    return `<article class="plugin-card${update ? " plugin-update-available" : ""}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><div class="pills"><span class="pill">${p.official ? "KAI" : "Community"}</span>${update ? '<span class="pill plugin-update-label">Update available</span>' : ""}</div></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted">Version ${esc(p.version)}${p.minCoreVersion ? ` · Core ${esc(p.minCoreVersion)}+` : ""}</p>${blocked ? `<p>${esc(p.compatibilityReason || "Update Core to use this plugin.")}</p>` : ""}<button${update && !blocked ? ' class="primary"' : ""} data-install-plugin="${esc(p.id)}" ${blocked || differentPublisher || installed && !update ? "disabled" : ""}>${label}</button></article>`;
   }).join("") : "<p>No plugins match your search.</p>");
-  const r = s.registry;
-  text("registry-status", r?.available && !r.expired ? `Signed catalog ${r.version} · ${r.count} plugins. Refresh to check for new releases.` : r?.present ? `Catalog unavailable: ${r.error || "Refresh the catalog to continue."} You can still open installed plugins or install a signed package directly.` : r?.error ? `Catalog refresh failed: ${r.error}. Showing bundled KAI releases.` : "Showing bundled KAI releases. Refresh to load the signed public catalog.");
+  const r = s.registry, check = s.catalogCheck;
+  const base = r?.available && !r.expired ? `Signed catalog ${r.version} · ${r.count} plugins.` : r?.present ? "Catalog unavailable. Check again before installing." : "Showing bundled KAI releases.";
+  const detail = check?.paused || s.network.privacyMode === "local-only" ? "Update checks are paused in Local-Only mode." : check?.error || r?.error ? "Could not check for new updates. Try again when connected." : check?.checking && !r?.available ? "Checking for plugin updates…" : "";
+  text("registry-status", [base, detail].filter(Boolean).join(" "));
+  $("refresh-registry").disabled = !!check?.checking;
 }
+let pluginCheckBusy = false;
+async function checkPluginCatalog() {
+  if (!bridge || pluginCheckBusy || document.hidden) return;
+  pluginCheckBusy = true;
+  try { await bridge.call("plugins.registry.check"); }
+  catch { /* Automatic check failures stay in catalog status, without a popup. */ }
+  finally { pluginCheckBusy = false; await refresh(); }
+}
+window.addEventListener("online", () => { void checkPluginCatalog(); });
+bridge?.onPluginCatalogChange?.(() => { void refresh(); });
 if ($("plugin-search")) $("plugin-search").oninput = renderCatalog;
 if ($("refresh-registry")) $("refresh-registry").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("plugins.registry.refresh"); notify(`Catalog ${r.version} verified · ${r.count} plugins available.`); });
 $("models").onclick = e => { const b = e.target.closest("[data-model]"); if (b) void action(b, () => { notices["model-message"].clear(); return api("/core/models/ensure", { alias: b.dataset.model }); }); };
-$("plugins").onclick = e => { const b = e.target.closest("[data-plugin]"); if (!b) return; void action(b, () => bridge.call(b.dataset.operation === "open" ? "plugins.open" : "plugins.change", { id: b.dataset.plugin, action: b.dataset.operation })); };
-if ($("plugin-catalog")) $("plugin-catalog").onclick = e => { const b = e.target.closest("[data-install-plugin]"); if (b) void action(b, () => bridge.call("plugins.install", { id: b.dataset.installPlugin })); };
+$("plugins").onclick = e => { const update = e.target.closest("[data-install-plugin]"); if (update) { if (!update.disabled) void action(update, () => bridge.call("plugins.install", { id: update.dataset.installPlugin })); return; } const b = e.target.closest("[data-plugin]"); if (!b) return; void action(b, () => bridge.call(b.dataset.operation === "open" ? "plugins.open" : "plugins.change", { id: b.dataset.plugin, action: b.dataset.operation })); };
+if ($("plugin-catalog")) $("plugin-catalog").onclick = e => { const b = e.target.closest("[data-install-plugin]"); if (b && !b.disabled) void action(b, () => bridge.call("plugins.install", { id: b.dataset.installPlugin })); };
 $("install-file").onclick = e => action(e.currentTarget, () => bridge.call("plugins.install"));
 $("install-url").onsubmit = e => { e.preventDefault(); void action(e.submitter, () => bridge.call("plugins.install", { url: $("plugin-url").value })); };
 function applyPrivacy(mode) {

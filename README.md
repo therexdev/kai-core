@@ -59,15 +59,22 @@ native upgrade verification are required before replacing the old app publicly.
 
 ## Install the feature plugins
 
-Core 0.4.3 includes direct install cards for eleven signed first-party plugins in
-**Plugins**. Choose **Refresh catalog** to fetch the signed public
-[plugin registry](https://github.com/therexdev/kai-plugin-registry). Catalog installs
+Core 0.4.5 includes direct install cards for eleven signed first-party plugins in
+**Plugins**. Core checks the signed public
+[plugin registry](https://github.com/therexdev/kai-plugin-registry) at startup and
+every 15 minutes. Returning to the app or opening Plugins checks again when the
+last attempt is at least one minute old; failed checks retry after five minutes.
+**Refresh catalog** also checks immediately. A numbered Plugins badge and update
+cards show installed plugins with newer versions, including disabled plugins.
+The count excludes uninstalled entries, older releases and other publishers;
+updates needing a newer Core are labeled. Checks cover entries in the catalog.
+Catalog installs
 verify the exact package digest, publisher, permissions and Core compatibility.
 Bundled official releases are available before the first registry refresh. After
 loading a catalog, an expired or invalid catalog must be refreshed before choosing
 a catalog release; installed plugins and direct package installation still work.
 Every installation asks you to review permissions; nothing installs automatically.
-Local-Only privacy blocks downloads; a downloaded `.kaiplugin` file can be installed
+Local-Only privacy pauses automatic checks and blocks downloads; a downloaded `.kaiplugin` file can be installed
 under **Install 3rd Party Plugins** at the bottom of the marketplace. Third-party signed packages still use the public API.
 
 Available repositories: [Assistant](https://github.com/therexdev/kai-plugin-assistant),

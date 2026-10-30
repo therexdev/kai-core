@@ -19,8 +19,17 @@ The public registry is a separately signed metadata release. Core pins its signi
 key, validity period and monotonic sequence, then verifies each downloaded plugin
 against the catalog's package digest, publisher, grants and minimum Core version.
 Registry entries cannot add private feature permissions to community publishers.
-Refresh is explicit. The bundled eleven official entries are used only before a
-catalog is cached; an invalid or expired cache does not resurrect withdrawn entries.
+A native monitor refreshes metadata at startup and every 15 minutes, with a
+one-minute throttle for app/Plugins returns and a five-minute retry after failure.
+Manual refresh joins an existing check. Local-Only and shutdown abort the current
+request; shutdown waits for its writer. Installation acquires its gate before
+waiting for an existing check, then pins a catalog entry while checks are paused.
+No package is downloaded or installed automatically. The Plugins badge counts
+strictly newer versions for installed IDs with matching publisher fingerprints;
+incompatible updates remain visible with their minimum Core requirement.
+Validated cached entries remain available after a failed refresh. The bundled
+eleven official entries are used only before a catalog is cached; an invalid or
+expired cache does not resurrect withdrawn entries.
 
 Node and Remote Access remain off until a reviewed Start action. The Node adapter
 uses the existing node manager without legacy reward/signing automation, retains

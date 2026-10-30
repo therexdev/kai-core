@@ -3,6 +3,12 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("kaiCore", Object.freeze({
   call: (method, input) => ipcRenderer.invoke("kai-core:call", method, input),
   credit: (action, input) => ipcRenderer.invoke("koin:test-payments", action, input),
+  onPluginCatalogChange: callback => {
+    if (typeof callback !== "function") throw TypeError("A catalog change callback is required");
+    const listener = () => callback();
+    ipcRenderer.on("kai-core:plugin-catalog-changed", listener);
+    return () => ipcRenderer.removeListener("kai-core:plugin-catalog-changed", listener);
+  },
   onChatProgress: callback => {
     if (typeof callback !== "function") throw TypeError("A progress callback is required");
     const listener = (_event, value) => callback(value);

@@ -6,7 +6,7 @@ const html = fs.readFileSync(path.join(__dirname, "../../ui-core/index.html"), "
 const flush = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve)); };
 function fixture({ state = {}, credit, call } = {}) {
   const elements = new Map(), windowEvents = new Map(), docEvents = new Map(), calls = [];
-  let creditListener;
+  let creditListener, catalogListener;
   function element(id) {
     return { id, textContent: "", innerHTML: "", value: id === "usd" ? "1" : "", hidden: false, disabled: false, dataset: {}, attrs: {},
       setAttribute(k, v) { this.attrs[k] = v; }, classList: { toggle() {} } };
@@ -15,6 +15,7 @@ function fixture({ state = {}, credit, call } = {}) {
   const snapshot = { version: "0.1.0", models: [], plugins: [], wallet: { exists: true, address: "synthetic-wallet", unlocked: false },
     profile: { mode: "existing", dataDir: "/synthetic/profile", backup: "/synthetic/backup", preserved: { wallet: true } }, runtime: {}, network: { privacyMode: "local-only" }, ...state };
   const bridge = {
+    onPluginCatalogChange(fn) { catalogListener = fn; },
     async call(method, input) { calls.push({ kind: "core", method, input }); if (method === "status") return snapshot; return call?.(method, input); },
     async credit(method, input) { calls.push({ kind: "credit", method, input }); return credit?.(method, input); },
   };
@@ -28,7 +29,7 @@ function fixture({ state = {}, credit, call } = {}) {
   vm.runInContext(presentation(), context, { filename: "presentation.js" });
   vm.runInContext(source, context, { filename: "core.js" });
   const submit = id => { const button = element("submit"); elements.get(id).onsubmit({ preventDefault() {}, submitter: button }); return flush(); };
-  return { context, elements, calls, snapshot, windowEvents, docEvents, submit, acceptCredits: state => creditListener(state), $: id => elements.get(id) };
+  return { context, elements, calls, snapshot, windowEvents, docEvents, submit, acceptCredits: state => creditListener(state), notifyCatalog: () => catalogListener?.(), $: id => elements.get(id) };
 }
 
 test("existing wallet UI does not create or restore a wallet on startup", async () => {
@@ -213,4 +214,101 @@ test("settled action messages dismiss without resubmitting and return on explici
   f.$("update-close").onclick(); assert.equal(f.$("update-notice").hidden, true);
   await f.$("check-updates").onclick({ currentTarget: f.$("check-updates") });
   assert.equal(f.$("update-notice").hidden, false);
+});
+
+
+function pluginState() {
+  const fingerprint = "a".repeat(64);
+  return {
+    network: { privacyMode: "local-first" },
+    plugins: [
+      { id: "kai.brain", version: "0.1.0", fingerprint, enabled: true },
+      { id: "kai.documents", version: "0.1.0", fingerprint, enabled: false },
+      { id: "kai.assistant", version: "0.2.0", fingerprint, enabled: true },
+      { id: "community.other", version: "0.1.0", fingerprint: "b".repeat(64), enabled: true },
+    ],
+    catalog: [
+      { id: "kai.brain", version: "0.1.1", fingerprint, compatible: true },
+      { id: "kai.documents", version: "0.1.1", fingerprint, compatible: false, minCoreVersion: "9.0.0", compatibilityReason: "Requires KAI Core 9.0.0" },
+      { id: "kai.assistant", version: "0.1.1", fingerprint, compatible: true },
+      { id: "community.other", version: "0.1.1", fingerprint, compatible: true },
+      { id: "kai.tools", version: "0.1.1", fingerprint, compatible: true },
+    ],
+    pluginUpdates: { count: 2, updates: [
+      { id: "kai.brain", installedVersion: "0.1.0", version: "0.1.1", compatible: true },
+      { id: "kai.documents", installedVersion: "0.1.0", version: "0.1.1", compatible: false, minCoreVersion: "9.0.0", compatibilityReason: "Requires KAI Core 9.0.0" },
+    ] },
+    registry: { available: true, version: "0.1.1", count: 5 },
+    catalogCheck: { checking: false, paused: false, error: null },
+  };
+}
+test("plugin update bubble counts installed updates once, including disabled and Core-blocked plugins", async () => {
+  const f = fixture({ state: pluginState() }); await flush();
+  assert.equal(f.$("plugin-update-count").textContent, "2"); assert.equal(f.$("plugin-update-count").hidden, false);
+  assert.equal(f.$("plugin-nav").attrs["aria-label"], "Plugins, 2 updates available");
+  assert.equal(f.$("plugin-updates-title").textContent, "2 plugin updates available");
+  assert.match(f.$("plugin-updates-detail").textContent, /1 update needs a newer Core/);
+  assert.match(f.$("plugins").innerHTML, /data-install-plugin="kai.brain" >Review update/);
+  assert.match(f.$("plugins").innerHTML, /disabled>Requires newer Core/);
+  assert.match(f.$("plugins").innerHTML, /Version 0.1.0.*<strong>0.1.1<\/strong>/);
+  assert.match(f.$("plugin-catalog").innerHTML, /disabled>Newer version installed/);
+  assert.match(f.$("plugin-catalog").innerHTML, /disabled>Different publisher/);
+  assert.ok(!f.calls.some(c => c.method === "plugins.install"));
+  f.snapshot.pluginUpdates.updates.push(...f.snapshot.pluginUpdates.updates,
+    { id: "kai.tools", installedVersion: "0.1.0", version: "0.1.1" },
+    { id: "community.other", installedVersion: "0.1.0", version: "0.1.1" },
+    { id: "kai.assistant", installedVersion: "0.2.0", version: "0.1.1" });
+  await f.context.refresh(); assert.equal(f.$("plugin-update-count").textContent, "2");
+});
+
+test("catalog change events update and clear the badge without opening Plugins or installing", async () => {
+  const state = pluginState(); state.plugins = []; state.pluginUpdates = { count: 0, updates: [] };
+  const f = fixture({ state }); await flush(); assert.equal(f.$("plugin-update-count").hidden, true);
+  Object.assign(f.snapshot, pluginState()); f.notifyCatalog(); await flush();
+  assert.equal(f.$("plugin-update-count").textContent, "2"); assert.equal(f.$("plugin-update-count").hidden, false);
+  f.snapshot.plugins[0].version = "0.1.1";
+  f.snapshot.pluginUpdates.updates.shift(); f.snapshot.pluginUpdates.count = 1;
+  f.notifyCatalog(); await flush(); assert.equal(f.$("plugin-update-count").textContent, "1");
+  assert.equal(f.$("plugin-nav").attrs["aria-label"], "Plugins, 1 update available");
+  f.snapshot.plugins[1].version = "0.1.1"; f.snapshot.pluginUpdates = { count: 0, updates: [] };
+  f.notifyCatalog(); await flush();
+  assert.equal(f.$("plugin-update-count").hidden, true); assert.equal(f.$("plugin-updates").hidden, true);
+  assert.equal(f.$("plugin-nav").attrs["aria-label"], "Plugins");
+  assert.ok(!f.calls.some(c => c.method === "plugins.install" || c.method === "plugins.registry.refresh"));
+});
+
+test("installed update review calls existing installer and canceled approval retains the badge", async () => {
+  let canceled = true, f;
+  f = fixture({ state: pluginState(), call: async method => {
+    if (method === "plugins.install" && !canceled) { f.snapshot.plugins[0].version = "0.1.1"; f.snapshot.pluginUpdates.updates.shift(); f.snapshot.pluginUpdates.count = 1; }
+    return null;
+  } });
+  await flush(); const button = { disabled: false, dataset: { installPlugin: "kai.brain" } };
+  const click = () => f.$("plugins").onclick({ target: { closest: selector => selector === "[data-install-plugin]" ? button : null } });
+  click(); await flush(); assert.equal(f.$("plugin-update-count").textContent, "2");
+  canceled = false; click(); await flush(); assert.equal(f.$("plugin-update-count").textContent, "1");
+  const installs = f.calls.filter(c => c.method === "plugins.install"); assert.equal(installs.length, 2); assert.equal(installs[0].input.id, "kai.brain");
+  button.disabled = true; click(); await flush(); assert.equal(f.calls.filter(c => c.method === "plugins.install").length, 2);
+});
+
+test("opening Plugins and reconnecting check the catalog quietly and deduplicate pending checks", async () => {
+  let finish, fail = false;
+  const f = fixture({ state: pluginState(), call: method => {
+    if (method === "plugins.registry.check") return new Promise((resolve, reject) => { finish = () => fail ? reject(Error("Catalog offline")) : resolve({}); });
+  } });
+  await flush(); f.$("notice").hidden = true; f.context.showPage("plugins"); f.windowEvents.get("online")(); f.context.showPage("plugins"); await flush();
+  assert.equal(f.calls.filter(c => c.method === "plugins.registry.check").length, 1);
+  finish(); await flush(); assert.equal(f.$("notice").hidden, true);
+  fail = true; f.windowEvents.get("online")(); await flush(); finish(); await flush();
+  assert.equal(f.$("notice").hidden, true); assert.equal(f.$("plugin-update-count").textContent, "2");
+  assert.ok(!f.calls.some(c => c.method === "plugins.install"));
+});
+
+test("failed background checks retain update count and local-only explains paused checks", async () => {
+  const f = fixture({ state: pluginState() }); await flush();
+  f.snapshot.catalogCheck.error = "Network unavailable"; f.notifyCatalog(); await flush();
+  assert.equal(f.$("plugin-update-count").textContent, "2"); assert.match(f.$("registry-status").textContent, /Could not check/);
+  f.snapshot.network.privacyMode = "local-only"; f.snapshot.catalogCheck.paused = true;
+  f.notifyCatalog(); await flush(); assert.equal(f.$("plugin-update-count").textContent, "2");
+  assert.match(f.$("registry-status").textContent, /paused in Local-Only/);
 });

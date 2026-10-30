@@ -26,9 +26,13 @@ Choose **Plugins → Install package** to test it. The private key is never pack
 Publish `.kaiplugin` files as release assets; their URL is what users install.
 Core 0.3.0 supports the signed [public registry](https://github.com/therexdev/kai-plugin-registry).
 Its versioned entries pin exact package digests, keys, grants and minimum Core versions.
-Catalog refresh is explicit, public-HTTPS-only and blocked in Local-Only mode;
+Core 0.4.5 refreshes catalog metadata automatically at startup, every 15 minutes,
+and on app/Plugins returns (throttled to one minute). Manual refresh is also
+available. Refresh is public-HTTPS-only and blocked in Local-Only mode;
 expiration, signatures and monotonic release sequences are checked before caching.
-Dependency installation, publisher key rotation and automatic plugin updates are not supported.
+A badge counts installed plugins with newer versions from the same publisher.
+Installation still requires native permission review, including for updates.
+Dependency installation, publisher key rotation and automatic installation are not supported.
 Reinstalling a newer signed package reviews its permissions again and retains one
 previous version for rollback. Removal retains private plugin data and its publisher
 binding; another key cannot claim that data by reusing the same ID.
