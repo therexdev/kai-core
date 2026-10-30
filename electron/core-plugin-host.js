@@ -28,7 +28,7 @@ class PluginHost {
       if (u.hostname !== id || request.method !== "GET" || !Object.hasOwn(pkg.files, file)) return new Response("Not found", { status: 404 });
       return new Response(pkg.files[file], { headers: { "content-type": `${MIME[path.extname(file)] || "text/plain"}; charset=utf-8`, "content-security-policy": CSP, "x-content-type-options": "nosniff" } });
     });
-    const window = new this.electron.BrowserWindow({ width: 1000, height: 760, title: manifest.name, backgroundColor: "#11151f", show: false,
+    const window = new this.electron.BrowserWindow({ width: 1000, height: 760, title: manifest.name, backgroundColor: "#f4f7fd", show: false,
       webPreferences: { session, preload: path.join(__dirname, "core-plugin-preload.js"), sandbox: true, nodeIntegration: false, contextIsolation: true, webSecurity: true, webviewTag: false, devTools: false } });
     // WebRTC UDP is not an HTTP request and cannot be filtered by webRequest.
     window.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");

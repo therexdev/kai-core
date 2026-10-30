@@ -72,3 +72,7 @@ changes, scheduler deployments or user wallet migrations are performed by tests.
 
 GitHub connector import records the exact source baseline above. Full earlier Git
 ancestry remains in therexdev/kaiapp; this repository starts with a source snapshot.
+
+## Plugin presentation
+
+First-party plugins package the common light workspace theme and dismissible notice helper from `scripts/core/plugin-ui`. Run `node scripts/core/sync-plugin-ui.js` before signing a presentation update; the copies are part of each signed package and have no privileged APIs. Each feature keeps its original app layout in a separate sandboxed window. The plugin host uses the matching light background while loading. Existing broker permissions and data formats are unchanged.

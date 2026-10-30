@@ -111,13 +111,102 @@ async function fill(win, values) {
   await js(win, `(() => { for (const [id,value] of Object.entries(${JSON.stringify(values)})) { const e=document.getElementById(id); if (!e) throw Error('Missing input '+id); e.value=value; e.dispatchEvent(new Event('input',{bubbles:true})); e.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
 }
 const submit = (win, selector) => js(win, `document.querySelector(${JSON.stringify(selector)}).requestSubmit(); void 0`);
-async function capture(win, file) {
+async function capture(win, file, { width = 1000, height = 760 } = {}) {
   await js(win, "window.scrollTo({top:0,left:0,behavior:'instant'}); void 0");
-  win.setSize(1000, 760); win.webContents.invalidate();
+  win.setSize(width, height); win.webContents.invalidate();
   await new Promise(resolve => setTimeout(resolve, 250));
   const shot = win.smokePaint || await win.webContents.capturePage();
   const size = shot.getSize(); assert.ok(size.width > 500 && size.height > 500, "Screenshot is smaller than the desktop viewport");
   fs.writeFileSync(file, shot.toPNG());
+}
+
+
+// These checks run in the actual sandboxed plugin renderer, with the signed
+// package's shared styles and notice helper. They do not grant new capabilities.
+async function presentation(win, id) {
+  const styles = await js(win, `(() => {
+    const style = getComputedStyle(document.body), root = getComputedStyle(document.documentElement);
+    return { background: style.backgroundColor, text: style.color, scheme: root.colorScheme,
+      sharedStyle: [...document.styleSheets].some(sheet => sheet.href?.endsWith('/kai-theme.css')),
+      sharedNotice: typeof window.KaiPluginNotice?.attach === 'function' };
+  })()`);
+  assert.equal(styles.background, "rgb(244, 247, 253)", id + " must use the original light workspace background");
+  assert.equal(styles.text, "rgb(20, 40, 78)", id + " must use the shared text color");
+  assert.equal(styles.scheme, "light", id + " must use light native controls");
+  assert.equal(styles.sharedStyle, true, id + " did not load the shared workspace theme");
+  assert.equal(styles.sharedNotice, true, id + " did not load the shared dismissible notice helper");
+  return styles;
+}
+async function dismissibleNotice(win, id) {
+  const before = { nativeActions: nativeActions.length, processes: blockedProcesses.length, inference: localCalls };
+  const noticeId = await js(win, `(() => {
+    const container = document.getElementById('notice') || document.getElementById('message');
+    if (!container) throw Error('Missing shared notice container');
+    const banner = window.KaiPluginNotice.attach(container);
+    banner.show('Synthetic warning <img src=x onerror=attack()>', {error:true, force:true});
+    return container.id;
+  })()`);
+  const target = `document.getElementById(${JSON.stringify(noticeId)})`;
+  const bounds = await js(win, `(() => {
+    const host = ${target}, button = host.querySelector('.kai-notice-close');
+    button.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
+    const r = button.getBoundingClientRect(), x = r.x + r.width/2, y = r.y + r.height/2;
+    const hit = document.elementFromPoint(x,y);
+    return { x, y, width:r.width, height:r.height, type:button.type, label:button.getAttribute('aria-label'),
+      clickable:hit===button||button.contains(hit), images:host.querySelectorAll('img').length };
+  })()`);
+  assert.equal(bounds.type, "button"); assert.equal(bounds.label, "Dismiss message");
+  assert.equal(bounds.images, 0, id + " notice content must be plain text");
+  assert.ok(bounds.width >= 24 && bounds.height >= 24 && bounds.clickable, id + " notice close control is not reachable");
+  win.webContents.sendInputEvent({ type: "mouseDown", x: Math.round(bounds.x), y: Math.round(bounds.y), button: "left", clickCount: 1 });
+  win.webContents.sendInputEvent({ type: "mouseUp", x: Math.round(bounds.x), y: Math.round(bounds.y), button: "left", clickCount: 1 });
+  await until(win, `${target}.hidden`, id + " mouse notice dismissal");
+  const stayedHidden = await js(win, `(() => {
+    const host = ${target}, banner = window.KaiPluginNotice.attach(host);
+    banner.show('Synthetic warning <img src=x onerror=attack()>', {error:true});
+    return host.hidden;
+  })()`);
+  assert.equal(stayedHidden, true, id + " repeated background warning must stay dismissed");
+  await js(win, `(() => {
+    const host = ${target}; window.KaiPluginNotice.attach(host).show('Synthetic warning <img src=x onerror=attack()>', {error:true, force:true});
+    const button = host.querySelector('.kai-notice-close'); button.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'}); button.focus();
+  })()`);
+  assert.equal(await js(win, `${target}.hidden`), false, id + " explicit retry must be able to show the same warning");
+  assert.equal(await js(win, `document.activeElement===${target}.querySelector('.kai-notice-close')`), true);
+  // Send the complete Enter sequence: raw key events alone omit Chromium's
+  // character/keypress step and do not activate a native HTML button.
+  win.focus(); win.webContents.focus();
+  win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+  win.webContents.sendInputEvent({ type: "char", keyCode: "\r" });
+  win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+  await until(win, `${target}.hidden`, id + " keyboard notice dismissal");
+  await js(win, `window.KaiPluginNotice.attach(${target}).clear(); void 0`);
+  assert.deepEqual({ nativeActions: nativeActions.length, processes: blockedProcesses.length, inference: localCalls }, before,
+    id + " notice dismissal must not invoke native actions, processes or inference");
+  return { container: noticeId, mouse: true, keyboard: true, repeatSuppressed: true, explicitRetry: true };
+}
+async function compactLayout(win, id, file) {
+  win.setSize(800, 700);
+  await new Promise(resolve => setTimeout(resolve, 150));
+  const result = await js(win, `(() => {
+    const visible = node => node.getClientRects().length && node.checkVisibility({checkVisibilityCSS:true,contentVisibilityAuto:true}) && !node.closest('details:not([open])');
+    let controls = [...document.querySelectorAll('button.primary, button[type=submit]')].filter(visible);
+    if (!controls.length) controls = [...document.querySelectorAll('button')].filter(visible).slice(0,3);
+    const checked = controls.map(button => {
+      button.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'});
+      const r = button.getBoundingClientRect(), x = r.x+r.width/2, y = r.y+r.height/2, hit = document.elementFromPoint(x,y);
+      return {label:button.id || button.textContent.trim().slice(0,60), width:r.width, height:r.height,
+        inViewport:r.left>=-1 && r.top>=-1 && r.right<=innerWidth+1 && r.bottom<=innerHeight+1,
+        receivesPointer:hit===button || button.contains(hit)};
+    });
+    return {width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,controls:checked};
+  })()`);
+  assert.ok(result.scrollWidth <= result.width + 1, `${id} has horizontal document overflow: ${JSON.stringify(result)}`);
+  assert.ok(result.controls.length, id + " has no reachable action controls");
+  for (const button of result.controls) assert.ok(button.width > 0 && button.height > 0 && button.inViewport && button.receivesPointer,
+    `${id} compact control is clipped: ${JSON.stringify(button)}`);
+  await capture(win, file, { width: 800, height: 700 });
+  return result;
 }
 
 async function exercise(win, id) {
@@ -153,13 +242,29 @@ async function exercise(win, id) {
       await until(win, "!document.getElementById('compare').disabled", "Compare model loading");
       await fill(win, { prompt: "Compare this synthetic task." }); await submit(win, "#comparison-form");
       await until(win, "document.getElementById('text-b').innerText.includes('Synthetic local response') && document.getElementById('history-count').innerText.includes('1')", "Compare responses");
-      return "Compared two local models; saved paired responses";
+      assert.equal(await js(win, "document.getElementById('name-a').innerText"), "Answer 1");
+      assert.equal(await js(win, "document.getElementById('name-b').innerText"), "Answer 2");
+      await click(win, "#reveal");
+      await until(win, "document.getElementById('name-a').innerText.includes('Synthetic') && !document.getElementById('vote').hidden && !document.getElementById('compare').disabled", "Compare model reveal");
+      await click(win, "#vote [data-pick='tie']");
+      await until(win, "document.getElementById('verdict-note').innerText==='Your pick: Tie' && !document.getElementById('compare').disabled", "Compare preference save");
+      const saved = await call(win, "storage.get", { key: "history" });
+      assert.equal(saved[0].pick, "tie"); assert.equal(saved[0].revealed, true);
+      return "Compared two local models blind; revealed identities; saved paired responses and preference";
     }
     case "kai.workflows": {
       await until(win, "document.getElementById('flow-list').innerText.includes('No workflows yet')", "Workflow initialization");
       await click(win, "[data-tab='agents']"); await click(win, "#new-agent"); await fill(win, { "agent-name": "Smoke editor", "agent-instructions": "Review this input clearly." }); await click(win, "#save-agent");
       await until(win, "document.getElementById('agent-list').innerText.includes('Smoke editor')", "Workflow agent save");
-      await click(win, "[data-tab='workflows']"); await click(win, "#new-flow"); await fill(win, { "flow-name": "Smoke workflow" }); await click(win, "#save-flow");
+      await click(win, "[data-tab='workflows']"); await click(win, "#new-flow");
+      assert.equal(await js(win, "document.querySelectorAll('#workflow-canvas button.flow-node').length"), 2);
+      await click(win, "#workflow-canvas button.flow-node:last-child");
+      assert.equal(await js(win, "document.querySelector('#workflow-canvas button.flow-node:last-child').getAttribute('aria-pressed')"), "true");
+      assert.equal(await js(win, "document.querySelectorAll('#steps .step').length"), 1, "only the selected workflow step belongs in the inspector");
+      await capture(win, path.join(output, id + ".builder.png"));
+      await compactLayout(win, id, path.join(output, id + ".builder-compact.png"));
+      win.setSize(1000, 760);
+      await fill(win, { "flow-name": "Smoke workflow" }); await click(win, "#save-flow");
       await until(win, "document.getElementById('flow-list').innerText.includes('Smoke workflow')", "Workflow save");
       const saved = (await call(win, "workflows.list")).workflows.find(w => w.name === "Smoke workflow");
       const run = await call(win, "workflows.run", { id: saved.id, input: "Synthetic workflow input" });
@@ -309,11 +414,18 @@ app.whenReady().then(async () => {
     const id = publisher.id; activeId = id; errors.set(id, []); console.log("Opening " + id);
     await host.open(id); const win = host.windows.get(id).window;
     await until(win, "document.readyState==='complete' && document.body.innerText.trim().length>100", id + " blank renderer");
-    let transitions, failure;
-    try { transitions = await exercise(win, id); } catch (error) { failure = error; }
+    let transitions, failure, theme, notice, compact;
+    const initialScreenshot = path.join(output, id + ".initial.png");
+    const compactScreenshot = path.join(output, id + ".compact.png");
+    await capture(win, initialScreenshot);
+    try { theme = await presentation(win, id); transitions = await exercise(win, id); } catch (error) { failure = error; }
     const page = await js(win, `({title:document.title,headings:[...document.querySelectorAll('h1,h2')].filter(e=>e.getClientRects().length).map(e=>e.innerText),bodyLength:document.body.innerText.trim().length,statuses:[...document.querySelectorAll('[role=status],[role=alert]')].filter(e=>e.getClientRects().length).map(e=>e.innerText),nodeAbsent:typeof require==='undefined'&&typeof process==='undefined'})`);
     const screenshot = path.join(output, id + ".png"); await capture(win, screenshot);
-    const rendererErrors = errors.get(id); reports.push({ id, ...page, transitions, rendererErrors, screenshot, ...(failure ? { failure: failure.message } : {}) });
+    if (!failure) {
+      try { notice = await dismissibleNotice(win, id); compact = await compactLayout(win, id, compactScreenshot); }
+      catch (error) { failure = error; await capture(win, path.join(output, id + ".failure.png"), { width: 800, height: 700 }); }
+    }
+    const rendererErrors = errors.get(id); reports.push({ id, ...page, transitions, theme, notice, compact, rendererErrors, initialScreenshot, screenshot, compactScreenshot, ...(failure ? { failure: failure.message } : {}) });
     assert.equal(page.nodeAbsent, true); assert.ok(page.headings.length, "No visible headings: " + id);
     assert.deepEqual(rendererErrors, [], "Renderer errors: " + id);
     if (failure) throw failure;
