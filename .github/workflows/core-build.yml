@@ -1,7 +1,7 @@
-name: Core preview installers
+name: Foundation preview installers
 on:
   push:
-    branches: [main]
+    branches: [main, foundation-v1]
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,25 +26,58 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: node node_modules/electron/install.js
-      - name: Prepare original voice and listening assets
-        run: node scripts/prepare-live-senses.js
-      - name: Build original Windows voice and computer helpers
-        if: runner.os == 'Windows'
-        run: |
-          node scripts/build-windows-voice.js
-          node scripts/build-windows-computer.js
       - run: npm test
-      - run: npm run test:compat
-      - name: Build preview only (no updater publication)
+      - run: npm run test:services
+      - name: Configure Electron sandbox helper on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Native public SDK check (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:foundation-native
+      - name: Native public SDK check (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:foundation-native
+      - name: Build Foundation only (no feature engines or updater publication)
         run: npm run dist -- ${{ matrix.args }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v4
         with:
-          name: kai-core-preview-${{ runner.os }}
+          name: kai-core-foundation-${{ runner.os }}
           path: |
             dist/*.exe
             dist/*.AppImage
             dist/*.dmg
             dist/*.zip
+            build/foundation-files.json
           if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kai-core-foundation-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish verified manual installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          mapfile -d '' assets < <(find release-assets -type f \( -name '*.exe' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.zip' \) -print0)
+          test "${#assets[@]}" -ge 8
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Version $tag already exists; refusing to replace immutable installers."
+            exit 1
+          fi
+          gh release create "$tag" "${assets[@]}" --target "$GITHUB_SHA" --title "KAI Foundation $version" --notes-file RELEASE_NOTES.md

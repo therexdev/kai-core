@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
 const { createController, providerPresentation, validateRewards, rewardMarkup, legacyAtoms, legacySummary } = require("../../ui-core/earning");
-const summaryApi = require("../../ui/reward-summary");
+const summaryApi = require("../../ui-core/reward-summary");
 const start = 1800000000000;
 const models = ["small", "large"].map(id => ({ id, label: id + " model", installed: true, compatible: true }));
 const info = (extra = {}) => ({ state: "ready", enabled: false, running: false, deviceAuthorized: true, walletReady: true,

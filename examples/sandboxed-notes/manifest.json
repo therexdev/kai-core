@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "apiVersion": 3,
+  "id": "example.notes",
+  "version": "1.0.0",
+  "name": "Example Notes",
+  "description": "A small sandboxed note stored only in this plugin's data.",
+  "entry": "index.html",
+  "runtime": "sandboxed",
+  "permissions": ["storage.read", "storage.write"],
+  "provides": [],
+  "consumes": []
+}

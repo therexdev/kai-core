@@ -5,7 +5,7 @@ const fs = require("node:fs"), path = require("node:path"), crypto = require("no
 // This preference contains IDs only. Plugin grants and package state stay owned
 // by PluginManager, and a stale UI cannot add an uninstalled app to the sidebar.
 function createAppOrder({ dataDir, getInstalled }) {
-  const directory = path.join(dataDir, "plugins-v1"), file = path.join(directory, "sidebar-order.json");
+  const directory = path.join(dataDir, "plugins-v3"), file = path.join(directory, "sidebar-order.json");
   const installedIds = () => getInstalled().map(row => typeof row === "string" ? row : row.id);
   const normalize = (ids, installed) => [...new Set([...ids.filter(id => installed.includes(id)), ...installed])];
   function read() {

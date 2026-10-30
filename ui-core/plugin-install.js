@@ -2,56 +2,14 @@
 (() => {
   // These labels describe native capabilities. Manifest text is never markup.
   const permissionLabels = Object.freeze({
-    "models.read": "View your installed models",
-    "inference.local": "Run local AI models",
-    "storage.read": "Read this plugin’s saved data",
-    "storage.write": "Save this plugin’s data",
-    "assistant.chat": "Use Assistant chat and AI features",
-    "assistant.native": "Manage model providers and companion features",
-    "assistant.network": "Use network chat and manage AI privacy settings",
-    "assistant.read": "Read saved chats and open related views or links",
-    "assistant.media": "Use Assistant audio and image features",
-    "assistant.write": "Save, edit and delete Assistant chats",
-    "desktop.navigate": "Open other KAI pages and apps",
-    "desktop.external": "Request to open websites in your browser",
-    "desktop.preferences": "Read language and interface preferences",
-    "brain.read": "Read Brain memories, notes, sources and goals",
-    "brain.write": "Manage Brain data and awareness tasks",
-    "brain.import": "Import and sync Brain sources",
-    "brain.export": "Export Brain data",
-    "brain.workflow": "Run workflows from Brain",
-    "documents.draft": "Draft and edit documents with AI",
-    "documents.read": "Read your saved documents",
-    "documents.write": "Save, edit and delete documents",
-    "documents.import": "Import documents you choose",
-    "documents.export": "Export documents to files",
-    "workflows.read": "Read and export workflows, agents and run history",
-    "workflows.write": "Create, import, edit and delete workflows and agents",
-    "workflows.run": "Run, schedule and manage workflow jobs",
-    "agent-network.read": "Read agent services and their activity",
-    "agent-network.write": "Create and edit agent services",
-    "agent-network.network": "Discover, publish and use network agent services",
-    "agent-network.manage": "Manage agent service settings and jobs",
-    "connections.read": "View connected apps and available tools",
-    "connections.manage": "Manage connected accounts and their permissions",
-    "connections.execute": "Request actions through connected apps",
-    "connections.brain": "Import and sync connected sources into Brain",
-    "tools.read": "View tool servers and available tools",
-    "tools.manage": "Manage tool servers and developer workspaces",
-    "tools.execute": "Run tools and request network AI",
-    "code.execute": "Run coding tasks and request project actions",
-    "code.read": "Read selected projects and coding sessions",
-    "code.assist": "Generate AI suggestions for selected projects",
-    "code.write": "Propose and apply approved project file changes",
-    "koinos-node.read": "View node status, logs and history",
-    "koinos-node.manage": "Set up, configure, start and stop your node",
-    "koinos-node.wallet": "Use node wallet features through KAI",
-    "koinos-node.fund": "Request node funding and wallet transactions",
-    "remote-access.keys": "Create and manage remote API keys",
-    "remote-access.read": "View remote access settings, keys and activity",
-    "remote-access.control": "Start, stop and configure remote access",
-    "compare.run": "Run local and network model comparisons",
-    "remote-access.features": "Legacy optional-workspace access (no longer available)",
+    "native.execute":"Run native code with full computer and application access",
+    "models.read":"View installed models", "models.manage":"Set up and load models", "inference.local":"Run local AI models", "inference.network":"Request network AI",
+    "storage.read":"Read plugin settings", "storage.write":"Save plugin settings", "secrets.use":"Use secure credential storage",
+    "network.status":"Read network policy", "network.configure":"Request privacy changes", "network.fetch":"Make network requests",
+    "desktop.navigate":"Open KAI pages and installed apps", "desktop.external":"Request browser links", "desktop.preferences":"Read and change interface preferences",
+    "desktop.media":"Request microphone and camera access", "desktop.windows":"Create native windows and desktop controls",
+    "account.request":"Use your signed-in KAI account for service requests", "wallet.read":"Read wallet summaries", "wallet.authorize":"Request reviewed credit and payment actions",
+    "services.call":"Use declared services from installed plugins", "services.provide":"Provide declared services to other plugins"
   });
   const byId = id => document.getElementById(id);
   const cancel = byId("cancel-install"), approve = byId("approve-install"), close = byId("close-install");
@@ -92,6 +50,11 @@
       const data = await window.kaiPluginInstall.read();
       if (!data || typeof data.name !== "string" || typeof data.version !== "string" || typeof data.id !== "string" || typeof data.fingerprint !== "string" || !Array.isArray(data.permissions) || data.permissions.some(p => typeof p !== "string")) throw Error("Invalid review");
       const updating = !!data.installedVersion;
+      byId("access-note").textContent = data.runtime === "native"
+        ? "Full computer access: this plugin runs native code inside KAI. It can read or change files, access accounts and credentials, run programs, and affect KAI itself. Listed API permissions do not confine native code. Install only if you trust this publisher completely."
+        : "This plugin runs in a sandboxed view. Core provides only its granted APIs.";
+      byId("access-note").classList.toggle("native-trust", data.runtime === "native");
+
       byId("review-heading").textContent = updating ? "Update plugin" : "Install plugin";
       document.title = `${updating ? "Update" : "Install"} plugin · KAI`;
       approve.textContent = updating ? "Update plugin" : "Install plugin";

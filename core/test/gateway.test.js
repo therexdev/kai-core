@@ -136,9 +136,10 @@ test("unknown model alias is a clean 400, not a crash", async () => {
 test("creating a key locks /v1 down; bearer key opens it; control plane stays open", async () => {
   const { gateway, runtime, keys, base } = await makeStack();
   try {
-    const created = await (
-      await fetch(`${base}/core/keys`, { method: "POST", headers: { "content-type": "application/json" }, body: '{"name":"t"}' })
-    ).json();
+    // Key-management UI and routes belong to Remote Access. The generic
+    // inference gateway still enforces credentials supplied by its owner.
+    assert.equal((await fetch(`${base}/core/keys`, {method:"POST"})).status,404);
+    const created = keys.create({name:"t"});
     assert.ok(created.secret.startsWith("kai_sk_"));
 
     const denied = await fetch(`${base}/v1/models`);

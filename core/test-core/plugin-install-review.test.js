@@ -58,7 +58,7 @@ test("review exposes an immutable metadata snapshot and approves only after expl
   const window = f.windows[0];
   assert.throws(() => f.call("decide", window, "approve"), /Open the plugin review/);
   const details = f.call("read", window);
-  assert.deepEqual(details, { ...pkg.manifest, fingerprint: pkg.fingerprint, installedVersion: "1.0.0", official: true });
+  assert.deepEqual(details, { ...pkg.manifest, fingerprint: pkg.fingerprint, runtime: undefined, installedVersion: "1.0.0", official: true });
   assert.equal(Object.hasOwn(details, "package"), false); assert.equal(Object.isFrozen(details), true); assert.equal(Object.isFrozen(details.permissions), true);
   pkg.manifest.name = "Changed later"; pkg.manifest.permissions.push("inference.local");
   assert.equal(details.name, "Notes <script>bad()</script>"); assert.deepEqual(details.permissions, ["models.read", "storage.write"]);

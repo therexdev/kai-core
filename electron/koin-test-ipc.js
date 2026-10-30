@@ -16,7 +16,7 @@ const PUBLIC_CREDIT_ACTIONS = new Set([
   "wallet-info", "wallet-connect", "purchase-connect", "purchase-info", "purchase-capabilities", "model-pricing",
   "purchase-estimate", "purchase-preview", "purchase-approve", "credit-purchase-retry", "purchase-stop",
   "chat-info", "credit-status", "chat-estimate", "chat-completion", "chat-recover", "chat-ack",
-  "run-input", "run-open", "run-chat", "run-execute", "run-list", "run-status", "run-stop", "stop",
+  "run-open", "run-chat", "run-list", "run-status", "run-stop", "stop",
   "provider-public-info", "provider-public-status", "provider-public-earnings", "provider-public-stop",
   "provider-public-start", "provider-public-download", "provider-public-model", "provider-public-models",
   "provider-public-authorize", "provider-public-revoke"
@@ -49,9 +49,20 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         window.webContents.send("koin:purchase-progress", progress);
     },
     progress: value => { const caller = pluginPaymentContext.getStore(), window = caller?.window || getMainWindow(), contents = caller?.webContents || window?.webContents; if (window && !window.isDestroyed() && contents && !contents.isDestroyed?.()) contents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
+  const pluginCreditServices = new Map();
+  function pluginCreditService(pluginId, fingerprint) {
+    const scope = crypto.createHash("sha256").update(pluginId + "|" + fingerprint).digest("hex");
+    if (!pluginCreditServices.has(scope)) pluginCreditServices.set(scope, new (require("./credit-service").CreditService)({
+      dataDir: path.join(dataDir, "plugin-finance", scope), account: core.creditAccount || core.account,
+      storage: (core.creditAccount || core.account)?.safeStorage, service: require("../core/lib/koin-network/credit-service.json"),
+      deviceFreeAccount: creditService.deviceFree, dialog,
+      progress: value => { const caller=pluginPaymentContext.getStore(), contents=caller?.webContents;
+        if (!disposed && contents && !contents.isDestroyed?.()) contents.send("koin:chat-progress", typeof value === "string" ? {text:value}:value); }
+    }));
+    return pluginCreditServices.get(scope);
+  }
   let creditBusy = false, purchaseSync = null;
   const creditProvider = new (require("./credit-provider").CreditProvider)({ service: creditService, core, dialog });
-  const creditRunExecutor = new (require("./credit-run-executor").CreditRunExecutor)({ service: creditService, core });
   const activeRequests = new Set(), paymentRequests = new Set();
   const open = () => {
     if (disposed) throw Error("Test payments are closing");
@@ -112,6 +123,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   const handlePayment = async (event, action, input) => {
     if (disposed) throw Error("Credit service is closing");
     const pluginCaller = pluginPaymentContext.getStore();
+    const callerCreditService = pluginCaller ? pluginCreditService(pluginCaller.pluginId, pluginCaller.fingerprint) : creditService;
     const window = pluginCaller?.window || getMainWindow();
     const contents = pluginCaller?.webContents || window?.webContents;
     if (pluginCaller ? !window || window.isDestroyed() || !contents || contents.isDestroyed?.() || event.sender !== contents || event.senderFrame !== contents.mainFrame || event.senderFrame.url !== pluginCaller.entry : !trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
@@ -119,7 +131,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (input !== undefined || disposed) throw Error("Network overview takes no arguments and requires an open app");
       // An activated credit network owns its model/qualification/receipt view.
       // Never replace a failed read of it with an unrelated public network.
-      if (creditService.service.state === "ready") return creditService.run(action, input, AbortSignal.timeout(10000));
+      if (callerCreditService.service.state === "ready") return callerCreditService.run(action, input, AbortSignal.timeout(10000));
       if (!isTest) return { network: await core.gateway.network.overview(AbortSignal.timeout(10000)) };
       if ([usdRoot, prepaidRoot].includes(root) && fs.existsSync(configFile)) {
         const config = readConfig(configFile);
@@ -129,18 +141,18 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       // without opening a payment journal or waiting for credit activation.
       return { network: await core.gateway.network.overview(AbortSignal.timeout(10000)) };
     }
-    if (!isTest && (!PUBLIC_CREDIT_ACTIONS.has(action) || creditService.service.state !== "ready")) return { enabled: false, mode: "test-deployment" };
-    if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate", "run-chat", "run-execute", "run-input"].includes(action) ? 28000 : 16384)) throw Error("Invalid Test payment action");
+    if (!isTest && (!PUBLIC_CREDIT_ACTIONS.has(action) || callerCreditService.service.state !== "ready")) return { enabled: false, mode: "test-deployment" };
+    if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate", "run-chat"].includes(action) ? 28000 : 16384)) throw Error("Invalid Test payment action");
     if (action === "wallet-info") {
       if (input !== undefined || disposed) throw Error("Wallet connection status takes no arguments and requires an open app");
-      return creditService.walletInfo(AbortSignal.timeout(10000));
+      return callerCreditService.walletInfo(AbortSignal.timeout(10000));
     }
     if (action === "wallet-connect") {
       if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to connect your wallet");
       if (input !== undefined && (!input || Array.isArray(input) || Object.keys(input).some(k => k !== "sessionOnly") || typeof input.sessionOnly !== "boolean")) throw Error("Invalid wallet connection option");
       if (busy) throw Error("Finish or cancel the open wallet or payment review first");
       busy = true;
-      try { return await withChatSignal(window, signal => creditService.connectWallet(window, input || {}, signal), true); }
+      try { return await withChatSignal(window, signal => callerCreditService.connectWallet(window, input || {}, signal), true); }
       finally { busy = false; }
     }
     if (action === "purchase-connect") {
@@ -152,7 +164,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         const checking = purchaseSync; checking?.abort.abort();
         if (checking) await checking.promise;
         signal.throwIfAborted();
-        return creditService.preparePurchase(window, signal);
+        return callerCreditService.preparePurchase(window, signal);
       }, true); }
       finally { busy = false; }
     }
@@ -160,15 +172,15 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     // wallet deployment that still supports balance reads or recovery.
     if (action === "purchase-info") {
       if (input !== undefined || disposed) throw Error("Purchase availability takes no arguments and requires an open app");
-      return creditService.purchaseInfo(AbortSignal.timeout(10000));
+      return callerCreditService.purchaseInfo(AbortSignal.timeout(10000));
     }
     if (action === "purchase-capabilities") {
       if (input !== undefined || disposed) throw Error("Purchase capabilities take no arguments and require an open app");
-      return creditService.purchaseCapabilities(AbortSignal.timeout(10000));
+      return callerCreditService.purchaseCapabilities(AbortSignal.timeout(10000));
     }
     if (action === "model-pricing") {
       if (input !== undefined || disposed) throw Error("Model pricing takes no arguments and requires an open app");
-      return require("./credit-model-pricing").modelPricing(creditService, AbortSignal.timeout(10000));
+      return require("./credit-model-pricing").modelPricing(callerCreditService, AbortSignal.timeout(10000));
     }
     if (action.startsWith("provider-public-")) {
       if (action === "provider-public-authorize") {
@@ -200,29 +212,26 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     }
     if (action === "purchase-stop") {
       if (input !== undefined || disposed) throw Error("Payment Stop takes no arguments and requires an open app");
-      purchaseSync?.abort.abort(); creditService.purchases.stop();
+      purchaseSync?.abort.abort(); callerCreditService.purchases.stop();
       for (const controller of paymentRequests) controller.abort();
       return { state: "stopped" };
     }
-    if (action === "stop") { stopVersion++; purchaseSync?.abort.abort(); payments?.stop(); creditService.purchases.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); if (workerAbort && !worker?.running) workerAbort.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
+    if (action === "stop") { stopVersion++; purchaseSync?.abort.abort(); payments?.stop(); callerCreditService.purchases.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); if (workerAbort && !worker?.running) workerAbort.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
     // Account activation is independent of historical wallet manifests. Do not
     // migrate, rewrite, or consume old custody balances to activate USD credits.
-    if (creditService.service.state === "ready") {
-      if (["chat-estimate", "chat-completion", "chat-recover", "run-open", "run-chat", "run-execute"].includes(action) &&
+    if (callerCreditService.service.state === "ready") {
+      if (["chat-estimate", "chat-completion", "chat-recover", "run-open", "run-chat"].includes(action) &&
           (core.gateway.network.status?.().privacyMode === "local-only" || core.settings?.get?.("network.privacyMode") === "local-only"))
         throw Error("Local-Only is on. Choose Network to use network credits.");
-      if (action === "chat-info") return creditService.info(AbortSignal.timeout(10000));
-      if (action === "run-input") return creditRunExecutor.input(input);
-      if (action === "run-stop") creditRunExecutor.stop(input);
-      if (["run-list", "run-status", "run-stop"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
-      if (["credit-status", "chat-estimate"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
-      if (["chat-completion", "chat-recover", "chat-ack", "run-open", "run-chat", "run-execute"].includes(action)) {
+      if (action === "chat-info") return callerCreditService.info(AbortSignal.timeout(10000));
+      if (["run-list", "run-status", "run-stop"].includes(action)) return callerCreditService.run(action, input, AbortSignal.timeout(10000));
+      if (["credit-status", "chat-estimate"].includes(action)) return callerCreditService.run(action, input, AbortSignal.timeout(10000));
+      if (["chat-completion", "chat-recover", "chat-ack", "run-open", "run-chat"].includes(action)) {
         if (disposed || creditBusy) throw Error("Finish or stop the current chat first");
-        const continuation = pluginCaller && ["run-chat", "run-execute", "chat-ack"].includes(action);
+        const continuation = pluginCaller && ["run-chat", "chat-ack"].includes(action);
         if (!continuation && (!window.isVisible() || window.isMinimized() || pluginCaller?.isVisible && !pluginCaller.isVisible())) throw Error("Return to this app to start a network chat or credit run");
         creditBusy = true;
-        try { return await withChatSignal(window, async signal => action === "run-execute"
-          ? creditRunExecutor.execute(await creditService.context(signal), input, signal) : creditService.run(action, input, signal)); }
+        try { return await withChatSignal(window, signal => callerCreditService.run(action, input, signal)); }
         finally { creditBusy = false; }
       }
     }
@@ -232,7 +241,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     }
     if (["purchase-estimate", "purchase-preview"].includes(action)) {
       if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app for the current price");
-      return withChatSignal(window, signal => creditService.run(action, input, AbortSignal.any([signal, AbortSignal.timeout(action === "purchase-preview" ? 45000 : 15000)])), true);
+      return withChatSignal(window, signal => callerCreditService.run(action, input, AbortSignal.any([signal, AbortSignal.timeout(action === "purchase-preview" ? 45000 : 15000)])), true);
     }
     if (["purchase-approve", "credit-purchase-retry"].includes(action)) {
       if (disposed || busy) throw Error("Finish or cancel the open payment approval first");
@@ -244,14 +253,14 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         const checking = purchaseSync; checking?.abort.abort();
         if (checking) await checking.promise;
         signal.throwIfAborted();
-        return creditService.run(action === "credit-purchase-retry" ? "purchase-retry" : action, input, signal, window);
+        return callerCreditService.run(action === "credit-purchase-retry" ? "purchase-retry" : action, input, signal, window);
       }, true); }
       finally { busy = false; }
     }
     if (action === "chat-info") {
-      if (!fs.existsSync(configFile)) return creditService.info();
+      if (!fs.existsSync(configFile)) return callerCreditService.info();
       const config = readConfig(configFile);
-      if (!isPrepaid(config.deployment)) return { ...await creditService.info(), legacyRecoveryAvailable: true };
+      if (!isPrepaid(config.deployment)) return { ...await callerCreditService.info(), legacyRecoveryAvailable: true };
       open(); let blocked = "";
       try { access.authorize(config.schedulerUrl); } catch (e) { blocked = String(e.message).slice(0, 220); }
       const recovery = flow(window).read();
@@ -260,7 +269,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         recoveryAvailable: !blocked && ["pending", "answered"].includes(recovery?.state) };
     }
     if (["chat-estimate", "credit-status"].includes(action)) {
-      if (!fs.existsSync(configFile)) throw Error(creditService.service.reason || "The credit service is not available yet");
+      if (!fs.existsSync(configFile)) throw Error(callerCreditService.service.reason || "The credit service is not available yet");
       const config = readConfig(configFile);
       if (!isPrepaid(config.deployment)) throw Error("The earlier KOIN account is preserved for recovery. Credit service activation is pending.");
       open(); access.authorize(config.schedulerUrl);
@@ -500,19 +509,19 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     try { await providerPending; } finally { providerTick = false; providerPending = null; }
   }, 15000); providerTimer.unref();
   return {
-    // Called only by verified Assistant and Tools brokers, never registered as a new
-    // renderer IPC surface. Uses the existing account, journals and busy gates.
-    runForPlugin(action, input, { window, webContents = window?.webContents, isVisible, signal } = {}) {
+    // Public native SDK adapter: identical credit authority for any granted
+    // publisher, with the actual installed renderer bound by the caller.
+    runForPlugin(action, input, { pluginId, fingerprint, entry: expectedEntry, window, webContents = window?.webContents, isVisible, signal } = {}) {
       const entry = window && !window.isDestroyed() && webContents && !webContents.isDestroyed?.() ? webContents.mainFrame.url : "";
-      const allowed = new Set(entry === "kai-plugin://kai.assistant/index.html" ? ["credit-status", "chat-info", "chat-completion", "chat-ack", "chat-recover", "stop", "run-open", "run-chat", "run-execute", "run-input", "run-list", "run-status", "run-stop"] : entry === "kai-plugin://kai.tools/index.html" ? ["chat-info", "stop", "run-open", "run-execute", "run-input", "run-list", "run-status", "run-stop"] : []);
-      if (!allowed.has(action)) return Promise.reject(Error("Plugin payment action denied"));
+      const allowed = new Set(["credit-status", "chat-info", "chat-estimate", "chat-completion", "chat-ack", "chat-recover", "stop", "run-open", "run-chat", "run-list", "run-status", "run-stop"]);
+      if (!require("../core/lib/plugins/package").safeId(pluginId) || !/^[a-f0-9]{64}$/.test(fingerprint || "") || !expectedEntry?.startsWith(`kai-plugin://${pluginId}/`) || entry !== expectedEntry || !allowed.has(action)) return Promise.reject(Error("Plugin payment action denied"));
       signal?.throwIfAborted();
       if (action === "stop") {
         for (const [controller, owner] of requestOwners) if (owner === webContents) controller.abort();
         return Promise.resolve({ state: "stopped" });
       }
       const event = { sender: webContents, senderFrame: webContents.mainFrame };
-      const pending = pluginPaymentContext.run({ window, webContents, isVisible, signal, entry: event.senderFrame.url }, () => handlePayment(event, action, input));
+      const pending = pluginPaymentContext.run({ pluginId, fingerprint, window, webContents, isVisible, signal, entry: event.senderFrame.url }, () => handlePayment(event, action, input));
       inFlight.add(pending);
       return pending.finally(() => inFlight.delete(pending));
     },
@@ -531,7 +540,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     isProviding: () => !!worker?.running || !!creditProvider.worker?.running, dispose() {
     if (disposal) return disposal;
     disposed = true; clearInterval(purchaseTimer); clearInterval(providerTimer);
-    purchaseSync?.abort.abort(); creditService.dispose(); payments?.stop(); creditService.purchases.stop();
+    purchaseSync?.abort.abort(); for (const service of pluginCreditServices.values()) service.dispose(); pluginCreditServices.clear(); creditService.dispose(); payments?.stop(); creditService.purchases.stop();
     for (const controller of activeRequests) controller.abort();
     chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.();
     // Keep the shared-profile lock until signed-byte staging, polling and

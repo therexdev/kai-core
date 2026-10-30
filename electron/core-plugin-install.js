@@ -42,7 +42,7 @@ function createPluginInstallReview({ electron, getWindow, isClosing, isTrustedPa
     const manifest = verified.manifest;
     const details = Object.freeze({ id: manifest.id, name: manifest.name, version: manifest.version,
       description: manifest.description || "", fingerprint: verified.fingerprint,
-      permissions: Object.freeze([...manifest.permissions]), installedVersion, official });
+      permissions: Object.freeze([...manifest.permissions]), runtime: manifest.runtime, installedVersion, official });
     const isolated = session.fromPartition(`kai-plugin-review-${randomUUID()}`, { cache: false });
     isolated.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     isolated.setPermissionCheckHandler(() => false);

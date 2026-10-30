@@ -56,3 +56,5 @@ svg{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-l
 .review-error{font-size:12px;color:#c93d4c;background:#fff1f3;border:1px solid #f2c4ce;border-radius:10px;padding:13px 15px;overflow-wrap:anywhere}
 @media(max-width:480px){.dialog-content{padding:21px 19px}.dialog-header{padding-left:18px;padding-right:13px}.dialog-footer{padding:15px 18px;gap:10px;flex-wrap:wrap}.dialog-footer p{max-width:none;flex:1 0 100%}.dialog-actions{margin-left:auto}.plugin-title h2{font-size:22px}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.access-note.native-trust { background:#fff4df; border:1px solid #e6b85a; color:#684514; padding:14px; border-radius:12px; font-weight:500; }

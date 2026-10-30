@@ -2,7 +2,7 @@
 const crypto = require("node:crypto");
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const REGISTRY_FINGERPRINT = "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440";
-const REGISTRY_URL = "https://github.com/therexdev/kai-plugin-registry/releases/latest/download/registry.json";
+const REGISTRY_URL = "https://github.com/therexdev/kai-plugin-registry/releases/latest/download/registry-foundation.json";
 const VERSION = /^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$/;
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -20,7 +20,10 @@ function publicKey(value) {
   return key;
 }
 function fingerprint(key) { return crypto.createHash("sha256").update(key.export({ format: "der", type: "spki" })).digest("hex"); }
-function packageDigest(pkg) { return crypto.createHash("sha256").update(canonical(pkg)).digest("hex"); }
+function packageDigest(pkg) {
+  if (pkg?.manifest?.schema === 2 && pkg.manifest.apiVersion === 3) return require("./package").packageDigest(pkg);
+  return crypto.createHash("sha256").update(canonical(pkg)).digest("hex");
+}
 function compareVersions(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || !VERSION.test(a) || !VERSION.test(b)) throw Error("Invalid Core version");
   const left = a.split(".").map(Number), right = b.split(".").map(Number);
@@ -29,7 +32,7 @@ function compareVersions(a, b) {
 }
 function validateEntry(entry) {
   if (!fields(entry, ["id", "name", "description", "version", "apiVersion", "minCoreVersion", "repository", "url", "publicKey", "fingerprint", "sha256", "permissions"])) throw Error("Invalid registry entry fields");
-  if (!safeId(entry.id) || !text(entry.name, 100) || !text(entry.description, 1000, true) || typeof entry.version !== "string" || !VERSION.test(entry.version) || typeof entry.minCoreVersion !== "string" || !VERSION.test(entry.minCoreVersion) || ![1, 2].includes(entry.apiVersion)) throw Error("Invalid registry plugin metadata");
+  if (!safeId(entry.id) || !text(entry.name, 100) || !text(entry.description, 1000, true) || typeof entry.version !== "string" || !VERSION.test(entry.version) || typeof entry.minCoreVersion !== "string" || !VERSION.test(entry.minCoreVersion) || ![1, 2, 3].includes(entry.apiVersion)) throw Error("Invalid registry plugin metadata");
   if (typeof entry.repository !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9_.-]{1,100}$/.test(entry.repository) || entry.repository.endsWith("/.") || entry.repository.endsWith("/..")) throw Error("Invalid registry repository");
   const prefix = `https://github.com/${entry.repository}/releases/download/v${entry.version}/`;
   if (typeof entry.url !== "string" || !entry.url.startsWith(prefix) || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,179}\.kaiplugin$/.test(entry.url.slice(prefix.length))) throw Error("Registry packages require an immutable GitHub release URL matching their repository and version");

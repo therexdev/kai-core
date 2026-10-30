@@ -1,6 +1,6 @@
 "use strict";
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
-const { assertPublicTarget, publicPageRequest } = require("../websearch");
+const { assertPublicTarget, publicPageRequest } = require("../public-http");
 const { verifyPackage } = require("./package");
 const format = require("./registry-format");
 const { MAX_REGISTRY_BYTES, REGISTRY_URL, verifyRegistry, canonical, packageDigest, compareVersions } = format;
@@ -32,15 +32,15 @@ async function downloadRegistry(url = REGISTRY_URL, { signal = AbortSignal.timeo
 }
 function verifyRegistryPackage(entry, input) {
   format.validateEntry(entry);
-  const verified = verifyPackage(input?.package || input), m = verified.manifest;
-  if (m.id !== entry.id || m.version !== entry.version || m.apiVersion !== entry.apiVersion || m.name !== entry.name || (m.description || "") !== entry.description || verified.fingerprint !== entry.fingerprint || verified.package.publicKey !== entry.publicKey || canonical([...m.permissions].sort()) !== canonical([...entry.permissions].sort()) || packageDigest(verified.package) !== entry.sha256) throw Error("Downloaded plugin does not match the signed registry entry");
-  return verified;
+  const verified = require("./package-file-verifier").getVerifiedPackage(input?.package || input) || verifyPackage(input?.package || input), m = verified.manifest;
+  if (m.id !== entry.id || m.version !== entry.version || m.apiVersion !== entry.apiVersion || m.name !== entry.name || (m.description || "") !== entry.description || verified.fingerprint !== entry.fingerprint || verified.package.publicKey !== entry.publicKey || canonical([...m.permissions].sort()) !== canonical([...entry.permissions].sort()) || verified.digest !== entry.sha256) throw Error("Downloaded plugin does not match the signed registry entry");
+  return typeof input?.dispose === "function" && input !== verified ? { ...verified, dispose: () => input.dispose() } : verified;
 }
 class RegistryClient {
   constructor({ dataDir, coreVersion, source = REGISTRY_URL, now = () => Date.now(), download = downloadRegistry, trustedFingerprint } = {}) {
     if (typeof dataDir !== "string" || !dataDir || typeof coreVersion !== "string") throw Error("Registry requires a Core profile and version");
     compareVersions(coreVersion, coreVersion);
-    this.root = path.join(dataDir, "plugins-v1"); this.file = path.join(this.root, "registry.json");
+    this.root = path.join(dataDir, "plugins-v3"); this.file = path.join(this.root, "registry.json");
     this.coreVersion = coreVersion; this.source = source; this.now = now; this.download = download; this.trustedFingerprint = trustedFingerprint;
     this.lastError = null; this.pending = null;
   }
@@ -68,8 +68,8 @@ class RegistryClient {
       const state = this.read(); if (!state) return [];
       const envelope = verifyRegistry(state.envelope, this.options());
       return envelope.catalog.plugins.map(entry => {
-        const compatible = compareVersions(this.coreVersion, entry.minCoreVersion) >= 0;
-        return { ...entry, compatible, compatibilityReason: compatible ? null : `Requires KAI Core ${entry.minCoreVersion} or newer` };
+        const compatible = entry.apiVersion === 3 && compareVersions(this.coreVersion, entry.minCoreVersion) >= 0;
+        return { ...entry, compatible, compatibilityReason: compatible ? null : entry.apiVersion !== 3 ? "Requires a Foundation API 3 plugin" : `Requires KAI Core ${entry.minCoreVersion} or newer` };
       });
     } catch { return []; }
   }
@@ -77,6 +77,7 @@ class RegistryClient {
     const state = this.read(); if (!state) throw Error("Refresh the plugin registry before installing");
     const entry = verifyRegistry(state.envelope, this.options()).catalog.plugins.find(row => row.id === id);
     if (!entry) throw Error("Plugin is not listed in the signed registry");
+    if (entry.apiVersion !== 3) throw Error("Requires a Foundation API 3 plugin");
     if (compareVersions(this.coreVersion, entry.minCoreVersion) < 0) throw Error(`Requires KAI Core ${entry.minCoreVersion} or newer`);
     return structuredClone(entry);
   }

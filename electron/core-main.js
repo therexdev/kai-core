@@ -1,5 +1,5 @@
 "use strict";
-// The INSTALLER identity is new; the OS credential/profile identity is not.
+// Foundation has its own profile; legacy installations remain untouched.
 process.env.KAI_CHANNEL = "core";
 const path = require("node:path"), fs = require("node:fs");
 const electron = require("electron");
@@ -32,21 +32,20 @@ app.on("window-all-closed", () => app.quit());
 app.on("will-quit", () => desktopTray?.dispose());
 if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => dialog.showMessageBox({ type: "info", title: "Close the other KAI app first", message: "Another KAI application is already running.",
-    detail: "KAI Core, Alpha and Test use the same wallet, models and saved data. Fully quit the running app from its tray menu, then open KAI Core again.", buttons: ["OK"] })).finally(() => app.quit());
+    detail: "KAI Core is already running. Open it from its tray icon.", buttons: ["OK"] })).finally(() => app.quit());
 } else {
   app.on("second-instance", () => desktopTray?.show());
   app.whenReady().then(start).catch(async error => { if (!shuttingDown) dialog.showErrorBox("KAI Core could not start", error.message); shuttingDown = true; await stop().catch(() => {}); shutdownComplete = true; app.quit(); });
 }
 async function start() {
-  const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "core");
-  report = require("../core/lib/core-profile").prepareProfile(dataDir, require("../package.json").version);
-  require("./desktop-first-run").initializeDesktopProfile(dataDir);
+  const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "foundation-v1");
+  report = require("./foundation-profile").prepareFoundationProfile(dataDir);
   const service = require("./credit-service").manifest(require("../core/lib/koin-network/credit-service.json"));
-  core = await require("../core/server").createCore({ dataDir, extensions: false, uiDirectory: path.join(__dirname, "../ui-core"),
+  core = await require("../core/server").createCore({ dataDir, uiDirectory: path.join(__dirname, "../ui-core"),
     sessionSecret: require("./wallet-session-secret").machineSecret(dataDir, electron.safeStorage),
     creditAccountOrigin: service.state === "ready" ? new URL(service.config.schedulerUrl).origin : null });
-  core.gateway.staticAssets.set("/credit-account.js", path.join(__dirname, "../ui/credit-account.js"));
-  core.gateway.staticAssets.set("/reward-summary.js", path.join(__dirname, "../ui/reward-summary.js"));
+  core.gateway.staticAssets.set("/credit-account.js", path.join(__dirname, "../ui-core/credit-account.js"));
+  core.gateway.staticAssets.set("/reward-summary.js", path.join(__dirname, "../ui-core/reward-summary.js"));
   const port = await core.start(), origin = `http://127.0.0.1:${port}`;
   if (shuttingDown) return;
   win = new BrowserWindow({ width: 1200, height: 820, minWidth: 800, minHeight: 600, title: "KAI Core", backgroundColor: "#f4f7fd", autoHideMenuBar: true,
@@ -86,41 +85,18 @@ async function start() {
     catalogMonitor.privacyChanged(); coreWallet?.privacyChanged(state.privacyMode);
     await features?.privacyChanged(state.privacyMode); return state;
   }
-  async function openCoreView(view) {
+  async function openCoreView(view, section) {
     if (shuttingDown) throw Error("Application is closing");
-    const target = require("./core-plugin-desktop").resolveView(view);
-    if (target.plugin) {
-      await pluginHost.open(target.plugin);
-      if (target.section) pluginHost.renderer(target.plugin)?.send("kai-plugin:navigate", { section: target.section });
-      return { opened: true };
-    }
-    pluginHost.hide(); desktopTray.show(); win.webContents.send("kai-core:open-view", target.page); return { opened: true };
+    if (!require("./foundation-api").CORE_VIEWS.has(view)) throw Error("Unknown Core page");
+    if (section !== undefined && (view !== "settings" || !["website-account", "credit-account"].includes(section))) throw Error("Unknown Core section");
+    pluginHost.hide(); desktopTray.show(); win.webContents.send("kai-core:open-view", section ? {page:view,section} : view); return { opened: true };
   }
-  features = new (require("./plugin-services").FeatureServices)({ dataDir, core, electron,
-    getWindow: () => win, localInference: (input, signal) => pluginHost.runLocal(input, signal),
-    getCoreWindow: () => win,
-    getPluginWindow: id => pluginHost?.windows.get(id)?.window,
-    getPluginWebContents: id => pluginHost?.renderer(id),
-    isPluginVisible: id => pluginHost?.isVisible(id) || false,
-    loadInstalledPlugin: id => { if (!manager.list().some(row => row.id === id && row.enabled)) return null; return manager.load(id); },
-    readCoreWalletSummary: () => coreWallet.call("wallet.summary", {}),
-    openPlugin: id => pluginHost.open(id),
-    openCoreView, setPrivacyMode,
-    withWalletSpend: run => payments.withWalletSpend(run),
-    runPayment: (action, input, options) => payments.runForPlugin(action, input, options),
-    desktopCall: require("./core-plugin-desktop").createPluginDesktop({ electron, getCoreWindow: () => win, hidePlugins: () => pluginHost.hide(), openPlugin: async (id, section) => { await pluginHost.open(id); if (section) pluginHost.renderer(id)?.send("kai-plugin:navigate", { section }); }, isClosing: () => shuttingDown,
-      confirm: async (title, detail) => { const result = await dialog.showMessageBox(win, { type: "question", title, message: title, detail, buttons: ["Cancel", "Open"], defaultId: 0, cancelId: 0 }); return result.response === 1 && !shuttingDown; } }),
-    onDisposeError: async id => {
-      const name = firstParty.find(plugin => plugin.id === id)?.name || "Plugin";
-      const options = { type: "warning", title: `${name} could not fully stop`, message: `${name} could not finish shutting down.`,
-        detail: id === "kai.koinos-node" ? "Docker may still be running this node. Check Docker and stop the KAI node containers before starting another KAI application." : "Check the service before starting it again. Core has closed the plugin window and revoked its access.", buttons: ["OK"] };
-      if (win && !win.isDestroyed()) await dialog.showMessageBox(win, options); else await dialog.showMessageBox(options);
-    },
-    confirm: async (title, detail) => {
-      if (shuttingDown) return false;
-      const result = await dialog.showMessageBox(win, { type: "question", title, message: title, detail: (typeof detail === "string" ? detail : JSON.stringify(detail, null, 2)).slice(0, 12000), buttons: ["Cancel", "Allow once"], defaultId: 0, cancelId: 0, noLink: true });
-      return result.response === 1 && !shuttingDown;
-    }
+  const openPlugin = async (id, section) => { await pluginHost.open(id); if (typeof section === "string") pluginHost.renderer(id)?.send("kai-plugin:navigate", { section }); return {opened:true}; };
+  features = new (require("./foundation-plugin-services").FoundationPluginServices)({manager,
+    createApi: record => require("./foundation-api").createFoundationApi({core,electron,getWindow:()=>win,
+      getWebContents:id=>pluginHost?.renderer(id),isVisible:id=>pluginHost?.isVisible(id)||false,
+      openPlugin,openCoreView,setPrivacyMode,isClosing:()=>shuttingDown,payments:()=>payments,wallet:()=>coreWallet},record),
+    onDisposeError: async (id,error) => { if(!shuttingDown) await dialog.showMessageBox(win,{type:"warning",title:"Plugin could not fully stop",message:`${id} could not fully stop.`,detail:String(error?.message||"Check its running services before restarting."),buttons:["OK"]}); }
   });
   pluginHost = new (require("./core-plugin-host").PluginHost)({ electron, manager, core, features, getContainerWindow: () => win,
     onActivate: view => { if (!shuttingDown && !win.isDestroyed()) win.webContents.send("kai-core:open-view", view); } });
@@ -146,10 +122,10 @@ async function start() {
       case "plugins.registry.check": await catalogMonitor.wake(); return registry.status();
       case "plugins.install": {
         if (installBusy) throw Error("Finish the current plugin operation first"); installBusy = true;
+        let verified;
         try {
           await catalogMonitor.waitForIdle();
           if (shuttingDown) throw Error("Plugin installation stopped because Core is closing");
-          let verified;
           const registryState = registry.status();
           const listed = input?.id && registryState.present ? registry.entry(input.id) : null;
           const official = input?.id && !listed ? firstParty.find(p => p.id === input.id) : null;
@@ -157,7 +133,7 @@ async function start() {
           if (input?.url || official || listed) {
             if (core.gateway.network.status().privacyMode === "local-only") throw Error("Local-Only blocks plugin downloads. Install a local package or change Privacy.");
             pluginDownload = new AbortController();
-            verified = await require("../core/lib/plugins/download").downloadPackage(listed?.url || official?.url || input.url, { signal: AbortSignal.any([pluginDownload.signal, AbortSignal.timeout(30000)]) });
+            verified = await require("../core/lib/plugins/download").downloadPackage(listed?.url || official?.url || input.url, { signal: AbortSignal.any([pluginDownload.signal, AbortSignal.timeout(900000)]), onProgress: progress => { if(!shuttingDown && !win.isDestroyed()) win.webContents.send("kai-core:plugin-download-progress", progress); } });
             if (core.gateway.network.status().privacyMode === "local-only") throw Error("Plugin download cancelled by Local-Only privacy");
             if (listed) verifyRegistryPackage(listed, verified);
             if (official && (verified.manifest.id !== official.id || verified.manifest.version !== official.version || verified.fingerprint !== official.fingerprint)) throw Error("Downloaded plugin does not match the reviewed publisher and release");
@@ -165,8 +141,8 @@ async function start() {
             const chosen = await dialog.showOpenDialog(win, { title: "Install a signed KAI plugin", properties: ["openFile"], filters: [{ name: "KAI plugin package", extensions: ["kaiplugin"] }] });
             if (chosen.canceled) return null;
             const file = chosen.filePaths[0];
-            if (fs.statSync(file).size > require("../core/lib/plugins/package").MAX_BYTES) throw Error("Plugin exceeds 24 MB");
-            verified = require("../core/lib/plugins/package").verifyPackage(fs.readFileSync(file, "utf8"));
+            if (fs.statSync(file).size > require("../core/lib/plugins/package").MAX_BYTES) throw Error("Plugin exceeds the package size limit");
+            verified = await require("../core/lib/plugins/package-file-verifier").verifyPackageFile(file, {extract:false});
           }
           const m = verified.manifest;
           const approved = await pluginReview.review(verified, manager.list().find(plugin => plugin.id === m.id)?.version || null,
@@ -174,9 +150,9 @@ async function start() {
           if (!approved || shuttingDown || win.isDestroyed() || !trustedMainDocument(event, win, origin)) return null;
           await pluginHost.close(m.id, "update");
           if (shuttingDown || !trustedMainDocument(event, win, origin)) return null;
-          const installed = manager.install(verified.package);
+          const installed = manager.install(verified.package, {trustNative: m.runtime === "native"});
           void features.startInstalledBackground(manager, m.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed;
-        } finally { installBusy = false; pluginDownload = null; }
+        } finally { try { await verified?.dispose?.(); } finally { installBusy = false; pluginDownload = null; } }
       }
       case "plugins.open": return pluginHost.open(input?.id, input?.bounds);
       case "plugins.hide": return pluginHost.hide();
@@ -200,7 +176,7 @@ async function start() {
         return core.gateway.earn.createWallet({ password: input.password });
       }
       case "wallet.restore": {
-        if (core.account.wallet.exists()) throw Error("Your existing wallet is preserved. Use the old app's recovery controls if needed.");
+        if (core.account.wallet.exists()) throw Error("Your existing wallet is preserved. Unlock it or use its backup controls.");
         return core.gateway.earn.restoreWallet({ wif: input.wif, password: input.password });
       }
       case "models.import": {
@@ -218,7 +194,7 @@ async function start() {
           const r = await updater.checkForUpdates();
           const available = r?.updateInfo?.version && require("semver").gt(r.updateInfo.version, app.getVersion());
           if (!available) return { message: "You have the latest published version." };
-          const answer = await dialog.showMessageBox(win, { type: "question", title: "KAI Core update", message: `Download KAI Core ${r.updateInfo.version}?`, detail: "Only this Core application will be updated. Your shared profile stays in place.", buttons: ["Later", "Download"], defaultId: 0, cancelId: 0 });
+          const answer = await dialog.showMessageBox(win, { type: "question", title: "KAI Core update", message: `Download KAI Core ${r.updateInfo.version}?`, detail: "Only this Core application will be updated. Your Foundation profile stays in place.", buttons: ["Later", "Download"], defaultId: 0, cancelId: 0 });
           if (answer.response !== 1) return { message: `Version ${r.updateInfo.version} is available.` };
           await updater.downloadUpdate();
           const restart = await dialog.showMessageBox(win, { type: "question", title: "Update ready", message: "Restart KAI Core to install the update?", detail: "Active work will be stopped before installation.", buttons: ["Later", "Restart"], defaultId: 0, cancelId: 0 });

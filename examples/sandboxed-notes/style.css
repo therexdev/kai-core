@@ -1,0 +1,4 @@
+:root { color-scheme: light; font: 15px/1.5 system-ui, sans-serif; color: #143459; background: #f4f7fd; }
+body { margin: 0; } main { max-width: 680px; margin: 40px auto; padding: 24px; } h1 { margin: 0 0 12px; } p { color: #617b99; }
+label { display: block; margin: 20px 0 6px; } textarea { box-sizing: border-box; width: 100%; padding: 14px; border: 1px solid #d8e5f8; border-radius: 12px; font: inherit; resize: vertical; }
+button { margin-top: 16px; border: 0; border-radius: 9px; padding: 10px 18px; background: #175bfa; color: white; font: inherit; cursor: pointer; } button:disabled { opacity: .6; cursor: wait; }

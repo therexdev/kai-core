@@ -333,7 +333,7 @@ class CreditProvider {
     try {
       if (Array.isArray(value.rewardSummaries) && value.rewardSummaries.length <= 64) {
         const matches = value.rewardSummaries.filter(s => s?.account === walletAddress);
-        if (matches.length === 1) summary = require("../ui/reward-summary").validate(matches[0], walletAddress, value.observedAt, payouts);
+        if (matches.length === 1) summary = require("../ui-core/reward-summary").validate(matches[0], walletAddress, value.observedAt, payouts);
       }
     } catch {}
     return { walletAddress, scope, observedAt: value.observedAt, lastCycleCheck: Number.isSafeInteger(value.lastCycleCheck) &&

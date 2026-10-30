@@ -1,0 +1,13 @@
+"use strict";
+const fs=require("node:fs"),path=require("node:path");
+const {closure,entries}=require("./source-closure");
+const root=path.resolve(__dirname,"../.."), graph=closure(entries);
+if(graph.missing.length)throw Error("Missing foundation modules: "+graph.missing.join(", "));
+const forbidden=/(?:^|\/)(?:plugin-services|companion[^/]*|workflow[^/]*|brain[^/]*|agent-network[^/]*|code-agent[^/]*|mcp[^/]*|mascot[^/]*|speech[^/]*|whisper[^/]*|koinos-node[^/]*)(?:\/|\.|$)/;
+const leaked=graph.files.filter(file=>forbidden.test(file));if(leaked.length)throw Error("Feature engines leaked into Core: "+leaked.join(", "));
+const resources=["ui-core/**","core/models/**","core/runtimes/catalog.json","build/icon.*","build/foundation-files.json"];
+const manifest={schema:1,entry:"electron/core-main.js",files:graph.files,resources,external:graph.external};
+fs.writeFileSync(path.join(root,"build/foundation-files.json"),JSON.stringify(manifest,null,2)+"\n");
+const file=path.join(root,"package.json"),pkg=JSON.parse(fs.readFileSync(file,"utf8"));
+pkg.build.files=[...graph.files,...resources];pkg.build.extraResources=[];pkg.build.asarUnpack=["build/icon.png","build/icon.ico"];delete pkg.build.win.extraResources;
+fs.writeFileSync(file,JSON.stringify(pkg,null,2)+"\n");console.log(`Foundation package: ${graph.files.length} source modules and ${resources.length} resource groups; no optional feature engines.`);

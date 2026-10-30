@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld("kaiCore", Object.freeze({
     ipcRenderer.on("kai-core:plugin-catalog-changed", listener);
     return () => ipcRenderer.removeListener("kai-core:plugin-catalog-changed", listener);
   },
+  onPluginDownloadProgress: callback => {
+    if (typeof callback !== "function") throw TypeError("A progress callback is required");
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("kai-core:plugin-download-progress", listener);
+    return () => ipcRenderer.removeListener("kai-core:plugin-download-progress", listener);
+  },
   onChatProgress: callback => {
     if (typeof callback !== "function") throw TypeError("A progress callback is required");
     const listener = (_event, value) => callback(value);

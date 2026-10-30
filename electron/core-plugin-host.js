@@ -1,5 +1,5 @@
 "use strict";
-const path = require("node:path"), crypto = require("node:crypto");
+const path = require("node:path"), crypto = require("node:crypto"), fs = require("node:fs");
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".txt": "text/plain" };
 Object.assign(MIME, { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".wav": "audio/wav", ".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".woff": "font/woff", ".woff2": "font/woff2" });
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; worker-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -24,9 +24,13 @@ class PluginHost {
     const activation = ++this.activation;
     if (this.getContainerWindow) { this.selected = null; this.hideViews(); }
     await this.features?.closeTasks?.get(id);
-    // Revalidate even an already-running app before activating it.
-    const verified = this.manager.load(id);
-    if (activation !== this.activation) return { opened: false };
+    // A running view uses the exact signed bytes already verified at launch.
+    // Recheck installed identity/grants; avoid rehashing large voice payloads on
+    // every navigation. New views always verify the signed package again.
+    const current = this.windows.get(id);
+    if (current) this.manager.assertActive(id, current.digest, current.fingerprint);
+    const verified = current || (this.features?.verifiedForUI ? await this.features.verifiedForUI(id) : this.manager.load(id));
+    if (activation !== this.activation) { if (!current && verified.manifest.runtime === "sandboxed") verified.dispose?.(); return { opened: false }; }
     if (this.getContainerWindow) {
       this.hideViews(); this.selected = id;
       if (bounds) this.setBounds(bounds, id);
@@ -39,6 +43,7 @@ class PluginHost {
     }
     try { if (pending) await pending; }
     catch (error) {
+      if (!current && verified.manifest.runtime === "sandboxed") verified.dispose?.();
       if (activation === this.activation && this.getContainerWindow) { this.hide(); this.onActivate?.({ page: "plugins", error: error.message }); }
       throw error;
     }
@@ -68,18 +73,17 @@ class PluginHost {
   }
   hideViews() { for (const record of this.windows.values()) if (record.view) record.view.setVisible(false); }
   hide() { ++this.activation; this.selected = null; this.hideViews(); return { hidden: true }; }
-  async create(id, { manifest, package: pkg, fingerprint }) {
-    const official = require("../core/lib/plugins/first-party.json").plugins.some(p => p.id === id && p.fingerprint === fingerprint);
-    if (!official && [...this.windows.values()].filter(record => !record.official).length >= 8) throw Error("Disable an unused third-party app before opening another (limit: 8)");
-    const assistantMedia = official && id === "kai.assistant" && manifest.permissions.includes("assistant.media");
-    const csp = official ? CSP.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'") + "; font-src 'self'; media-src 'self' blob:" : CSP;
+  async create(id, { manifest, package: pkg, fingerprint, digest, root, dispose: releasePackage }) {
+    if (this.windows.size >= 24) throw Error("Close an unused app before opening another (limit: 24)");
+    const mediaAccess = manifest.permissions.includes("desktop.media");
+    const csp = CSP.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'") + "; font-src 'self'; media-src 'self' blob:";
     const session = this.electron.session.fromPartition(`kai-plugin-${crypto.randomUUID()}`);
     const origin = `kai-plugin://${id}`, entry = `${origin}/${manifest.entry}`;
     session.setPermissionRequestHandler((_wc, _p, cb) => cb(false));
     session.setPermissionCheckHandler(() => false);
     session.on("will-download", event => event.preventDefault());
     session.webRequest.onBeforeRequest((details, cb) => {
-      let allowed = false; try { const u = new URL(details.url); allowed = u.protocol === "kai-plugin:" && u.hostname === id && !u.username && !u.password && !u.port || official && u.protocol === "blob:" && u.pathname.startsWith(origin + "/"); } catch {}
+      let allowed = false; try { const u = new URL(details.url); allowed = u.protocol === "kai-plugin:" && u.hostname === id && !u.username && !u.password && !u.port || mediaAccess && u.protocol === "blob:" && u.pathname.startsWith(origin + "/"); } catch {}
       cb({ cancel: !allowed });
     });
     session.protocol.handle("kai-plugin", request => {
@@ -88,7 +92,7 @@ class PluginHost {
       catch { return new Response("Invalid request", { status: 400 }); }
       if (u.hostname !== id || request.method !== "GET" || !Object.hasOwn(pkg.files, file)) return new Response("Not found", { status: 404 });
       const binary = require("../core/lib/plugins/package").BINARY.test(file);
-      return new Response(binary ? Buffer.from(pkg.files[file], "base64") : pkg.files[file], { headers: { "content-type": `${MIME[path.extname(file)] || "text/plain"}${binary ? "" : "; charset=utf-8"}`, "content-security-policy": csp, "x-content-type-options": "nosniff" } });
+      return new Response(root ? fs.readFileSync(path.join(root, ...file.split("/"))) : binary ? Buffer.from(pkg.files[file], "base64") : pkg.files[file], { headers: { "content-type": `${MIME[path.extname(file)] || "text/plain"}${binary ? "" : "; charset=utf-8"}`, "content-security-policy": csp, "x-content-type-options": "nosniff" } });
     });
     const preferences = { session, preload: path.join(__dirname, "core-plugin-preload.js"), sandbox: true, nodeIntegration: false, contextIsolation: true, webSecurity: true, webviewTag: false, devTools: false, backgroundThrottling: false };
     const container = this.getContainerWindow?.();
@@ -99,9 +103,9 @@ class PluginHost {
     if (view) { view.setBackgroundColor("#f4f7fd"); view.setVisible(false); container.contentView.addChildView(view); }
     // WebRTC UDP is not an HTTP request and cannot be filtered by webRequest.
     webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
-    const record = { window, view, webContents, manifest, entry, fingerprint, official, controller: new AbortController(), busy: false, calls: [], ready: false };
+    const record = { window, view, webContents, manifest, entry, fingerprint, digest, root, controller: new AbortController(), busy: false, calls: [], ready: false };
     this.windows.set(id, record);
-    if (assistantMedia) {
+    if (mediaAccess) {
       const granted = new Set();
       session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permission === "media" && wc === webContents && [origin, origin + "/"].includes(requestingOrigin) && details?.isMainFrame === true && details.requestingUrl === entry && webContents.mainFrame.url === entry && !record.controller.signal.aborted && !!this.manager.state.installed[id]?.enabled && granted.has(details?.mediaType));
       session.setPermissionRequestHandler(async (wc, permission, callback, details) => {
@@ -109,7 +113,7 @@ class PluginHost {
         if (permission !== "media" || wc !== webContents || details?.isMainFrame !== true || details.requestingUrl !== entry || wc.mainFrame.url !== entry || !types.length || types.some(type => !["audio", "video"].includes(type)) || record.controller.signal.aborted || !this.manager.state.installed[id]?.enabled) return callback(false);
         try {
           if (!types.every(type => granted.has(type))) {
-            const answer = await this.electron.dialog.showMessageBox(window, { type: "question", title: "KAI Assistant media access", message: `Allow KAI Assistant to use your ${types.map(type => type === "audio" ? "microphone" : "camera").join(" and ")}?`, detail: "Access is used for the voice or camera feature you start. This permission lasts until KAI quits or Assistant is disabled or updated.", buttons: ["Cancel", "Allow"], defaultId: 0, cancelId: 0 });
+            const answer = await this.electron.dialog.showMessageBox(window, { type: "question", title: `${manifest.name} media access`, message: `Allow ${manifest.name} to use your ${types.map(type => type === "audio" ? "microphone" : "camera").join(" and ")}?`, detail: "Access is used for the voice or camera feature you start. This permission lasts until KAI quits or Assistant is disabled or updated.", buttons: ["Cancel", "Allow"], defaultId: 0, cancelId: 0 });
             if (answer.response !== 1 || record.controller.signal.aborted || wc.mainFrame.url !== entry || !this.manager.state.installed[id]?.enabled) return callback(false);
             types.forEach(type => granted.add(type));
           }
@@ -124,7 +128,7 @@ class PluginHost {
       if (this.windows.get(id) === record) this.windows.delete(id);
       if (view && !window.isDestroyed()) window.contentView.removeChildView(view);
       if (!record.closingReason) void (this.features?.detachWindow?.(id) || this.features?.close(id))?.catch(error => console.warn("[plugin]", error.message));
-      session.protocol.unhandle("kai-plugin"); void session.clearStorageData().catch(() => {});
+      session.protocol.unhandle("kai-plugin"); if (manifest.runtime === "sandboxed") releasePackage?.(); void session.clearStorageData().catch(() => {});
     };
     record.cleanup = cleanup;
     if (view) webContents.once("destroyed", cleanup); else window.once("closed", cleanup);
@@ -154,16 +158,15 @@ class PluginHost {
     if (record.calls.length >= 30) throw Error("Plugin request rate exceeded; wait a moment before retrying");
     record.calls.push(now);
     const { manifest: m } = record;
-    if (!this.manager.state.installed[m.id]?.enabled) throw Error("Plugin is disabled");
+    this.manager.assertActive(m.id, record.digest, record.fingerprint);
     const permissions = { "models.list": "models.read", "inference.local": "inference.local", "storage.get": "storage.read", "storage.set": "storage.write" };
-    const permission = typeof method === "string" ? (Object.hasOwn(permissions, method) ? permissions[method] : this.features?.permission(method)) : null;
-    if (!permission || !m.permissions.includes(permission)) throw Error("Plugin permission denied");
-    const inputLimit = record.official && record.manifest.id === "kai.assistant" && record.manifest.permissions.includes("assistant.media") ? 24 * 1024 * 1024
-      : record.official && record.manifest.id === "kai.documents" && record.manifest.permissions.includes("documents.write") ? 12 * 1024 * 1024 : 1024 * 1024;
+    const permission = typeof method === "string" && Object.hasOwn(permissions, method) ? permissions[method] : null;
+    if (permission ? !m.permissions.includes(permission) : m.runtime !== "native" || !m.permissions.includes("native.execute")) throw Error("Plugin permission denied");
+    const inputLimit = m.runtime === "native" ? 24 * 1024 * 1024 : 1024 * 1024;
     if (Buffer.byteLength(JSON.stringify(input ?? null)) > inputLimit) throw Error("Plugin input too large");
     if (method === "models.list") return this.core.models.aliases().map(({ alias, label, status }) => ({ alias, label, status }));
     if (method.startsWith("storage.")) return this.manager.storage(m.id, method.slice(8), input?.key, input?.value);
-    if (!Object.hasOwn(permissions, method)) return this.features.call(record, method, input);
+    if (!permission) return this.features.call(record, method, input);
     if (record.busy) throw Error("Inference is busy; retry after the current request");
     record.busy = true;
     try { return await this.runLocal(input, record.controller.signal); } finally { record.busy = false; }

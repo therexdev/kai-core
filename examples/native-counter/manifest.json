@@ -1,0 +1,14 @@
+{
+  "schema": 2,
+  "apiVersion": 3,
+  "id": "example.counter",
+  "version": "1.0.0",
+  "name": "Example Counter",
+  "description": "A native service with its own saved state and a declared local read service.",
+  "entry": "index.html",
+  "runtime": "native",
+  "service": "service/index.js",
+  "permissions": ["native.execute", "storage.read", "storage.write", "services.provide"],
+  "provides": ["example.counter"],
+  "consumes": []
+}

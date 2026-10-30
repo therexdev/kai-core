@@ -15,12 +15,16 @@ function channelConfig(channel = process.env.KAI_CHANNEL || pkg.kaiChannel || "s
     // Test exercises the owner's existing live node and profile.
     port: 41100,
     ollamaPort: 11434,
-    homeDirName: ".koinos-ai",
+    homeDirName: channel === "core" ? ".kai-foundation" : ".koinos-ai",
   };
 }
 
 function configureDesktop(app, config) {
-  if (config.isTest || config.isCore) {
+  if (config.isCore) {
+    app.setName("KAI Core");
+    const profile = path.join(app.getPath("appData"), "KAI Core");
+    app.setPath("userData", profile); app.setPath("sessionData", profile);
+  } else if (config.isTest) {
     // Keep the live OS credential identity and singleton/profile path. The
     // installer, window/tray label and updater still use Test's own identity.
     // This must run before the single-instance lock or any session is created.

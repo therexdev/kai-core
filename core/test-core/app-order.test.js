@@ -32,16 +32,16 @@ test("stale or malformed reorder cannot install or inject an app", t => {
 test("damaged display preference falls back without altering plugin installation state", t => {
   const { dataDir, order, state } = fixture(t);
   order.save(["kai.workflows", "kai.brain"]);
-  fs.writeFileSync(path.join(dataDir, "plugins-v1/sidebar-order.json"), "broken");
+  fs.writeFileSync(path.join(dataDir, "plugins-v3/sidebar-order.json"), "broken");
   assert.deepEqual(order.read(), ["kai.brain", "kai.workflows"]);
   assert.equal(state.installed[1].enabled, false);
-  assert.equal(fs.readFileSync(path.join(dataDir, "plugins-v1/sidebar-order.json"), "utf8"), "broken");
+  assert.equal(fs.readFileSync(path.join(dataDir, "plugins-v3/sidebar-order.json"), "utf8"), "broken");
 });
 
 test("app order never reads or replaces a linked preference file", { skip: process.platform === "win32" }, t => {
   const { dataDir, order } = fixture(t);
   order.save(["kai.workflows", "kai.brain"]);
-  const file = path.join(dataDir, "plugins-v1/sidebar-order.json"), target = path.join(dataDir, "preserved.json");
+  const file = path.join(dataDir, "plugins-v3/sidebar-order.json"), target = path.join(dataDir, "preserved.json");
   fs.writeFileSync(target, '{"schema":1,"ids":["kai.workflows","kai.brain"]}');
   fs.unlinkSync(file); fs.symlinkSync(target, file);
   assert.deepEqual(order.read(), ["kai.brain", "kai.workflows"]);

@@ -32,7 +32,7 @@ const VERSION = require("./package.json").version;
 // self-hosters; the Earn tab field overrides per machine.
 const DEFAULT_SCHEDULER_URL = process.env.KAI_SCHEDULER_URL || "https://koinosai.com/scheduler";
 
-async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, creditAccountOrigin = null, extensions = true, uiDirectory = null } = {}) {
+async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, creditAccountOrigin = null, uiDirectory = null } = {}) {
   const release = channelConfig();
   dataDir = dataDir || process.env.KAI_CORE_DATA || path.join(os.homedir(), release.homeDirName);
   // Every event also lands in <dataDir>/core.log so packaged-app failures
@@ -108,8 +108,6 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
   // Wallet keys stay in Core (§8); the worker only starts on explicit opt-in
   // and stops immediately on request (§10).
   const { WalletService } = require("./lib/wallet");
-  const { Worker } = require("./lib/worker");
-  const { LoadGuard } = require("./lib/load-guard");
   const wallet = new WalletService(path.join(dataDir, "wallet"));
   let worker = null;
   let loadGuard = null; // lives exactly as long as the worker does
@@ -260,53 +258,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
       throw new Error("Credit purchases are unavailable during the KOIN transition. No funds were moved.");
     },
     start: async () => {
-      if (!extensions) throw new Error("Legacy earning is not enabled in KAI Core. Use Share AI capacity instead.");
-      const s = wallet.status();
-      if (!s.exists) throw new Error("Create a wallet first");
-      if (!s.unlocked) throw new Error("Unlock the wallet first");
-      const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
-      if (!url) throw new Error("Set the scheduler URL first");
-      if (worker?.running) return worker.status();
-      worker = new Worker({
-        schedulerUrl: url, wallet, runtime, hardware: hw, models, onEvent: events,
-        // The account page's Koinos node card. Built by the shared snapshot
-        // module so an earning machine and a node-only machine describe
-        // themselves to the dashboard in exactly the same words.
-        producer: producerSnapshot,
-      });
-      const st = await worker.start();
-      /*
-       * Load guard (field report 2026-08-26: Earn + heavy GPU design work
-       * froze a tester's PC; closing the app un-froze it instantly — VRAM
-       * oversubscription). While the owner's other applications are working
-       * the GPU, earning backs off: stop polling for jobs, and unload the
-       * idle engine so its VRAM comes back RIGHT NOW — the exact relief
-       * closing the app gave, without closing the app. `earn.courtesy` set
-       * to "off" disables it for dedicated rigs that want every job.
-       */
-      if (settings.get("earn.courtesy", "auto") !== "off") {
-        loadGuard = new LoadGuard({
-          isOurLoad: () => runtime.busy(),
-          onContention: () => {
-            worker?.setBackoff(true, "your GPU is busy");
-            // Free the VRAM unless something is actually streaming from the
-            // engine (a local chat mid-answer must never be cut off — the
-            // guard re-calls this each contended sample, so the unload
-            // happens as soon as the stream ends).
-            if (!runtime.busy()) runtime.stop();
-          },
-          onQuiet: () => worker?.setBackoff(false),
-          onEvent: events,
-        });
-        loadGuard.start();
-      }
-      settings.set("earn.autoStart", true);
-      return st;
+      throw new Error("Use Share AI capacity to participate in the network.");
     },
-    nudge: async () => (worker ? worker.nudge() : { running: false }),
-    // userIntent distinguishes the Stop button from process shutdown: only
-    // the user's own Stop turns auto-resume off — a quit or update keeps
-    // their "earning on" choice for the next launch.
     stop: async ({ userIntent = true } = {}) => {
       loadGuard?.stop();
       loadGuard = null;
@@ -398,197 +351,14 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     },
   };
 
-  // The desktop UI is plain web content served by the gateway itself — the
-  // Electron shell just opens a window onto it, and a browser works too.
-  const uiDir = uiDirectory || path.join(__dirname, "..", "ui");
-  const { liveSensesAssets, smartTurnModelPath } = extensions ? require("./lib/live-senses-assets") : {};
-  const { ChatStore } = require("./lib/chats");
-
-  // ---- unified tool layer: ONE policy point for everything a model can do
-  // beyond generating text (§7 egress gating + confirm-before-use) ----
-  const { ToolRegistry } = require("./lib/tools");
-  const { MemoryStore } = extensions ? require("./lib/memory") : {};
-  const { registerBuiltinTools } = extensions ? require("./lib/builtin-tools") : {};
-  const { McpManager } = extensions ? require("./lib/mcp-manager") : {};
-  const { EmailService, registerEmailTools } = extensions ? require("./lib/email") : {};
-  const { CalendarService, registerCalendarTools } = extensions ? require("./lib/caldav") : {};
-  const registry = new ToolRegistry({ privacyMode: () => settings.get("network.privacyMode") || "local-only" });
-  const memory = extensions ? new MemoryStore(dataDir) : null;
-  // Legacy facts are read only for migration into the private desktop Brain.
-  // Brain is never exposed through the Core/network tool registry.
-  // Node runtime for npx-based MCP servers AND the run_code sandbox —
-  // constructed before the builtin tools so run_code can probe which node
-  // binary (and which permission flag) this machine actually has.
-  const { NodeRuntime } = extensions ? require("./lib/node-runtime") : {};
-  const nodeRuntime = extensions ? new NodeRuntime({ provisioner, runtimesDir: path.join(dataDir, "runtimes") }) : null;
-  if (extensions) registerBuiltinTools(registry, { dataDir, nodeRuntime });
-  // Electron's safeStorage encrypts account credentials with the OS keychain;
-  // absent (tests, headless) the services fall back to a 0600 file and say so.
+  // Shared foundation services only. Optional engines are installed packages.
+  const uiDir = uiDirectory || path.join(__dirname, "..", "ui-core");
   let safeStorage = null;
-  try { safeStorage = require("electron").safeStorage; } catch { /* not in electron */ }
-  const emailSvc = extensions ? new EmailService({ dataDir, safeStorage, onEvent: events }) : null;
-  if (extensions) registerEmailTools(registry, emailSvc);
-  const calendarSvc = extensions ? new CalendarService({ dataDir, safeStorage, onEvent: events }) : null;
-  // Koinos node tools. Constructed always, INERT until the Earn toggle flips
-  // it on: nothing here opens a Provider or touches the network while off.
-  const { KoinosService } = extensions ? require("./lib/koinos") : {};
-  const koinosSvc = extensions ? new KoinosService({ settings, hardware: hw, dataDir, wallet, onEvent: events }) : null;
-  // The FULL node stack — Docker lifecycle, guided WSL/Docker setup, onramp,
-  // bridge, swaps, rewards. It uses THIS wallet; there is no second one.
-  const { createKoinosNode } = extensions ? require("./lib/koinos-node") : {};
-  const koinosNodeSvc = extensions ? createKoinosNode({
-    dataDir,
-    wallet,
-    appVersion: VERSION,
-    // Logged like everything else, and pushed live to the node UI over
-    // /core/koinos/events — the stream Electron IPC carried in the
-    // standalone app. `gateway` is created below; by the first event it exists.
-    onEvent: (e) => {
-      events(e);
-      // A boot-time event can fire before the const below initialises (TDZ).
-      try { gateway?.pushKoinosEvent(e); } catch { /* not up yet; the log has it */ }
-    },
-  }) : null;
-  if (extensions) registerCalendarTools(registry, calendarSvc);
-
-  /*
-   * One builder for the block-producer snapshot, shared by the earning Worker
-   * and by the standalone reporter below. `earn.start()` is declared above
-   * this line but only reads the const when the Worker is actually
-   * constructed, by which time it exists — the same arrangement the inline
-   * version had with `koinosNodeSvc`.
-   */
-  const { createProducerSnapshot } = require("./lib/koinos/producer-snapshot");
-  const producerSnapshot = createProducerSnapshot({
-    call: (method, args) => koinosNodeSvc ? koinosNodeSvc.call(method, args) : Promise.resolve(null),
-    appVersion: VERSION,
-  });
-
-  /*
-   * Task #84: the node reports itself even with Earning off. Constructed
-   * here, started in start() — it gates itself on privacy mode, the wallet,
-   * and whether the earning Worker is already doing the reporting, so it is
-   * safe to leave running for the life of the process.
-   */
-  const { ProducerReporter } = extensions ? require("./lib/producer-reporter") : {};
-  const producerReporter = extensions ? new ProducerReporter({
-    schedulerUrl: () => settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
-    privacyMode: () => settings.get("network.privacyMode", "local-only"),
-    wallet,
-    snapshot: producerSnapshot,
-    earning: () => !!(worker && worker.status().running),
-    onEvent: events,
-  }) : null;
-  const mcp = extensions ? new McpManager({ settings, registry, nodeRuntime, onEvent: events }) : null;
-  // Koinos AI account (task #49): device-link sign-in + wallet attach. The
-  // bearer token is stored like email credentials (OS keychain when
-  // available); the wallet's unlocked signer produces the link proof — it
-  // moves no value, same trust class as receipt signing.
+  try { safeStorage = require("electron").safeStorage; } catch {}
   const { AccountService } = require("./lib/account");
   const account = new AccountService({ dataDir, settings, wallet, safeStorage, onEvent: events });
   const creditAccount = creditAccountOrigin ? new AccountService({ dataDir, settings, wallet,
     safeStorage: wallet.creditStorage(safeStorage, creditAccountOrigin), onEvent: events, accountOrigin: creditAccountOrigin }) : null;
-  // AI Teams (task #58): the runner lives in Core so headless API users and
-  // the Pi get teams without a window. Completions loop back through the
-  // gateway's own chat lane, so teams inherit EVERY routing rule — local
-  // engine acquisition, network consume, privacy modes — instead of
-  // re-implementing any of it. (`gateway` is created below; teams only run
-  // after listen, when its port exists.)
-  const { TeamRunner } = extensions ? require("./lib/teams") : {};
-  // One loopback completion through the gateway's own chat lane — teams AND
-  // bench inherit every routing rule (privacy modes, budgets, kill switch)
-  // instead of re-implementing any of it.
-  const loopbackChat = async ({ model, messages, maxTokens }) => {
-    const r = await fetch(`http://127.0.0.1:${gateway.port}/core/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        // Headless deployments gate /core/* behind KAI_CORE_TOKEN — the
-        // engine's own internal calls carry it so teams/bench keep working.
-        ...(process.env.KAI_CORE_TOKEN ? { authorization: `Bearer ${process.env.KAI_CORE_TOKEN}` } : {}),
-      },
-      body: JSON.stringify({ model, messages, stream: false, max_tokens: maxTokens }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j?.error?.message || `chat failed (${r.status})`);
-    return j?.choices?.[0]?.message?.content ?? "";
-  };
-  const teams = extensions ? new TeamRunner({ registry, onEvent: events, chatFn: loopbackChat }) : null;
-  // Developer tools (task #61): ONE explicit switch in Local API. Off by
-  // default; while off, custom team specs and the bench routes refuse. The
-  // switch reveals capability, never permissions — sensitive tools still
-  // need their own upfront yes with it on.
-  const dev = extensions ? {
-    status: () => ({ enabled: extensions && settings.get("dev.tools", false) === true }),
-    configure: ({ enabled }) => {
-      settings.set("dev.tools", enabled === true);
-      events({ type: "dev:tools", message: enabled === true ? "on" : "off" });
-      return dev.status();
-    },
-  } : null;
-  const { BenchRunner } = extensions ? require("./lib/bench") : {};
-  const bench = extensions ? new BenchRunner({ chatFn: loopbackChat, teams, dataDir }) : null;
-  // Multi-agent group chats (task #64) — the full-AutoGen developer track:
-  // named agents, one shared transcript, round-robin/selector/handoff turn
-  // order, humans as pausing agents. Same loopback, same registry, same
-  // permission policy; saved definitions live beside the other app state.
-  const { GroupChatRunner, GroupDefs } = extensions ? require("./lib/groupchat") : {};
-  const agents = extensions ? {
-    runner: new GroupChatRunner({ chatFn: loopbackChat, registry, onEvent: events }),
-    defs: new GroupDefs(path.join(dataDir, "agent-teams.json")),
-    registry,
-  } : null;
-  // Koinos Code in the app (task #60 v3): the CLI's coding agent hosted by
-  // Core, permission gates routed to approval cards over SSE. Same loopback
-  // lane, so runs inherit every routing/privacy rule.
-  const { CodeAgent } = extensions ? require("./lib/code-agent") : {};
-  const { CodeProjects } = extensions ? require("./lib/code-projects") : {};
-  /*
-   * Koinos Code has its OWN switch and its own sidebar item (task #72). It
-   * used to ride on the Developer-tools switch, but the two are different
-   * questions: developer tools reveal multi-agent systems and a benchmark,
-   * while Koinos Code writes files anywhere you point it and runs commands as
-   * you. Someone should be able to want one without the other.
-   *
-   * MIGRATION: the switch is seeded from dev.tools the first time it is read,
-   * so anyone who turned developer tools on to get Koinos Code keeps it and
-   * nothing disappears out from under them.
-   */
-  const codeSwitch = {
-    status: () => {
-      let v = settings.get("code.enabled", null);
-      if (v === null || v === undefined) {
-        v = settings.get("dev.tools", false) === true;
-        settings.set("code.enabled", v);
-      }
-      return { enabled: v === true };
-    },
-    configure: ({ enabled }) => {
-      settings.set("code.enabled", enabled === true);
-      events({ type: "code:switch", message: enabled === true ? "on" : "off" });
-      return codeSwitch.status();
-    },
-  };
-  const code = extensions ? new CodeAgent({ chatFn: loopbackChat, registry, onEvent: events }) : null;
-  if (code) code.projects = new CodeProjects(dataDir);
-  if (code) code.switch = codeSwitch;
-  // GitHub for Koinos Code (task #73): clone a repo into a project, and push
-  // work back. The token lives on this machine at 0600 and never enters a
-  // command line, a remote URL, or any response body.
-  const { GitHub } = extensions ? require("./lib/github") : {};
-  if (code) code.github = new GitHub(dataDir);
-
-  // Local speech-to-text (§7: audio never leaves the machine). Engine+model
-  // are catalog-pinned; nothing downloads until the user opts into setup.
-  const { VoiceManager } = extensions ? require("./lib/whisper") : {};
-  const voice = extensions ? new VoiceManager({
-    provisioner,
-    catalogPath: path.join(__dirname, "runtimes", "catalog.json"),
-    voiceDir: path.join(dataDir, "voice"),
-    onEvent: events,
-  }) : null;
-  const speech = extensions ? new (require("./lib/speech").SpeechManager)({ speechDir: path.join(dataDir, "voice", "kokoro") }) : null;
-  const turn = extensions ? new (require("./lib/smart-turn").SmartTurnManager)({ modelPath: smartTurnModelPath() }) : null;
   const gateway = new Gateway({
     port: port ?? Number(process.env.KAI_CORE_PORT || release.port),
     runtime,
@@ -596,29 +366,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     keys,
     onEvent: events,
     uiDir: require("fs").existsSync(uiDir) ? uiDir : null,
-    staticAssets: extensions ? liveSensesAssets() : new Map(),
-    earn,
-    network,
-    voice,
-    speech,
-    turn,
-    tools: registry,
-    memory,
-    mcp,
-    nodeRuntime,
-    email: emailSvc,
-    calendar: calendarSvc,
-    koinos: koinosSvc,
-    koinosNode: koinosNodeSvc,
-    teams,
-    account,
-    creditAccount,
-    dev,
-    bench,
-    agents,
-    code,
-    chats: new ChatStore(path.join(dataDir, "chats")),
-    docs: extensions ? new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")) : null,
+    staticAssets: new Map(),
+    earn, network, account, creditAccount,
     coreInfo: () => ({ version: VERSION, channel: release.channel, productName: release.productName, dataDir, hardware: hw }),
     // Feedback relay: one honest box in the app, straight to the project's
     // inbox. The diagnostic tail is core.log — events only, no chat
@@ -655,99 +404,13 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     },
   });
 
-  const { registerAppTools, appRequest } = extensions ? require("./lib/app-tools") : {};
-  if (extensions) registerAppTools(registry, { request: appRequest(gateway), privacyMode: () => network.status().privacyMode });
-
   return {
-    settings,
-    account,
-    creditAccount,
-    speech,
-    turn,
-    state,
-    hardware: hw,
-    keys,
-    models,
-    runtime,
-    gateway,
-    // KAI Core installs optional capabilities lazily through their reviewed
-    // first-party plugin broker. The legacy desktop still uses extensions.
-    ensureLegacyFeature(feature) {
-      if (!this._pluginLegacyServices) this._pluginLegacyServices = require("../electron/plugin-services/legacy-core-services").createLegacyCoreServices({ core: this, dataDir, provisioner, events });
-      return this._pluginLegacyServices.ensure(feature);
-    },
+    settings, account, creditAccount, state, hardware: hw, keys, models, runtime, gateway,
     async start() {
       const p = await gateway.listen();
-      mcp?.autoConnect().catch(() => {}); // only spawn tool servers after the gateway starts
       events({ type: "core:ready", message: `gateway on http://127.0.0.1:${p}` });
-      // Remote access (task #94): outbound long-poll to the relay so the
-      // local API works from anywhere with zero router setup. Off by
-      // default; resumes the user's last explicit choice, and start()
-      // itself refuses while no API key exists.
-      if (extensions) {
-        const { RemoteAccess } = require("./lib/remote-access");
-        this.remote = new RemoteAccess({
-          relayUrl: process.env.KAI_RELAY_URL || "https://koinosai.com",
-          settings,
-          keys,
-          localBase: () => `http://127.0.0.1:${p}`,
-          onEvent: events,
-        });
-        gateway.remote = this.remote;
-        if (settings.get("remote.enabled", false) === true) {
-          this.remote.start().catch((e) => events({ type: "remote:error", message: String(e.message) }));
-        }
-      }
-      // Scheduled tasks call chat through our own front door, so §7
-      // privacy routing, budgets, and the kill switch govern them exactly
-      // like a typed message.
-      if (extensions) {
-        const { TaskRunner } = require("./lib/tasks");
-        this.tasks = new TaskRunner({
-          file: path.join(dataDir, "tasks.json"),
-          chats: gateway.chats,
-          onEvent: events,
-          /*
-           * Through the SAME loopback lane teams and bench use — the control
-           * plane's /core/chat/completions, not the public /v1 API.
-           *
-           * This used to POST to /v1/chat/completions with no credentials, which
-           * worked right up until the user created an API key: from that moment
-           * `keys.required()` is true, every /v1 call needs a bearer token, and
-           * every scheduled task failed with "Missing or invalid API key" — a
-           * message about the external API, for a task the user set up in the
-           * app and never gave a key to. The control-plane lane exists precisely
-           * so that creating an external key cannot lock the app's own features
-           * out of their own engine, and it carries KAI_CORE_TOKEN for headless
-           * deployments as a bonus. A scheduled task is the app asking a
-           * question on the user's behalf, so it goes where the app goes.
-           */
-          runChat: ({ model, prompt }) =>
-            loopbackChat({ model, messages: [{ role: "user", content: prompt }] }),
-        });
-        gateway.tasks = this.tasks;
-        this.tasks.start();
-      }
-      // Warm start (fire-and-forget): if the model is already on disk, bring
-      // the whole engine ladder up now so the first message answers instantly
-      // instead of paying engine startup at send time.
-      const ready = models.aliases().filter((a) => a.status === "ready");
-      if (ready.length === 1) {
-        runtime.ensure(ready[0].alias).catch((e) => events({ type: "runtime:warmstart-failed", message: String(e.message) }));
-      }
-      // Earning resumes by itself after a restart when the machine session
-      // unlocked the wallet and the user had left earning on (§10: their
-      // last explicit choice keeps ruling; Stop or Lock clears it).
-      if (extensions && wallet.status().unlocked && settings.get("earn.autoStart", false)) {
-        earn.start().then(
-          () => events({ type: "earn:auto-resumed" }),
-          (e) => events({ type: "earn:auto-resume-failed", message: String(e.message) })
-        );
-      }
-      // The Koinos node's own report to the dashboard — independent of the
-      // Earn toggle. No-ops on a machine with no node, no wallet, or
-      // local-only privacy.
-      if (extensions) producerReporter.start();
+      const ready = models.aliases().filter(a => a.status === "ready");
+      if (ready.length === 1) runtime.ensure(ready[0].alias).catch(error => events({type:"runtime:warmstart-failed",message:error.message}));
       syncKillSwitch().catch(() => {});
       this._policyTimer = setInterval(() => syncKillSwitch().catch(() => {}), 5 * 60 * 1000);
       this._policyTimer.unref?.();
@@ -755,39 +418,12 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     },
     async stop() {
       for (const controller of shadowRequests) controller.abort();
-      await this._pluginLegacyServices?.dispose();
       wallet.disposeCreditStorage();
-      this.remote?.stop();
-      speech?.close();
-      turn?.close();
       if (this._policyTimer) clearInterval(this._policyTimer);
-      producerReporter?.stop();
-      koinosNodeSvc?.stop();
-      this.tasks?.stop();
-      mcp?.closeAll(); // stdio tool servers are child processes — never orphan them
-      await earn.stop({ userIntent: false }).catch(() => {});
+      await earn.stop({userIntent:false}).catch(() => {});
       runtime.stop();
       await gateway.close();
     },
   };
 }
-
 module.exports = { createCore, VERSION };
-
-if (require.main === module) {
-  if (require("../package.json").kaiChannel === "core") throw Error("KAI Core must be launched with npm start so Alpha, Test and Core share the same profile lock.");
-  createCore()
-    .then(async (core) => {
-      const stop = async () => {
-        await core.stop();
-        process.exit(0);
-      };
-      process.on("SIGINT", stop);
-      process.on("SIGTERM", stop);
-      await core.start();
-    })
-    .catch((e) => {
-      console.error("core failed to start:", e);
-      process.exit(1);
-    });
-}

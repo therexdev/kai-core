@@ -1,9 +1,11 @@
-# KAI Core development
+# KAI Foundation development
 
-- This is therexdev/kai-core, the plugin-based successor. Work only here; never push, promote or release changes to therexdev/kaiapp from this project.
-- `main` is the development branch. Installer publication is manual and must follow native verification. Inherited documentation describes the old app and is historical unless linked by README.md.
-- Preserve the existing `Koinos AI` Electron runtime name, userData/sessionData paths, singleton lock, core data path and model locations. Installer ID/product/updater are KAI Core only. Alpha, Test and Core must exclude one another before opening shared data.
-- Back up configuration and encrypted credentials BEFORE any runtime reads that might migrate state. Never overwrite corrupt wallet/profile data, regenerate an existing wallet, relocate models or node databases, or auto-restore chain/payment journals.
-- Core starts with legacy optional extensions disabled. Saved Brain/workflow/account/node data remains in place. Plugins receive only reviewed manifest capabilities and never wallet keys or account tokens. Private feature APIs are pinned to each official plugin ID and publisher; each can access only its own feature data. Native filesystem and process actions require explicit, bounded broker approval.
-- Keep plugin renderer sandboxing and exact sender/main-frame/entry checks. No Node-enabled third-party extensions. Deny unknown permissions. Verify package signatures on installation AND launch.
-- Run `npm test`, `npm run test:compat`, and relevant native checks. Never imply a local synthetic test proves Windows/macOS keychain migration or an installer release.
+- Work in therexdev/kai-core and its plugin repositories. Never push, promote or release changes to therexdev/kaiapp.
+- The user explicitly authorized a new architecture without legacy data or structural compatibility. Use the new `KAI Core/foundation-v1` profile. Never adopt, overwrite or remove an older profile, wallet or node database automatically.
+- Core owns generic foundation services only. A plugin owns its complete feature implementation, dependencies, assets and saved data. Do not add feature-specific factories, private first-party APIs, shared CompanionHub state or feature engines to Core.
+- Every publisher uses the same documented SDK. Native plugins have full computer/application trust; never describe them as confined by their manifest. Sandboxed UI remains isolated with exact sender/main-frame/entry checks and no Node integration.
+- Verify signatures and exact approved content on installation and launch. Unknown permissions are denied. Bundle dependencies at author build time; never run npm or postinstall on a user's machine. Reject unsupported old package formats in the fresh profile.
+- Credit journals and recovery are scoped per initiating plugin and publisher. Keep remote/rented job authority separate from local native/plugin service authority. No raw wallet keys/account tokens in normal SDK results.
+- Preserve unreadable current-profile financial or feature data; fail clearly rather than silently resetting it. Use reviewed financial operations and never fake successful transactions or provider availability.
+- Run `npm test`, `npm run test:services`, native Foundation checks and relevant plugin suites. Build uses the generated production closure. Do not imply synthetic native tests verify real devices, live accounts or live payments.
+- Development can use the isolated `foundation-v1` branch; publish preview installers only after native verification. Automatic updater feed publication remains disabled.

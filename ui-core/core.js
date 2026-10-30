@@ -303,3 +303,10 @@ window.KaiCredits.subscribe(state => {
 if (!bridge) notify("Open KAI Core desktop to use this workspace.", true); else void refresh().then(() => { if (page === "chat") showPage("chat"); });
 setInterval(() => { if (!document.hidden) { void refresh(); renderCredits(); } }, 5000);
 setInterval(() => { if (!document.hidden) void price(); }, 30000);
+
+bridge?.onPluginDownloadProgress?.(progress => {
+  if (!Number.isFinite(progress?.received)) return;
+  const received = (progress.received / 1048576).toFixed(1);
+  const total = Number.isFinite(progress.total) ? ` of ${(progress.total / 1048576).toFixed(1)} MB` : " MB";
+  notify(progress.verifying ? "Download complete. Verifying plugin…" : `Downloading plugin: ${received}${total}`);
+});

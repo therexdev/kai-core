@@ -1,6 +1,6 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
-const { createCreditState } = require("../../ui/credit-account");
+const { createCreditState } = require("../../ui-core/credit-account");
 const value = version => ({ product: "prepaid-usd-v1", owner: "fixture-account", credits: { version, unit: "USD-1e-8", available: "120", purchased: { available: "100" }, free: { state: "available", available: "20" } } });
 test("all subscribers receive the same versioned balance; older reads cannot overwrite newer state", () => {
   const store = createCreditState({ read: async () => value("1") }), a = [], b = [];
@@ -31,7 +31,7 @@ test("sign-out clears the prior balance, rejects its late response and permits a
 });
 
 test("automatic free access never presents a locked purchased balance as zero", () => {
-  const { creditPresentation } = require("../../ui/credit-account"), store = createCreditState({ read: async () => value("1") });
+  const { creditPresentation } = require("../../ui-core/credit-account"), store = createCreditState({ read: async () => value("1") });
   const guest = { ...value("1"), owner: "automatic-free-installation", accessKind: "device-free", paidAccessLocked: true };
   guest.credits.available = guest.credits.free.available; guest.credits.purchased.available = "0";
   store.accept(guest);
@@ -48,7 +48,7 @@ test("opening and retrying the account reports loading without inventing a zero 
 });
 
 test("background credit reads stay quiet while fresh but never extend the last verified balance deadline", async () => {
-  const { creditPresentation } = require("../../ui/credit-account");
+  const { creditPresentation } = require("../../ui-core/credit-account");
   let resolve;
   const store = createCreditState({ read: () => new Promise(done => { resolve = done; }), clock: () => 1000 });
   store.accept(value("1"));
@@ -64,7 +64,7 @@ test("background credit reads stay quiet while fresh but never extend the last v
 });
 
 test("credit presentation distinguishes zero, unavailable, stale and earlier KOIN accounts", async () => {
-  const { creditPresentation, credits } = require("../../ui/credit-account");
+  const { creditPresentation, credits } = require("../../ui-core/credit-account");
   const store = createCreditState({ read: async () => { throw Error("Error invoking remote method 'koin:test-payments': Error: Service not activated"); }, clock: () => 1000 });
   assert.equal(creditPresentation(store.get(), 1000).total, "…");
   await store.refresh();
