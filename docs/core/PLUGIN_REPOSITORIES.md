@@ -1,8 +1,11 @@
 # Plugin repositories
 
-The nine repositories below other than Node, Remote Access and Registry now contain
-installable v0.1.0 plugin releases requiring Core 0.2.0. Those three repositories
-remain pending. Official installs work directly from GitHub releases without the registry.
+All eleven feature repositories contain signed v0.1.0 packages. The first nine
+require Core 0.2.0; Node and Remote Access require Core 0.3.0. The registry contains
+a separately signed public catalog, developer submission instructions and release
+validation. It is consumed by Core, rather than installed as a privileged plugin.
+Any developer can publish a signed package from their own repository and submit a
+catalog entry for review; direct file/HTTPS installation also remains available.
 
 | Repository | Responsibility | Legacy starting point |
 | --- | --- | --- |
@@ -16,7 +19,7 @@ remain pending. Official installs work directly from GitHub releases without the
 | `kai-plugin-model-compare` | Side-by-side model comparison | Existing comparison UI |
 | `kai-plugin-code` | Koinos Code projects and coding tools | CodeAgent, CodeProjects and CLI; native operations need a separately reviewed execution host |
 | `kai-plugin-tools` | MCP/tool-server management and tool discovery | McpManager, NodeRuntime and tool UI; broker must own external processes |
-| `kai-plugin-koinos-node` | Node lifecycle, producer controls and node-specific wallet operations | KoinosNode and node UI |
+| `kai-plugin-koinos-node` | Reviewed node setup, lifecycle, diagnostics and saved producer configuration; no wallet operations | KoinosNode and node UI |
 | `kai-plugin-remote-access` | Opt-in authenticated access to the local API from elsewhere | RemoteAccess and its controls |
 
 Core keeps model installation/runtime routing, secure wallet and payment services,
@@ -24,7 +27,7 @@ compute-provider earning, permission enforcement, profile management and the plu
 host. Plugins never own raw wallet keys. No separate repository is needed for a
 wallet plugin, model downloader, updater or SDK at this stage.
 
-Core API 2 supplies reviewed legacy-data adapters for the nine releases. Feature
+Core API 2 supplies reviewed legacy-data adapters for the eleven releases. Feature
 renderers remain sandboxed; signed packages cannot load native source as privileged
 code. Each plugin README documents the supported subset and remaining legacy
 functionality. Continue extending the API with native tests for each new capability.

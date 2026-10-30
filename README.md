@@ -42,9 +42,14 @@ native upgrade verification are required before replacing the old app publicly.
 
 ## Install the feature plugins
 
-Core 0.2.0 includes direct install cards for nine signed first-party plugins in
-**Plugins**. Each card downloads the versioned GitHub release asset, verifies the
-pinned publisher, and asks you to review its permissions. A registry is not needed.
+Core 0.3.0 includes direct install cards for eleven signed first-party plugins in
+**Plugins**. Choose **Refresh catalog** to fetch the signed public
+[plugin registry](https://github.com/therexdev/kai-plugin-registry). Catalog installs
+verify the exact package digest, publisher, permissions and Core compatibility.
+Bundled official releases are available before the first registry refresh. After
+loading a catalog, an expired or invalid catalog must be refreshed before choosing
+a catalog release; installed plugins and direct package installation still work.
+Every installation asks you to review permissions; nothing installs automatically.
 Local-Only privacy blocks downloads; a downloaded `.kaiplugin` file can be installed
 with **Install package**. Third-party signed packages still use the public API.
 
@@ -55,8 +60,10 @@ Available repositories: [Assistant](https://github.com/therexdev/kai-plugin-assi
 [Agent Network](https://github.com/therexdev/kai-plugin-agent-network),
 [Documents](https://github.com/therexdev/kai-plugin-documents),
 [Model Compare](https://github.com/therexdev/kai-plugin-model-compare),
-[Code](https://github.com/therexdev/kai-plugin-code), and
-[Tools](https://github.com/therexdev/kai-plugin-tools).
+[Code](https://github.com/therexdev/kai-plugin-code),
+[Tools](https://github.com/therexdev/kai-plugin-tools),
+[Koinos Node](https://github.com/therexdev/kai-plugin-koinos-node), and
+[Remote Access](https://github.com/therexdev/kai-plugin-remote-access).
 
 Their renderers are independently versioned packages. Reviewed native adapters and
 the shared workflow runtime stay in Core. Each private API is bound to its matching
@@ -74,7 +81,14 @@ relay. Paid rental contracts are not deployed or enabled by these plugins. Code 
 selected project files with native approval and does not run arbitrary shell commands.
 Each repository documents its implemented operations and limits.
 
-Node, Remote Access and the public registry await their repositories. Platform signing,
+Koinos Node reuses saved node settings and paths, with reviewed Docker inspection,
+configuration and explicit start/stop controls. Opening it never resumes production,
+reward automation or wallet operations. Remote Access is opt-in, uses scoped API
+keys and only exposes installed-model listing and bounded local inference through
+the configured relay. It never forwards the private Core API. Both services stop
+when their plugin closes or Local-Only is selected.
+
+Platform signing,
 real-install upgrade checks, macOS Keychain and Linux Secret Service continuity still
 need verification before recommending replacement of the old app. Existing profile
 backup and mutual exclusion remain mandatory. No plugin auto-imports wallet funds,

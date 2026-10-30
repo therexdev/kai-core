@@ -24,8 +24,11 @@ npm run plugin:pack -- plugins/examples/local-chat /private/path/publisher.pem /
 
 Choose **Plugins → Install package** to test it. The private key is never packaged.
 Publish `.kaiplugin` files as release assets; their URL is what users install.
-V1 does not yet support a catalog manifest that points to another package URL,
-automatic dependency installation, publisher key rotation or automatic plugin updates.
+Core 0.3.0 supports the signed [public registry](https://github.com/therexdev/kai-plugin-registry).
+Its versioned entries pin exact package digests, keys, grants and minimum Core versions.
+Catalog refresh is explicit, public-HTTPS-only and blocked in Local-Only mode;
+expiration, signatures and monotonic release sequences are checked before caching.
+Dependency installation, publisher key rotation and automatic plugin updates are not supported.
 Reinstalling a newer signed package reviews its permissions again and retains one
 previous version for rollback. Removal retains private plugin data and its publisher
 binding; another key cannot claim that data by reusing the same ID.
@@ -49,8 +52,8 @@ Storage is limited to 32 keys/1 MiB per plugin. Wallet keys, arbitrary filesyste
 ## First-party feature scopes (API 2)
 
 `core/lib/plugins/contracts.json` defines exact methods and grants for the official
-Assistant, Brain, Connections, Workflows, Agent Network, Documents, Code and Tools
-plugins. Model Compare uses only public capabilities. Official IDs and their private
+Assistant, Brain, Connections, Workflows, Agent Network, Documents, Code, Tools,
+Koinos Node and Remote Access plugins. The last two require Core 0.3.0. Model Compare uses only public capabilities. Official IDs and their private
 feature methods require the publisher fingerprint pinned in `first-party.json`, both
 at installation and dispatch. A valid third-party signature cannot claim those IDs
 or private scopes. Each service is lazy and closes with its plugin.

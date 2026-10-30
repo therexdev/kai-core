@@ -10,6 +10,22 @@ every call, independently of the renderer.
 `ui-core` is the trusted first-party control surface. Plugin windows use a different
 preload, separate sessions and a capability broker; they never inherit its IPC.
 
+The public registry is a separately signed metadata release. Core pins its signing
+key, validity period and monotonic sequence, then verifies each downloaded plugin
+against the catalog's package digest, publisher, grants and minimum Core version.
+Registry entries cannot add private feature permissions to community publishers.
+Refresh is explicit. The bundled eleven official entries are used only before a
+catalog is cached; an invalid or expired cache does not resurrect withdrawn entries.
+
+Node and Remote Access remain off until a reviewed Start action. The Node adapter
+uses the existing node manager without legacy reward/signing automation, retains
+databases and keys in place, and stops containers it started when closed. The
+Remote Access adapter accepts only authenticated installed-model listing and
+bounded local text inference. It never proxies arbitrary Core gateway routes.
+Remote keys are scoped separately from gateway keys; old keys require explicit
+adoption. Native teardown is awaited during disable, update and shutdown, and
+Local-Only stops both services and pending catalog/package downloads.
+
 The legacy source is retained for extraction and compatibility tests. Optional
 speech/mail dependencies are devDependencies rather than installed
 production dependencies. The old UI is not served by the new desktop. Only the

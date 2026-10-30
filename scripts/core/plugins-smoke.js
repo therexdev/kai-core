@@ -5,7 +5,8 @@
 // KAI_PLUGIN_SOURCES can point at a directory containing kai-plugin-* repos.
 // KAI_PLUGIN_CORE_ROOT can point at a built resources/app.asar to test packaging.
 // KAI_PLUGIN_SMOKE_IDS is an optional comma-separated subset for development.
-// --download fetches the exact catalog releases into a temporary staging tree.
+// --download verifies the published signed registry and fetches its exact releases
+// into a temporary staging tree.
 // Signing, publisher pins, renderer isolation and broker routing are unchanged.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -24,11 +25,15 @@ const { ChatStore } = fromCore("core/lib/chats");
 const publishers = fromCore("core/lib/plugins/first-party.json").plugins;
 delete process.env.KAI_CORE_TOKEN; delete process.env.KAI_SESSION_SECRET;
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-plugins-smoke-profile-"));
+// Resolve platform-owned aliases such as macOS /var before the profile
+// reaches native storage guards; descendants remain subject to symlink checks.
+const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kai-plugins-smoke-profile-")));
 const profile = path.join(root, "profile"), dataDir = path.join(root, "data");
 const output = path.join(os.tmpdir(), "kai-plugins-smoke");
+const legacyNodeFile = path.join(dataDir, "koinos-node", "settings.json");
+const legacyNodeSettings = JSON.stringify({ network: "harbinger", node: { dataDir: path.join(dataDir, "preserved-node-data") }, fixture: "preserve-me" });
 for (const dir of [profile, dataDir, output]) fs.mkdirSync(dir, { recursive: true });
-app.setName("KAI Synthetic Nine Plugin Smoke");
+app.setName("KAI Synthetic Plugin Smoke");
 app.setPath("userData", profile); app.setPath("sessionData", profile);
 app.disableHardwareAcceleration();
 // Closing one plugin is part of the sequence, not the end of the fixture.
@@ -62,15 +67,15 @@ const fixtureElectron = {
   },
   shell: { openExternal: async () => { throw Error("Synthetic smoke forbids external applications"); } },
 };
-let host, features, server, finished = false, localCalls = 0, activeId = null, workflowExpression = false;
+let host, features, server, finished = false, localCalls = 0, activeId = null, workflowExpression = false, registryVerified = false;
 const errors = new Map(), reports = [];
 const downloading = process.argv.includes("--download");
-const deadline = setTimeout(() => void finish(Error("Nine-plugin smoke exceeded its deadline")), downloading ? 360000 : 120000);
+const deadline = setTimeout(() => void finish(Error("Plugin smoke exceeded its deadline")), downloading ? 360000 : 120000);
 async function finish(error) {
   if (finished) return; finished = true; clearTimeout(deadline);
-  host?.closeAll(); await features?.dispose(); ipcMain.removeHandler("kai-plugin:call");
+  await host?.closeAll(); await features?.dispose(); ipcMain.removeHandler("kai-plugin:call");
   server?.closeAllConnections(); server?.close();
-  const result = { coreRoot, workflowExpression, syntheticProfile: true, realEncryptionTested: false, captureMode: process.platform === "linux" && !process.env.DISPLAY ? "offscreen-chromium" : "desktop-chromium", localCalls, nativeActions, blockedProcesses, plugins: reports, ...(error ? { error: error.stack || String(error) } : {}) };
+  const result = { coreRoot, workflowExpression, registryVerified, syntheticProfile: true, realEncryptionTested: false, captureMode: process.platform === "linux" && !process.env.DISPLAY ? "offscreen-chromium" : "desktop-chromium", localCalls, nativeActions, blockedProcesses, plugins: reports, ...(error ? { error: error.stack || String(error) } : {}) };
   fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(result, null, 2));
   if (error) console.error(error.stack || error);
   else console.log(`PASS: ${reports.length} signed plugins rendered and exercised; ${localCalls} loopback inference calls; screenshots/report in ${output}`);
@@ -193,6 +198,32 @@ async function exercise(win, id) {
       assert.equal((await call(win, "code.choose")).cancelled, true);
       return "Loaded project workspace; native project picker canceled";
     }
+    case "kai.koinos-node": {
+      await until(win, "document.getElementById('network')?.options.length > 0", "Node initialization");
+      const before = await call(win, "node.status");
+      assert.equal(before.inspectionAllowed, false); assert.equal(before.checkedAt, null); assert.equal(before.docker, null);
+      assert.equal(before.owned, false); assert.equal(before.privacyMode, "local-only");
+      assert.equal(before.network, "harbinger"); assert.equal(before.dataDir, path.join(dataDir, "preserved-node-data", "harbinger"));
+      assert.equal((await call(win, "node.inspect")).cancelled, true);
+      const after = await call(win, "node.status");
+      assert.equal(after.inspectionAllowed, false); assert.equal(after.checkedAt, null); assert.equal(after.docker, null);
+      assert.equal(fs.readFileSync(legacyNodeFile, "utf8"), legacyNodeSettings);
+      return "Reused saved network and data folder; inspection approval canceled; no Docker process launched";
+    }
+    case "kai.remote-access": {
+      await until(win, "document.getElementById('state')?.innerText.toLowerCase().includes('off')", "Remote Access initialization");
+      const before = await call(win, "remote.status");
+      assert.equal(before.enabled, false); assert.equal(before.state, "off"); assert.equal(before.privacyMode, "local-only");
+      assert.deepEqual(before.keys, []); assert.equal(before.legacyEnabled, true);
+      assert.deepEqual(before.legacyKeys.map(({ id, enabled }) => ({ id, enabled })), [{ id: "key_aabbccddeeff", enabled: false }]);
+      const rejected = await js(win, "window.kai.call('remote.start',{}).then(()=>false,e=>/Local-Only/i.test(e.message))");
+      assert.equal(rejected, true, "Local-Only must prevent remote activation");
+      assert.equal((await call(win, "remote.keyCreate", { name: "Synthetic canceled key" })).cancelled, true);
+      const after = await call(win, "remote.status");
+      assert.equal(after.enabled, false); assert.deepEqual(after.keys, []);
+      assert.equal(after.legacyEnabled, true); assert.equal(after.legacyKeys[0].enabled, false);
+      return "Preserved legacy key metadata without auto-start; Local-Only blocked activation; key creation approval canceled";
+    }
     default: throw Error("Missing smoke scenario for " + id);
   }
 }
@@ -215,7 +246,12 @@ app.whenReady().then(async () => {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const realFetch = global.fetch, inferenceURL = `http://127.0.0.1:${server.address().port}/core/chat/completions`;
   global.fetch = (url, options) => { assert.equal(String(url), inferenceURL, "Smoke attempted non-fixture network"); return realFetch(url, options); };
-  const settings = new Map();
+  const settings = new Map([
+    ["remote", { enabled: true, token: "b".repeat(64) }],
+    ["apiKeys", { key_aabbccddeeff: { name: "Earlier synthetic gateway key", digest: "a".repeat(64) } }],
+  ]);
+  fs.mkdirSync(path.dirname(legacyNodeFile), { recursive: true });
+  fs.writeFileSync(legacyNodeFile, legacyNodeSettings);
   const chats = new ChatStore(path.join(dataDir, "chats"));
   chats.save({ id: "synthetic-legacy-chat", title: "Earlier synthetic chat", messages: [{ role: "user", content: "A preserved synthetic conversation." }] });
   fs.mkdirSync(path.join(dataDir, "docs"));
@@ -236,7 +272,24 @@ app.whenReady().then(async () => {
   host = new PluginHost({ electron: fixtureElectron, manager, core, features });
   const sourceRoot = downloading ? path.join(root, "downloaded") : path.resolve(process.env.KAI_PLUGIN_SOURCES || path.join(__dirname, "../../.."));
   const subset = process.env.KAI_PLUGIN_SMOKE_IDS?.split(",");
-  const selected = publishers.filter(p => !subset || subset.includes(p.id)); assert.ok(selected.length);
+  let selected = publishers.filter(p => !subset || subset.includes(p.id)); assert.ok(selected.length);
+  let registryEntries, verifyRegistryPackage;
+  if (downloading) {
+    const registry = fromCore("core/lib/plugins/registry");
+    console.log("Downloading signed plugin registry");
+    const envelope = await registry.downloadRegistry();
+    registryEntries = envelope.catalog.plugins;
+    verifyRegistryPackage = registry.verifyRegistryPackage;
+    selected = selected.map(publisher => {
+      const entry = registryEntries.find(row => row.id === publisher.id);
+      assert.ok(entry, "Official plugin missing from signed registry: " + publisher.id);
+      assert.equal(entry.fingerprint, publisher.fingerprint);
+      assert.equal(entry.publicKey, publisher.publicKey);
+      assert.ok(registry.compareVersions(fromCore("package.json").version, entry.minCoreVersion) >= 0, "Published registry plugin requires a newer Core: " + publisher.id);
+      return entry;
+    });
+    registryVerified = true;
+  }
   for (const publisher of selected) {
     const repo = publisher.repository.split("/").pop(), file = path.join(sourceRoot, repo, "dist", `${repo}-${publisher.version}.kaiplugin`);
     if (downloading) {
@@ -244,6 +297,7 @@ app.whenReady().then(async () => {
       const verified = await downloadPackage(publisher.url);
       assert.equal(verified.manifest.id, publisher.id); assert.equal(verified.manifest.version, publisher.version);
       assert.equal(verified.fingerprint, publisher.fingerprint);
+      verifyRegistryPackage(registryEntries.find(entry => entry.id === publisher.id), verified);
       fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(verified.package));
     }
     assert.ok(fs.existsSync(file), `Missing signed package: ${file}`);
@@ -263,7 +317,7 @@ app.whenReady().then(async () => {
     assert.equal(page.nodeAbsent, true); assert.ok(page.headings.length, "No visible headings: " + id);
     assert.deepEqual(rendererErrors, [], "Renderer errors: " + id);
     if (failure) throw failure;
-    console.log(`PASS ${id}: ${transitions}`); host.close(id); activeId = null;
+    console.log(`PASS ${id}: ${transitions}`); await host.close(id); activeId = null;
     await features.close(id);
   }
   assert.deepEqual(blockedProcesses, [], "A plugin attempted to launch a process");

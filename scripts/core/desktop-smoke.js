@@ -81,6 +81,15 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
       assert.equal(await page.locator(`[data-panel="${tab}"]`).isVisible(), true, `${tab} did not open`);
       assert.equal(await page.locator("[data-panel]:visible").count(), 1, "multiple workspace panels visible");
     }
+    await page.locator('[data-page="plugins"]').click();
+    const catalog = (await page.evaluate(() => window.kaiCore.call("status"))).catalog;
+    assert.equal(catalog.length, 11, "all eleven official plugins must be available offline");
+    assert.ok(catalog.some(plugin => plugin.id === "kai.koinos-node" && plugin.name === "Koinos Node"));
+    assert.ok(catalog.some(plugin => plugin.id === "kai.remote-access" && plugin.name === "Remote Access"));
+    assert.equal(await page.locator("#plugin-catalog article").count(), 11);
+    const refreshBlocked = await page.evaluate(() => window.kaiCore.call("plugins.registry.refresh").then(() => false, error => /Local-Only/i.test(error.message)));
+    assert.equal(refreshBlocked, true, "Local-Only must prevent online registry refresh");
+    assert.equal((await page.evaluate(() => window.kaiCore.call("status"))).catalog.length, 11, "blocked refresh must preserve offline catalog");
     await page.locator('[data-page="models"]').click();
     assert.ok(await page.locator("#models article").count() > 0, "model catalog was not rendered");
     await page.locator('[data-page="wallet"]').click();
@@ -105,7 +114,7 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
     assert.equal(fs.readFileSync(path.join(dataDir, "companion-hub.json"), "utf8"), '{"synthetic":"preserved-workflows-and-brain"}');
     assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, "settings.json"), "utf8")).fixture, "preserve-me");
     assert.ok(fs.existsSync(path.join(status.profile.backup, "manifest.json")), "configuration backup was not created");
-    console.log(`PASS: real Core desktop starts on a synthetic existing profile; all six sections work; wallet unlock/lock preserves its address; model and feature files remain unchanged; ${process.env.KAI_SMOKE_SYNTHETIC_LOCK === "1" ? "synthetic fixture lock (native locking not exercised); " : ""}no renderer errors or external fetches. Screenshot: ${screenshot}`);
+    console.log(`PASS: real Core desktop starts on a synthetic existing profile; all six sections and eleven-plugin catalog work; Local-Only registry refresh is blocked; wallet unlock/lock preserves its address; model and feature files remain unchanged; ${process.env.KAI_SMOKE_SYNTHETIC_LOCK === "1" ? "synthetic fixture lock (native locking not exercised); " : ""}no renderer errors or external fetches. Screenshot: ${screenshot}`);
   } catch (error) {
     if (output) console.error(output);
     throw error;

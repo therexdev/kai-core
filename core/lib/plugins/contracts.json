@@ -123,5 +123,31 @@
       "code.stage": "code.write",
       "code.apply": "code.write"
     }
+  },
+  "kai.koinos-node": {
+    "module": "koinos-node.js",
+    "permissions": {
+      "node.status": "koinos-node.read",
+      "node.inspect": "koinos-node.manage",
+      "node.logs": "koinos-node.read",
+      "node.configure": "koinos-node.manage",
+      "node.start": "koinos-node.manage",
+      "node.stop": "koinos-node.manage",
+      "node.setup": "koinos-node.manage"
+    }
+  },
+  "kai.remote-access": {
+    "module": "remote-access.js",
+    "permissions": {
+      "remote.status": "remote-access.read",
+      "remote.keys": "remote-access.read",
+      "remote.copyEndpoint": "remote-access.read",
+      "remote.start": "remote-access.control",
+      "remote.stop": "remote-access.control",
+      "remote.rotate": "remote-access.control",
+      "remote.keyCreate": "remote-access.keys",
+      "remote.keyRevoke": "remote-access.keys",
+      "remote.keyAdopt": "remote-access.keys"
+    }
   }
 }

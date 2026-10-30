@@ -32,9 +32,23 @@ async function refresh() {
     text("download", s.download ? `Downloading · ${Math.round(s.download.pct || 0)}%` : s.runtime.activeAlias ? `Loaded: ${s.runtime.activeAlias}` : "");
     html("models", s.models.map(m => `<article><div class="row"><h2>${esc(m.label || m.alias)}</h2><span class="pill">${esc(m.status)}</span></div><p>${esc(m.alias)}</p><button data-model="${esc(m.alias)}">${m.status === "ready" ? "Load model" : "Download & load"}</button></article>`).join(""));
     html("plugins", s.plugins.length ? s.plugins.map(p => `<article><div class="row"><h2>${esc(p.name)}</h2><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span></div><p>Version ${esc(p.version)}</p><p class="muted">${esc(p.permissions.join(" · ") || "No capabilities requested")}</p><div class="actions">${p.enabled ? `<button data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></article>`).join("") : "<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a signed package to add your first capability.</p></article>");
-    if ($("plugin-catalog")) html("plugin-catalog", (s.catalog || []).map(p => `<article><h2>${esc(p.name)}</h2><p>Version ${esc(p.version)} · verified KAI publisher</p><button data-install-plugin="${esc(p.id)}" ${s.plugins.some(x => x.id === p.id && x.version === p.version) ? "disabled" : ""}>${s.plugins.some(x => x.id === p.id && x.version === p.version) ? "Installed" : "Install"}</button></article>`).join(""));
+    renderCatalog();
   } catch (e) { notify(e.message, true); } finally { refreshing = false; }
 }
+function renderCatalog() {
+  if (!snapshot || !$("plugin-catalog")) return;
+  const s = snapshot, query = ($("plugin-search")?.value || "").trim().toLowerCase();
+  const rows = (s.catalog || []).filter(p => `${p.name} ${p.description || ""} ${p.id}`.toLowerCase().includes(query));
+  html("plugin-catalog", rows.length ? rows.map(p => {
+    const installed = s.plugins.some(x => x.id === p.id && x.version === p.version), blocked = p.compatible === false;
+    const older = s.plugins.some(x => x.id === p.id);
+    return `<article><div class="row"><h2>${esc(p.name)}</h2><span class="pill">${p.official ? "KAI" : "Community"}</span></div><p>${esc(p.description || p.repository || "")}</p><p class="muted">Version ${esc(p.version)}${p.minCoreVersion ? ` · Core ${esc(p.minCoreVersion)}+` : ""}</p>${blocked ? `<p>${esc(p.compatibilityReason || "Update Core to use this plugin.")}</p>` : ""}<button data-install-plugin="${esc(p.id)}" ${installed || blocked ? "disabled" : ""}>${installed ? "Installed" : blocked ? "Requires newer Core" : older ? "Review update" : "Install"}</button></article>`;
+  }).join("") : "<p>No plugins match your search.</p>");
+  const r = s.registry;
+  text("registry-status", r?.available && !r.expired ? `Signed catalog ${r.version} · ${r.count} plugins. Refresh to check for new releases.` : r?.present ? `Catalog unavailable: ${r.error || "Refresh the catalog to continue."} You can still open installed plugins or install a signed package directly.` : r?.error ? `Catalog refresh failed: ${r.error}. Showing bundled KAI releases.` : "Showing bundled KAI releases. Refresh to load the signed public catalog.");
+}
+if ($("plugin-search")) $("plugin-search").oninput = renderCatalog;
+if ($("refresh-registry")) $("refresh-registry").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("plugins.registry.refresh"); notify(`Catalog ${r.version} verified · ${r.count} plugins available.`); });
 $("models").onclick = e => { const b = e.target.closest("[data-model]"); if (b) void action(b, () => api("/core/models/ensure", { alias: b.dataset.model })); };
 $("plugins").onclick = e => { const b = e.target.closest("[data-plugin]"); if (!b) return; void action(b, () => bridge.call(b.dataset.operation === "open" ? "plugins.open" : "plugins.change", { id: b.dataset.plugin, action: b.dataset.operation })); };
 if ($("plugin-catalog")) $("plugin-catalog").onclick = e => { const b = e.target.closest("[data-install-plugin]"); if (b) void action(b, () => bridge.call("plugins.install", { id: b.dataset.installPlugin })); };

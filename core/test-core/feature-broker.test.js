@@ -22,3 +22,33 @@ test("shared encrypted companion writes cannot silently overwrite external chang
   assert.throws(()=>store.note({title:'After',text:'Do not overwrite'}),/changed outside/);
   assert.throws(()=>broker.getCompanionStore(),/changed outside/);assert.equal(fs.readFileSync(file,'utf8'),'external-change');
 });
+test("closing a feature waits for native teardown before a replacement can start", async () => {
+  let release, disposed = false;
+  const broker = new FeatureServices({}, { publishers: [{ id: "kai.fixture", fingerprint: "trusted" }], definitions: { "kai.fixture": {
+    permissions: { "fixture.status": "fixture.read" }, factory: { create: () => ({ call: () => true,
+      dispose: async () => { await new Promise(resolve => { release = resolve; }); disposed = true; } }) }
+  } } });
+  const record = { manifest: { id: "kai.fixture", permissions: ["fixture.read"] }, fingerprint: "trusted", controller: new AbortController() };
+  await broker.call(record, "fixture.status");
+  const closing = broker.close("kai.fixture");
+  assert.equal(broker.close("kai.fixture"), closing);
+  await assert.rejects(broker.call(record, "fixture.status"), /closing/);
+  assert.equal(disposed, false); release(); await closing; assert.equal(disposed, true);
+  assert.equal(broker.closeTasks.size, 0); await broker.dispose();
+});
+test("privacy changes await every active native service even when one fails", async () => {
+  const broker = new FeatureServices({}); const modes = [];
+  broker.services.set("first", { privacyChanged: mode => { modes.push(mode); throw Error("stop failed"); } });
+  broker.services.set("second", { privacyChanged: async mode => { await Promise.resolve(); modes.push(mode); } });
+  await assert.rejects(broker.privacyChanged("local-only"), /stop failed/);
+  assert.deepEqual(modes, ["local-only", "local-only"]);
+  await broker.dispose();
+});
+test("native cleanup failure is reported once before shutdown completes", async () => {
+  let reports = 0, release;
+  const broker = new FeatureServices({ onDisposeError: async id => { assert.equal(id, "kai.fixture"); reports++; await new Promise(resolve => { release = resolve; }); } });
+  broker.services.set("kai.fixture", { dispose: () => { throw Error("Native service still running"); } });
+  const closing = broker.close("kai.fixture"); assert.equal(broker.close("kai.fixture"), closing);
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(reports, 1); assert.equal(broker.closing.has("kai.fixture"), true);
+  release(); await assert.rejects(closing, /still running/); await broker.dispose(); assert.equal(reports, 1);
+});

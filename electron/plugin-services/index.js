@@ -8,7 +8,7 @@ const firstParty = require("../../core/lib/plugins/first-party.json").plugins;
 class FeatureServices {
   constructor(ctx, { definitions = contracts, publishers = firstParty } = {}) {
     this.ctx = ctx; this.definitions = definitions; this.publishers = publishers;
-    this.services = new Map(); this.lifetimes = new Map(); this.pending = new Set(); this.closing = new Set(); this.stopped = false; this.store = null;
+    this.services = new Map(); this.lifetimes = new Map(); this.pending = new Set(); this.closing = new Set(); this.closeTasks = new Map(); this.stopped = false; this.store = null;
   }
   permission(method) {
     for (const spec of Object.values(this.definitions)) if (Object.hasOwn(spec.permissions, method)) return spec.permissions[method];
@@ -66,11 +66,18 @@ class FeatureServices {
     try { const result = await task; active(); return result; } finally { this.pending.delete(task); }
   }
   close(id) {
-    const service = this.services.get(id); if (!service) return Promise.resolve();
+    const service = this.services.get(id); if (!service) return this.closeTasks.get(id) || Promise.resolve();
     this.lifetimes.get(id)?.abort(); this.lifetimes.delete(id);
     this.services.delete(id); this.closing.add(id);
-    const task = Promise.resolve().then(() => service.dispose?.()).finally(() => { this.pending.delete(task); this.closing.delete(id); });
-    this.pending.add(task); return task;
+    const task = Promise.resolve().then(() => service.dispose?.()).catch(async error => {
+      await this.ctx.onDisposeError?.(id, error); throw error;
+    }).finally(() => { this.pending.delete(task); this.closing.delete(id); this.closeTasks.delete(id); });
+    this.closeTasks.set(id, task); this.pending.add(task); return task;
+  }
+  async privacyChanged(mode) {
+    const results = await Promise.allSettled([...this.services.values()].map(service => Promise.resolve().then(() => service.privacyChanged?.(mode))));
+    const failed = results.find(result => result.status === "rejected");
+    if (failed) throw failed.reason;
   }
   async dispose() {
     this.stopped = true;

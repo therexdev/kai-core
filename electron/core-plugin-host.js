@@ -8,6 +8,7 @@ class PluginHost {
     electron.ipcMain.handle("kai-plugin:call", (event, method, input) => this.call(event, method, input));
   }
   async open(id) {
+    await this.features?.closeTasks?.get(id);
     const existing = this.windows.get(id); if (existing) { existing.window.show(); existing.window.focus(); return; }
     if (this.windows.size >= 8) throw Error("Close a plugin window before opening another (limit: 8)");
     const { manifest, package: pkg, fingerprint } = this.manager.load(id);
@@ -38,8 +39,8 @@ class PluginHost {
     window.once("closed", () => { record.controller.abort(); this.windows.delete(id); void this.features?.close(id).catch(error => console.warn("[plugin]", error.message)); session.protocol.unhandle("kai-plugin"); void session.clearStorageData().catch(() => {}); });
     try { await window.loadURL(entry); window.show(); } catch (error) { window.destroy(); throw error; }
   }
-  close(id) { this.windows.get(id)?.window.destroy(); }
-  closeAll() { for (const id of this.windows.keys()) this.close(id); }
+  close(id) { this.windows.get(id)?.window.destroy(); return this.features?.close(id) || Promise.resolve(); }
+  closeAll() { return Promise.allSettled([...this.windows.keys()].map(id => this.close(id))); }
   async call(event, method, input) {
     const record = [...this.windows.values()].find(r => r.window.webContents === event.sender);
     if (!record || event.senderFrame !== event.sender.mainFrame || event.senderFrame.url !== record.entry) throw Error("Plugin caller denied");

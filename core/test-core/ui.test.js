@@ -88,3 +88,12 @@ test("plugin labels are escaped rather than interpreted as HTML", async () => {
   const f = fixture({ state: { plugins: [{ id: "example.safe", name: '<img src=x onerror="attack()">', enabled: true, version: "1.0.0", permissions: [] }] } });
   await flush(); assert.match(f.$("plugins").innerHTML, /&lt;img/); assert.doesNotMatch(f.$("plugins").innerHTML, /<img/);
 });
+test("catalog displays community compatibility and escapes developer metadata without auto-refresh", async () => {
+  const f = fixture({ state: { catalog: [{ id: "community.demo", name: "Community demo", description: '<img src=x onerror="attack()">', version: "1.0.0", compatible: false, compatibilityReason: "Requires KAI Core 0.4.0", minCoreVersion: "0.4.0", official: false }], registry: { available: true, version: "0.1.0", count: 1 } } });
+  await flush(); const markup = f.$("plugin-catalog").innerHTML;
+  assert.match(markup, /Community/); assert.match(markup, /&lt;img/); assert.doesNotMatch(markup, /<img/);
+  assert.match(markup, /disabled>Requires newer Core/); assert.match(f.$("registry-status").textContent, /Signed catalog/);
+  assert.ok(f.calls.every(call => call.method === "status"));
+  f.$("plugin-search").value = "not present"; f.$("plugin-search").oninput();
+  assert.match(f.$("plugin-catalog").innerHTML, /No plugins match/);
+});
