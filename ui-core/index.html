@@ -31,13 +31,13 @@
   </aside>
   <main id="main">
     <header class="workspace-header"><h1 id="workspace-title">Chat with KAI</h1><span class="workspace-badge">CORE</span></header>
-    <div id="notice" role="status" hidden></div>
+    <div id="notice" class="dismissible-notice" hidden><p id="notice-message" role="status" aria-atomic="true"></p><button id="notice-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div>
     <div class="workspace-content">
       <section data-panel="chat" class="chat-page" aria-label="Chat with KAI"><div id="chat-content"></div></section>
       <section data-panel="models" class="page" hidden>
         <div class="page-head"><div><h1>Your model library</h1><p>Choose the models you want to use on this computer.</p></div><button id="import-model">Import GGUF</button></div>
         <div class="actions model-progress"><span id="download" role="status"></span><button id="cancel-download">Cancel download</button></div>
-        <p id="model-message" role="status"></p><div id="models" class="cards"></div>
+        <div id="model-notice" class="dismissible-notice inline-notice" hidden><p id="model-message" role="status" aria-atomic="true"></p><button id="model-message-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div><div id="models" class="cards"></div>
       </section>
       <section data-panel="plugins" class="page" hidden>
         <div class="page-head"><div><h1>Plugins</h1><p>Add the capabilities you want in your workspace.</p></div></div>
@@ -70,7 +70,7 @@
       </section>
       <section data-panel="buy-credits" class="page" hidden>
         <div class="page-head"><div><h1>Buy credits</h1><p>Add credits to use models on the Koinos network.</p></div><button data-go="credits">Your Credits</button></div>
-        <article class="purchase-card"><h2>Choose an amount</h2><form id="buy-credits"><label for="usd">Purchase amount (USD)</label><div class="amount-input"><span>$</span><input id="usd" type="number" min="0.01" step="0.01" value="1" required></div><p id="price">Your KOIN payment will be shown before approval.</p><button class="primary">Buy credits</button></form><p id="purchase-state" role="status"></p><div class="purchase-help"><button id="connect-wallet" class="text-button">Connect wallet</button><button id="purchase-retry" class="text-button">Recover pending purchase</button></div></article>
+        <article class="purchase-card"><h2>Choose an amount</h2><form id="buy-credits"><label for="usd">Purchase amount (USD)</label><div class="amount-input"><span>$</span><input id="usd" type="number" min="0.01" step="0.01" value="1" required></div><p id="price">Your KOIN payment will be shown before approval.</p><button class="primary">Buy credits</button></form><div id="purchase-notice" class="dismissible-notice inline-notice" hidden><p id="purchase-state" role="status" aria-atomic="true"></p><button id="purchase-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div><div class="purchase-help"><button id="connect-wallet" class="text-button">Connect wallet</button><button id="purchase-retry" class="text-button">Recover pending purchase</button></div></article>
       </section>
       <section data-panel="earning" class="page" hidden><div id="earning-content"></div></section>
       <section data-panel="network" class="page" hidden><div id="network-content"></div></section>
@@ -78,10 +78,10 @@
         <div class="page-head"><div><h1>Settings</h1><p>Make this workspace your own.</p></div></div>
         <article><h2>AI privacy</h2><label for="privacy">Where AI can run</label><select id="privacy"><option value="local-only">Local only</option><option value="local-first">Local first</option><option value="network">Network</option></select><p class="muted">Choose Local only to keep chat on this computer. Choose an online mode to use network models and credits.</p></article>
         <article><h2>Closing the window</h2><p id="closing-window-detail">Checking system tray availability…</p></article>
-        <article><h2>Application updates</h2><p>Keep KAI Core up to date.</p><button id="check-updates">Check for updates</button><p id="update-state" role="status"></p></article>
+        <article><h2>Application updates</h2><p>Keep KAI Core up to date.</p><button id="check-updates">Check for updates</button><div id="update-notice" class="dismissible-notice inline-notice" hidden><p id="update-state" role="status" aria-atomic="true"></p><button id="update-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div></article>
       </section>
     </div>
   </main>
-  <script src="credit-account.js"></script><script src="presentation.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="core.js"></script>
+  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="core.js"></script>
 </body>
 </html>

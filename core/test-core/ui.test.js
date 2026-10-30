@@ -24,6 +24,7 @@ function fixture({ state = {}, credit, call } = {}) {
     document: { hidden: false, activeElement: null, getElementById(id) { assert.ok(elements.has(id), `Missing element ${id}`); return elements.get(id); }, querySelectorAll() { return []; }, addEventListener(event, fn) { docEvents.set(event, fn); } },
     async fetch(url, options) { calls.push({ kind: "fetch", url, options }); return { ok: true, async json() { return { ok: true }; } }; },
   });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../ui-core/notices.js"), "utf8"), context, { filename: "notices.js" });
   vm.runInContext(presentation(), context, { filename: "presentation.js" });
   vm.runInContext(source, context, { filename: "core.js" });
   const submit = id => { const button = element("submit"); elements.get(id).onsubmit({ preventDefault() {}, submitter: button }); return flush(); };
@@ -75,6 +76,14 @@ test("model import and asynchronous load errors appear in the model view", async
   assert.equal(f.$("model-message").textContent, "Unsupported GGUF header");
   f.snapshot.ensure = { state: "error", alias: "model", error: "Insufficient memory" }; await f.context.refresh();
   assert.equal(f.$("model-message").textContent, "Insufficient memory");
+  f.$("model-message-close").onclick(); await f.context.refresh();
+  assert.equal(f.$("model-notice").hidden, true);
+  const retry = { dataset: { model: "model" } };
+  f.$("models").onclick({ target: { closest() { return retry; } } }); await flush();
+  assert.equal(f.$("model-notice").hidden, false, "a fast failed explicit retry must show its error again");
+  f.snapshot.importing = { pct: 10 }; await f.context.refresh();
+  assert.match(f.$("model-message").textContent, /Importing model/);
+  assert.equal(f.$("model-message-close").hidden, true, "active progress is separate from settled errors");
 });
 
 test("plugin labels are escaped rather than interpreted as HTML", async () => {
@@ -153,4 +162,42 @@ test("failed update checks leave a retryable explanation", async () => {
   await flush(); await f.$("check-updates").onclick({ currentTarget: f.$("check-updates") });
   assert.match(f.$("update-state").textContent, /could not finish/);
   assert.equal(f.$("check-updates").disabled, false);
+});
+
+test("wallet warnings can be dismissed, retried, and cleared by a successful unlock", async () => {
+  let fail = true;
+  const f = fixture({ call: async method => { if (method === "wallet.unlock" && fail) throw Error("Incorrect password for synthetic wallet"); } });
+  await flush(); await f.submit("unlock-wallet");
+  assert.match(f.$("notice-message").textContent, /Incorrect password/);
+  const beforeDismiss = f.calls.length;
+  f.$("notice-close").onclick(); assert.equal(f.$("notice").hidden, true);
+  assert.equal(f.calls.length, beforeDismiss, "dismissal must not call wallet or payment APIs");
+  await f.context.refresh(); assert.equal(f.$("notice").hidden, true);
+  await f.submit("unlock-wallet"); assert.equal(f.$("notice").hidden, false);
+  fail = false; await f.submit("unlock-wallet");
+  assert.equal(f.$("notice").hidden, true); assert.equal(f.$("notice-message").textContent, "");
+});
+
+test("background refresh does not resurrect a dismissed failure, but a new failure does", async () => {
+  const f = fixture(); await flush();
+  const original = f.context.window.kaiCore.call;
+  f.context.window.kaiCore.call = async () => { throw Error("Temporarily unavailable"); };
+  await f.context.refresh(); f.$("notice-close").onclick();
+  await f.context.refresh(); assert.equal(f.$("notice").hidden, true);
+  f.context.window.kaiCore.call = original; await f.context.refresh();
+  f.context.window.kaiCore.call = async () => { throw Error("Temporarily unavailable"); };
+  await f.context.refresh(); assert.equal(f.$("notice").hidden, false);
+});
+
+test("settled action messages dismiss without resubmitting and return on explicit retry", async () => {
+  const f = fixture({ credit: async () => ({ state: "cancelled" }), call: async () => ({ message: "No update available" }) });
+  await flush(); await f.submit("buy-credits");
+  const beforeDismiss = f.calls.length;
+  f.$("purchase-close").onclick(); assert.equal(f.$("purchase-notice").hidden, true);
+  assert.equal(f.calls.length, beforeDismiss);
+  await f.submit("buy-credits"); assert.equal(f.$("purchase-notice").hidden, false);
+  await f.$("check-updates").onclick({ currentTarget: f.$("check-updates") });
+  f.$("update-close").onclick(); assert.equal(f.$("update-notice").hidden, true);
+  await f.$("check-updates").onclick({ currentTarget: f.$("check-updates") });
+  assert.equal(f.$("update-notice").hidden, false);
 });

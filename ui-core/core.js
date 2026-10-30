@@ -3,9 +3,20 @@ const $ = id => document.getElementById(id), bridge = window.kaiCore;
 let snapshot, page = "chat", refreshing = false, priceGeneration = 0, creditState, knownPrivacy, purchaseInfoKey, purchaseInfoGeneration = 0, cancelledPurchases = new Set();
 const pageTitles = { chat: "Chat", models: "Models", plugins: "Plugins", wallet: "Wallet", credits: "Credits and Usage", "buy-credits": "Buy credits", earning: "Earn KOIN", network: "Network", settings: "Settings" };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const text = (id, value) => { if ($(id).textContent !== String(value ?? "")) $(id).textContent = value ?? ""; };
-function notify(message, error = false) { $("notice").textContent = String(message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""); $("notice").hidden = false; $("notice").classList.toggle("error", error); }
-async function action(button, fn) { if (button) button.disabled = true; try { return await fn(); } catch (e) { notify(e.message, true); } finally { if (button) button.disabled = false; await refresh(); } }
+const makeNotice = (container, message, close, focusTarget) => window.KaiCoreNotice.create({ container: $(container), message: $(message), close: $(close), focusTarget });
+const globalNotice = makeNotice("notice", "notice-message", "notice-close", () => page === "wallet" ? $("password") : document.querySelector('[data-page][aria-current="page"]'));
+const notices = {
+  "model-message": makeNotice("model-notice", "model-message", "model-message-close", () => $("import-model")),
+  "purchase-state": makeNotice("purchase-notice", "purchase-state", "purchase-close", () => $("usd")),
+  "update-state": makeNotice("update-notice", "update-state", "update-close", () => $("check-updates")),
+};
+let noticeSource = "action";
+const text = (id, value) => { if (notices[id]) notices[id].show(value); else if ($(id).textContent !== String(value ?? "")) $(id).textContent = value ?? ""; };
+function notify(message, error = false, { background = false } = {}) {
+  noticeSource = background ? "refresh" : "action";
+  globalNotice.show(String(message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""), { error, force: !background });
+}
+async function action(button, fn) { globalNotice.clear(); if (button) button.disabled = true; try { return await fn(); } catch (e) { notify(e.message, true); } finally { if (button) button.disabled = false; await refresh(); } }
 async function api(route, body) { const r = await fetch(route, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const j = await r.json(); if (!r.ok) throw Error(j.error?.message || j.error || "Request failed"); return j; }
 function hideBackup() { text("wallet-backup", ""); $("wallet-backup").hidden = true; $("hide-backup").hidden = true; }
 window.addEventListener("blur", hideBackup);
@@ -47,9 +58,12 @@ async function refresh() {
     text("wallet-address", address || "No wallet created"); text("wallet-detail", s.wallet.unlocked ? "Wallet unlocked. Plugins never receive its private key." : "Unlock to authorize wallet actions.");
     $("create-wallet").hidden = s.wallet.exists; $("restore-wallet").hidden = s.wallet.exists; $("unlock-button").hidden = !s.wallet.exists || s.wallet.unlocked; $("lock-wallet").hidden = !s.wallet.unlocked;
     if (document.activeElement !== $("privacy")) $("privacy").value = s.network.privacyMode;
-    text("model-message", s.ensure?.state === "error" ? s.ensure.error || "The model could not be loaded. Try another model or retry."
-      : s.importError || (s.importing ? `Importing model · ${Math.round(s.importing.pct || 0)}%`
-      : s.ensure?.state === "working" ? `Preparing ${s.ensure.alias}…` : ""));
+    const modelBusy = !!s.importing || s.ensure?.state === "working";
+    const modelError = !modelBusy && (s.ensure?.state === "error" || !!s.importError);
+    notices["model-message"].show(s.importing ? `Importing model · ${Math.round(s.importing.pct || 0)}%`
+      : s.ensure?.state === "working" ? `Preparing ${s.ensure.alias}…`
+      : s.ensure?.state === "error" ? s.ensure.error || "The model could not be loaded. Try another model or retry."
+      : s.importError || "", { error: modelError, dismissible: !modelBusy });
     text("download", s.download ? `Downloading · ${Math.round(s.download.pct || 0)}%` : s.runtime.activeAlias ? `Loaded: ${s.runtime.activeAlias}` : "");
     html("models", s.models.map(m => `<article><div class="row"><h2>${esc(m.label || m.alias)}</h2><span class="pill">${esc(m.status)}</span></div><p>${esc(m.alias)}</p><button data-model="${esc(m.alias)}">${m.status === "ready" ? "Load model" : "Download & load"}</button></article>`).join(""));
     html("plugins", s.plugins.length ? s.plugins.map(p => {
@@ -58,7 +72,8 @@ async function refresh() {
     }).join("") : "<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a plugin below to add the tools you need.</p></article>");
     window.KaiCoreChat?.update(s);
     renderCatalog();
-  } catch (e) { notify(e.message, true); } finally { refreshing = false; }
+    if (noticeSource === "refresh") globalNotice.clear();
+  } catch (e) { notify(e.message, true, { background: true }); } finally { refreshing = false; }
 }
 function renderCatalog() {
   if (!snapshot || !$("plugin-catalog")) return;
@@ -75,7 +90,7 @@ function renderCatalog() {
 }
 if ($("plugin-search")) $("plugin-search").oninput = renderCatalog;
 if ($("refresh-registry")) $("refresh-registry").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("plugins.registry.refresh"); notify(`Catalog ${r.version} verified · ${r.count} plugins available.`); });
-$("models").onclick = e => { const b = e.target.closest("[data-model]"); if (b) void action(b, () => api("/core/models/ensure", { alias: b.dataset.model })); };
+$("models").onclick = e => { const b = e.target.closest("[data-model]"); if (b) void action(b, () => { notices["model-message"].clear(); return api("/core/models/ensure", { alias: b.dataset.model }); }); };
 $("plugins").onclick = e => { const b = e.target.closest("[data-plugin]"); if (!b) return; void action(b, () => bridge.call(b.dataset.operation === "open" ? "plugins.open" : "plugins.change", { id: b.dataset.plugin, action: b.dataset.operation })); };
 if ($("plugin-catalog")) $("plugin-catalog").onclick = e => { const b = e.target.closest("[data-install-plugin]"); if (b) void action(b, () => bridge.call("plugins.install", { id: b.dataset.installPlugin })); };
 $("install-file").onclick = e => action(e.currentTarget, () => bridge.call("plugins.install"));
@@ -97,13 +112,13 @@ $("restore-button").onclick = e => action(e.currentTarget, () => createWallet(tr
 $("hide-backup").onclick = hideBackup;
 $("lock-wallet").onclick = e => { hideBackup(); return action(e.currentTarget, () => bridge.call("wallet.lock")); };
 $("connect-wallet").onclick = e => action(e.currentTarget, async () => { await bridge.credit("wallet-connect"); window.KaiCredits.clear(); await window.KaiCredits.refresh(); });
-$("import-model").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("models.import"); if (r) await api("/core/models/import", { path: r.file }); });
+$("import-model").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("models.import"); if (r) { notices["model-message"].clear(); await api("/core/models/import", { path: r.file }); } });
 $("cancel-download").onclick = e => action(e.currentTarget, () => api("/core/models/download/cancel", {}));
 let priceBusy = false;
 async function price() { if (!bridge || priceBusy || page !== "buy-credits" || snapshot?.network.privacyMode === "local-only") return; priceBusy = true; const generation = ++priceGeneration, usd = $("usd").value; try { const r = await bridge.credit("purchase-estimate", { usd }); if (generation === priceGeneration) text("price", `Estimated payment: ${r.estimate.koin} KOIN · ${r.estimate.credits} credits`); } catch (e) { if (generation === priceGeneration) text("price", e.message); } finally { priceBusy = false; } }
 $("usd").oninput = () => { priceGeneration++; text("price", "The exact KOIN payment will be shown before approval."); };
 $("buy-credits").onsubmit = e => { e.preventDefault(); const usd = $("usd").value; void action(e.submitter, async () => {
-  text("purchase-state", "Preparing purchase…");
+  notices["purchase-state"].show("Preparing purchase…", { dismissible: false });
   try {
     const connected = await bridge.credit("purchase-connect");
     if (connected.state === "cancelled") { text("purchase-state", "Purchase cancelled. No payment was approved."); return; }
@@ -120,12 +135,12 @@ $("buy-credits").onsubmit = e => { e.preventDefault(); const usd = $("usd").valu
   }
 }); };
 $("purchase-retry").onclick = e => action(e.currentTarget, async () => {
-  text("purchase-state", "Checking saved purchase…");
+  notices["purchase-state"].show("Checking saved purchase…", { dismissible: false });
   try { const r = await bridge.credit("credit-purchase-retry"); text("purchase-state", r.detail || r.state); await window.KaiCredits.refresh(); }
   catch (error) { text("purchase-state", error.message); throw error; }
 });
 $("check-updates").onclick = e => action(e.currentTarget, async () => {
-  text("update-state", "Checking for a published update…");
+  notices["update-state"].show("Checking for a published update…", { dismissible: false });
   try { text("update-state", (await bridge.call("updates.check")).message); }
   catch (error) {
     const unavailable = /ERR_UPDATER_(?:NO_PUBLISHED_VERSIONS|LATEST_VERSION_NOT_FOUND|CHANNEL_FILE_NOT_FOUND)|No published versions on GitHub|please ensure a production release exists/.test(error.message);

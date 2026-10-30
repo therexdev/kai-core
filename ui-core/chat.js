@@ -210,10 +210,11 @@
       <div id="chat-messages" class="chat-messages" role="log" aria-label="Chat messages" aria-live="polite"></div>
       <div id="chat-empty" class="chat-empty"><img class="brand-mark" src="assets/brand-mark.svg" width="64" height="64" alt=""><h2 class="chat-welcome">How can I help?</h2><p>Ask a question or start a conversation.</p><button id="chat-setup" type="button">Choose a model</button></div>
       <div id="chat-recovery" class="chat-recovery" hidden><p>An unfinished network request is available. Resuming uses credits if the reply needs to be retried.</p><button id="chat-recover" type="button">Resume saved request</button></div>
-      <p id="chat-status" class="chat-status" role="status"></p>
+      <div id="chat-status-notice" class="dismissible-notice inline-notice" hidden><p id="chat-status" class="chat-status" role="status"></p><button id="chat-status-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div>
       <form id="chat-form" class="chat-composer"><label class="sr-only" for="chat-input">Message</label><textarea id="chat-input" rows="3" maxlength="16000" placeholder="Message KAI…"></textarea><div class="chat-compose-actions"><span id="chat-hint" class="muted"></span><button id="chat-stop" type="button" hidden>Stop</button><button id="chat-send" type="submit" class="primary">Send</button></div></form>
     </div>`;
     const $ = id => document.getElementById(id);
+    const statusNotice = window.KaiCoreNotice.create({ container: $("chat-status-notice"), message: $("chat-status"), close: $("chat-status-close"), focusTarget: () => $("chat-input") });
     let source = "local", signature = "", messagesSignature = "", visible = false;
     const controller = createChatController({ bridge: window.kaiCore, onChange: render, refreshCredits: () => window.KaiCredits?.refresh() });
     function render(state) {
@@ -232,7 +233,7 @@
       $("chat-refresh").hidden = !network; $("chat-refresh").disabled = state.busy || state.checking || state.privacyMode === "local-only";
       $("chat-send").disabled = state.busy || !picked?.available || network && (!state.info?.enabled || !!state.info?.blocked || state.privacyMode === "local-only");
       $("chat-recovery").hidden = !network || !state.info?.recoveryAvailable; $("chat-recover").disabled = state.busy || state.privacyMode === "local-only";
-      $("chat-status").textContent = state.status; $("chat-status").classList.toggle("error", state.error);
+      statusNotice.show(state.status, { error: state.error, dismissible: !state.busy });
       $("chat-hint").textContent = network ? "Your network conversation is sent to the selected network model." : "Messages stay on this computer.";
       $("chat-model-detail").textContent = !network ? (picked ? "Runs locally on your computer." : "Install or import a model in Models to start chatting.")
         : state.privacyMode === "local-only" ? "Local-Only is on. Open Settings to allow network chat."
@@ -260,10 +261,10 @@
     $("chat-source").onchange = event => { void controller.setSource(event.target.value); };
     $("chat-model").onchange = event => controller.setModel(event.target.value);
     $("chat-input").oninput = event => controller.setDraft(event.target.value);
-    $("chat-form").onsubmit = event => { event.preventDefault(); void controller.send($("chat-input").value); };
-    $("chat-input").onkeydown = event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("chat-send").disabled && !controller.state.busy) void controller.send(event.target.value); } };
+    $("chat-form").onsubmit = event => { event.preventDefault(); statusNotice.clear(); void controller.send($("chat-input").value); };
+    $("chat-input").onkeydown = event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("chat-send").disabled && !controller.state.busy) { statusNotice.clear(); void controller.send(event.target.value); } } };
     $("chat-new").onclick = () => controller.clear(); $("chat-stop").onclick = () => { void controller.stop(); };
-    $("chat-recover").onclick = () => { void controller.recover(); }; $("chat-refresh").onclick = () => { void controller.refreshNetwork(); };
+    $("chat-recover").onclick = () => { statusNotice.clear(); void controller.recover(); }; $("chat-refresh").onclick = () => { void controller.refreshNetwork(); };
     $("chat-setup").onclick = () => window.dispatchEvent(new window.CustomEvent("kai-core-navigate", { detail: { page: controller.state.source === "local" ? "models" : controller.state.privacyMode === "local-only" ? "settings" : "network" } }));
     const unsubscribe = window.kaiCore.onChatProgress?.(controller.progress);
     window.addEventListener("kai-core-use-network-model", async event => {

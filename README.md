@@ -13,6 +13,8 @@ Alpha/Test release pipelines, starting from `kaiapp` Test commit
   service and delivery recovery. Advanced tools remain optional plugins.
 - Your Credits shows available balance, purchases and usage; Buy credits opens a
   separate purchase screen with the existing native quote approval.
+- Wallet warnings and other action messages have a dismiss button. Dismissed
+  messages stay hidden during background refresh; an explicit retry can show a new result.
 - Closing the window keeps Core and active earning in the system tray. Use the
   tray icon to reopen it, or **Quit KAI Core** to stop services and release the shared
   profile. If a tray icon cannot be created, closing the window quits normally.
@@ -51,7 +53,7 @@ native upgrade verification are required before replacing the old app publicly.
 
 ## Install the feature plugins
 
-Core 0.4.1 includes direct install cards for eleven signed first-party plugins in
+Core 0.4.2 includes direct install cards for eleven signed first-party plugins in
 **Plugins**. Choose **Refresh catalog** to fetch the signed public
 [plugin registry](https://github.com/therexdev/kai-plugin-registry). Catalog installs
 verify the exact package digest, publisher, permissions and Core compatibility.
