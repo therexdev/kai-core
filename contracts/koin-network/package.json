@@ -1,0 +1,22 @@
+{
+  "name": "kai-koin-network-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "generate": "node scripts/generate.js",
+    "build": "node scripts/generate.js && asc assembly/credits-main.ts --target credits --use abort=assembly/Abort/contractAbort && asc assembly/rewards-main.ts --target rewards --use abort=assembly/Abort/contractAbort && asc assembly/prepaid-main.ts --target prepaid --use abort=assembly/Abort/contractAbort && asc assembly/prepaid-usd-main.ts --target prepaid-usd --use abort=assembly/Abort/contractAbort",
+    "test": "node ../verify-coverage-toolchain.js && node scripts/generate.js && asp --nologo"
+  },
+  "devDependencies": {
+    "@koinos/sdk-as": "1.0.0",
+    "micromatch": "npm:picomatch@4.0.7",
+    "protobufjs": "7.6.6",
+    "yaml": "2.9.0",
+    "somap": "file:../vendor/somap"
+  },
+  "overrides": {
+    "protobufjs": "7.6.6",
+    "somap": "$somap"
+  }
+}

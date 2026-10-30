@@ -1,0 +1,1 @@
+{"schema":1,"apiVersion":1,"id":"example.local-chat","version":"1.0.0","name":"Local Chat example","description":"SDK example: chat with an installed model and save a draft within this plugin. Does not read legacy chat history.","entry":"index.html","permissions":["models.read","inference.local","storage.read","storage.write"]}

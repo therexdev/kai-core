@@ -1,0 +1,2741 @@
+"use strict";
+
+/*
+ * Koinos AI desktop renderer. Plain web app served by Core's own gateway —
+ * everything goes over same-origin HTTP, so the identical code runs inside
+ * the Electron shell or a plain browser tab. State machine:
+ *   connecting -> onboarding (no model ready) -> chat (model ready)
+ */
+
+const $ = (id) => document.getElementById(id);
+
+const state = {
+  view: "chat",
+  routed: false, // true once the user picks a view themselves
+  alias: null, // the model alias we chat with
+  ready: false, // runtime serving that alias
+  chatting: false,
+  abort: null,
+  history: [], // [{role, content}]
+  chatId: null, // persisted id of the open conversation
+  chatIndex: [], // [{id,title,updatedAt,searchText}] for the sidebar
+};
+
+// ---------- boot / status polling ----------
+
+async function coreGet(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`Core answered ${r.status} for ${path}`);
+  return r.json();
+}
+
+let pollTimer = null;
+function schedule(ms) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(refresh, ms);
+}
+
+async function refresh() {
+  clearTimeout(pollTimer);
+  let models;
+  try {
+    models = await coreGet("/core/models");
+  } catch {
+    setStatus("err", "Core unreachable");
+    schedule(1500);
+    return;
+  }
+
+  // Prefer a model that's already on disk (returning user goes straight
+  // to chat); a fresh install onboards onto the first NON-DEV catalog
+  // alias — the launch model. Dev pipeline models are picked only when
+  // they're the only thing ready (CI, dev machines).
+  const first =
+    models.aliases.find((a) => a.status === "ready" && !a.dev) ||
+    models.aliases.find((a) => a.status === "ready") ||
+    models.aliases.find((a) => !a.dev) ||
+    models.aliases[0] ||
+    null;
+  state.alias = state.alias || first?.alias || null;
+  const entry = models.aliases.find((a) => a.alias === state.alias) || first;
+  const running = models.runtime?.runtime?.running && models.runtime.activeAlias === state.alias;
+  state.ready = !!(entry && entry.status === "ready");
+  // Finish asynchronous provider discovery before painting either status.
+  // Otherwise every poll briefly renders local-model status above the launcher.
+  await updateModelPick(models.aliases);
+
+  if (models.download) {
+    const { pct, done, total } = models.download;
+    showProgress(pct, done, total);
+    setStatus("busy", KaiI18n.message`Downloading model… ${pct ?? "?"}%`);
+  } else if (models.runtimeDownload?.phase === "extracting") {
+    showProgress(null);
+    setStatus("busy", "Setting up engine… (one time — takes a few minutes, the app stays usable)");
+  } else if (models.runtimeDownload) {
+    const { pct, done, total } = models.runtimeDownload;
+    showProgress(pct, done, total);
+    setStatus("busy", KaiI18n.message`Downloading engine… ${pct ?? "?"}%`);
+  } else if (models.ensure?.state === "working") {
+    showProgress(null);
+    setStatus("busy", "Loading model…");
+  } else if (models.ensure?.state === "error" || models.runtime?.lastLoadError) {
+    const reason = models.ensure?.error || models.runtime?.lastLoadError?.message || "";
+    onboardError(reason);
+    // The reason is actionable (engine stderr, missing file, quarantine) —
+    // and truncating it hid the second engine's half of the story (field
+    // finding). Full text, wrapped; the pane grows.
+    setStatus("err", KaiI18n.message`Model load failed${reason ? ` — ${reason}` : ""}`);
+    $("status-pane").title = reason;
+  } else if (running) {
+    setStatus("ok", "Model loaded");
+  } else if (state.ready) {
+    setStatus("ok", "Ready (model loads on first message)");
+  } else {
+    setStatus("busy", "Local model not installed");
+  }
+  KaiI18n.setText($("status-model"), entry ? entry.label.split(" (")[0] : "No models in catalog");
+  const desktopReady = KaiProviders.models().some(m => m.alias === composedChatModel());
+  if (desktopReady && !models.download && !models.ensure?.state) {
+    setStatus("ok", "Desktop provider ready");
+    $("status-model").textContent = KaiProviders.label(composedChatModel());
+  }
+  $("status-model").title = $("status-model").textContent;
+
+  // Route: onboarding until the model file is on disk — but only until the user
+  // goes somewhere themselves. This poll runs every few seconds, and it used to
+  // slam the view back to onboarding each time, throwing anyone without a model
+  // off whatever screen they were on mid-keystroke. The Koinos node in
+  // particular needs no model at all.
+  const route = state.ready || desktopReady || state.routed ? state.view : "onboarding";
+  showView(route, { navOnly: true });
+  if (!state.ready && entry) renderOnboarding(entry);
+
+  const busy = models.download || models.ensure?.state === "working";
+  schedule(busy ? 500 : 4000);
+}
+
+// Version tag in the sidebar footer: fetched once, retried until Core answers.
+async function loadVersion() {
+  try {
+    const h = await coreGet("/core/health");
+    if (h.version) KaiI18n.setText($("app-version"), KaiI18n.message`${h.productName || "Koinos AI"} v${h.version}`);
+    document.body.dataset.releaseChannel = h.channel || "stable";
+    if (h.channel === "test") {
+      document.title = "Koinos AI Test";
+      const title = document.querySelector(".tb-title");
+      if (title) KaiI18n.setText(title, "Koinos AI Test");
+    }
+  } catch {
+    setTimeout(loadVersion, 3000);
+  }
+}
+loadVersion();
+
+/** The footer promise must match the chosen §7 mode — never overstate privacy. */
+function updatePrivacyNote(mode) {
+  const el = document.getElementById("privacy-note");
+  if (!el || el.dataset.mode === mode) return;
+  el.dataset.mode = mode;
+  el.innerHTML =
+    mode === "local-only"
+      ? KaiI18n.html("Your chats never leave this machine.<br />(Node and earning use their own network controls.)")
+      : mode === "local-first"
+        ? KaiI18n.html("Local when possible. If this machine<br />can't serve a chat, it overflows to<br />Koinos Network — and says so.")
+        : KaiI18n.html("Network mode on — chats sent to<br />Koinos Network leave this machine.");
+  // Web search is egress by definition, so the toggle only exists outside
+  // Local-Only — same contract as network chat, enforced again in Core.
+  const webBtn = document.getElementById("btn-web");
+  if (webBtn) {
+    webBtn.hidden = mode === "local-only";
+    if (mode === "local-only") setWebSearch(false);
+  }
+  // Research mode reads the web; in Local-Only it's greyed out with the why.
+  // Agent mode stays — the tool registry hides egress tools by itself.
+  const researchOpt = document.querySelector('#mode-pick option[value="research"]');
+  if (researchOpt) {
+    researchOpt.disabled = mode === "local-only";
+    KaiI18n.setText(researchOpt, mode === "local-only" ? "🔬 Research — needs web (see Privacy)" : "🔬 Research");
+    if (mode === "local-only" && getChatMode() === "research") setChatMode("chat");
+  }
+}
+
+// ---- answer mode (Chat / Research / Agent), persisted like other prefs ----
+function getChatMode() {
+  return document.getElementById("mode-pick")?.value || "chat";
+}
+function setChatMode(m) {
+  const pick = document.getElementById("mode-pick");
+  if (pick) pick.value = m;
+  try { localStorage.setItem("kai-chat-mode", m); } catch { /* private mode */ }
+}
+setChatMode((() => { try { return localStorage.getItem("kai-chat-mode") || "chat"; } catch { return "chat"; } })());
+document.getElementById("mode-pick")?.addEventListener("change", () => setChatMode(getChatMode()));
+
+/** One short non-streaming model call — the workhorse of research/agent
+ *  phases. Same endpoint, same routing (local or network) as the chat. */
+async function askModelOnce(messages, model) {
+  const r = await KaiProviders.chatFetch("/core/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    signal: state.abort?.signal,
+    body: JSON.stringify({ model, stream: false, max_tokens: KaiProviders.isModel(model) ? 4096 : 900, messages }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error?.message || `Core answered ${r.status}`);
+  return j?.choices?.[0]?.message?.content || "";
+}
+
+/** Plain-language consent for sensitive tools. The Core enforces this
+ *  server-side (HTTP 428) — this dialog is how the user says yes. */
+function confirmTool(name, args) {
+  const pretty = name.replace(/^mcp:[^:]+:/, "");
+  const detail = Object.entries(args || {}).map(([k, v]) => `${k}: ${String(v).slice(0, 120)}`).join("\n");
+  return Promise.resolve(window.confirm(`The AI wants to use a tool:\n\n${pretty}\n${detail ? "\n" + detail + "\n" : ""}\nAllow it this once?`));
+}
+
+// ---- web search toggle (persisted like other renderer prefs) ----
+function setWebSearch(on) {
+  state.webSearch = Boolean(on);
+  try { localStorage.setItem("kai-web-search", on ? "1" : "0"); } catch { /* private mode */ }
+  const b = document.getElementById("btn-web");
+  if (b) b.classList.toggle("on", state.webSearch);
+}
+setWebSearch((() => { try { return localStorage.getItem("kai-web-search") === "1"; } catch { return false; } })());
+document.getElementById("btn-web")?.addEventListener("click", () => setWebSearch(!state.webSearch));
+
+/** Multi-step research before answering: search → read the top result →
+ *  hand the model a bounded, cited context block. Deterministic on purpose —
+ *  reliable with 4k-context local models, no flaky model-driven tool calls.
+ *  Returns { context, citations } or null (caller answers from the model). */
+async function webResearch(query, statusEl, signal) {
+  const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };
+  setStatus("🌐 Searching the web…");
+  let search;
+  try {
+    const r = await fetch("/core/search", {
+      signal,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ q: query }),
+    });
+    if (r.status === 403) { setWebSearch(false); setStatus("🌐 Web search is off in Local-Only mode."); return null; }
+    search = await r.json();
+  } catch (e) { if (e.name === "AbortError") throw e; search = null; }
+  const results = search?.results || [];
+  if (!results.length) { setStatus("🌐 No web results — answering from the model."); return null; }
+
+  // Read the best page we can (several independent results on failure) — the
+  // "multi-action" part: search, then fetch, then answer.
+  let extract = null;
+  for (const cand of results.slice(0, 4)) {
+    setStatus(`🌐 Reading ${cand.title || cand.url}…`);
+    try {
+      const r = await fetch("/core/fetch", {
+        signal,
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: cand.url }),
+      });
+      const j = await r.json();
+      if (j.ok && j.page?.text) { extract = { ...j.page, from: cand }; break; }
+    } catch (e) { if (e.name === "AbortError") throw e; /* try the next result */ }
+  }
+
+  // Budget hard: every char here competes with history in a 4k context.
+  const lines = results.map((x, i) => `${i + 1}. ${x.title} — ${x.url}\n   ${x.snippet || ""}`).join("\n").slice(0, 1100);
+  const body = extract ? `\n\nExtract from "${extract.title || extract.from.title}" (${extract.url}):\n${extract.text.slice(0, 1500)}` : "";
+  const context =
+    `🌐 Live web results for "${query.slice(0, 200)}" (fetched just now — prefer these over older knowledge; cite sources by number):\n${lines}${body}`;
+  // The trace PERSISTS (field feedback: on slower network chats the flash of
+  // status vanished and the agent looked like it never ran). What it did
+  // stays on screen, above the reply, in every mode.
+  let readHost = "";
+  try { readHost = extract ? new URL(extract.url).hostname.replace(/^www\./, "") : ""; } catch { /* keep empty */ }
+  setStatus(`🌐 Searched the web — ${results.length} source${results.length === 1 ? "" : "s"}${readHost ? ` · read ${readHost}` : ""}`);
+  return { context, citations: results.map((x) => ({ title: x.title, url: x.url })) };
+}
+
+/** API wire format: image-bearing turns become OpenAI content parts (what
+ *  llama-server-with-mmproj and Ollama vision models accept); everything else
+ *  is plain {role, content} — UI-only fields (citations, images) never leak
+ *  into the request body. */
+function toWire(messages) {
+  return messages.map((m) =>
+    Array.isArray(m.images) && m.images.length
+      ? {
+          role: m.role,
+          content: [
+            { type: "text", text: String(m.content || "") },
+            ...m.images.map((u) => ({ type: "image_url", image_url: { url: u } })),
+          ],
+        }
+      : { role: m.role, content: m.content }
+  );
+}
+
+/** Thumbnails on an image-bearing user message (data: URIs — CSP-safe). */
+function renderMsgImages(el, images) {
+  if (!Array.isArray(images) || !images.length) return;
+  const row = document.createElement("div");
+  row.className = "msg-images";
+  for (const u of images.slice(0, 3)) {
+    if (!String(u).startsWith("data:image/")) continue;
+    const img = document.createElement("img");
+    img.src = u;
+    img.alt = "attached image";
+    img.className = "msg-img";
+    row.appendChild(img);
+  }
+  if (row.children.length) el.appendChild(row);
+}
+
+/** Citation chips under an assistant message — plain links, renderer-safe. */
+function renderCitations(bubble, citations) {
+  if (!Array.isArray(citations) || !citations.length) return;
+  const div = document.createElement("div");
+  div.className = "citations";
+  for (const c of citations.slice(0, 8)) {
+    if (!/^https?:\/\//i.test(c.url || "")) continue;
+    const a = document.createElement("a");
+    a.href = c.url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.className = "citation-chip";
+    let host = "";
+    try { host = new URL(c.url).hostname.replace(/^www\./, ""); } catch { /* keep title only */ }
+    a.textContent = c.title ? `${c.title.slice(0, 60)}${host ? ` · ${host}` : ""}` : host || c.url;
+    div.appendChild(a);
+  }
+  if (div.children.length) bubble.appendChild(div);
+}
+
+let networkEligible = false;
+let pickable = []; // latest [{v,label}] the chat picker offers — reused by Compare/Tasks
+async function updateModelPick(aliases) {
+  await KaiProviders.refresh().catch(() => {});
+  await window.KaiNetwork?.refresh().catch(() => {});
+  let netBlockedWhy = "", networkPrivacyAllowed = false;
+  try {
+    const n = await coreGet("/core/network");
+    // Wallet state is part of eligibility: advertising "Koinos Network"
+    // while the wallet is locked just defers the failure to send time.
+    networkPrivacyAllowed = n.privacyMode !== "local-only";
+    networkEligible = networkPrivacyAllowed && !!n.schedulerUrl && n.walletUnlocked !== false;
+    // Field finding (owner's Pi): with the Local-Only default, the network
+    // source simply didn't EXIST in the picker and looked broken. Name the
+    // reason so it's discoverable instead of invisible.
+    if (!networkEligible) {
+      netBlockedWhy =
+        n.privacyMode === "local-only"
+          ? "enable in Local API → Privacy"
+          : !n.schedulerUrl
+            ? "no network configured"
+            : "unlock your wallet in Earn";
+    }
+    updatePrivacyNote(n.privacyMode);
+    if (document.getElementById("privacy-pick") && document.activeElement?.id !== "privacy-pick") {
+      $("privacy-pick").value = n.privacyMode;
+    }
+  } catch { networkEligible = false; }
+  if (window.KaiNetwork?.info.configured) {
+    networkEligible = networkPrivacyAllowed && !KaiNetwork.info.blocked;
+    netBlockedWhy = networkPrivacyAllowed ? KaiNetwork.info.blocked || "" : "blocked by Local-Only";
+  }
+  const pick = $("model-pick");
+  // Source + model, two boxes (field request): pick WHERE it runs, then
+  // WHICH model. Local lists only models on this machine; Network lists
+  // what live providers actually serve right now, plus Auto.
+  state.localModels = aliases
+    .filter((al) => al.status === "ready" && (!al.dev || al.alias === state.alias))
+    .map((al) => ({ v: al.alias, label: al.label.split(" (")[0] }));
+  state.aliasLabels = Object.fromEntries(aliases.map((al) => [al.alias, al.label.split(" (")[0]]));
+  state.visionAliases = new Set(aliases.filter((al) => al.vision).map((al) => al.alias)); // gates image attach
+  const src = $("src-pick");
+  const srcSig = `local${networkEligible ? ",network" : `,blocked:${netBlockedWhy}`}` + JSON.stringify(KaiProviders.status);
+  if (src.dataset.sig !== srcSig) {
+    const prevSrc = src.value || (KaiProviders.desktop ? KaiProviders.read("kai-chat-source", "local") : "local");
+    src.innerHTML = "";
+    for (const [v, label] of [["local", "This machine"], ...(networkEligible ? [["network", "Koinos Network"]] : [])]) {
+      const o = document.createElement("option");
+      o.value = v; KaiI18n.setText(o, label);
+      src.appendChild(o);
+    }
+    if (KaiProviders.desktop) for (const p of KaiProviders.status.providers) {
+      const o = document.createElement("option"); o.value = p.id;
+      const why = !KaiProviders.status.available || KaiProviders.status.locked ? "unlock secure storage" : !p.configured ? "connect in Settings" : KaiProviders.status.blocked ? "blocked by Local-Only" : !p.models.length ? "refresh models in Settings" : "";
+      o.textContent = p.label + " · Desktop" + (why ? " — " + why : ""); o.disabled = !!why; src.appendChild(o);
+    }
+    if (!networkEligible && netBlockedWhy) {
+      // Visible but not selectable — the network exists; here's how to get it.
+      const o = document.createElement("option");
+      o.value = "network"; o.disabled = true;
+      KaiI18n.setText(o, KaiI18n.message`Koinos Network — ${netBlockedWhy}`);
+      src.appendChild(o);
+    }
+    if ([...src.options].some((o) => o.value === prevSrc)) src.value = prevSrc;
+    src.dataset.sig = srcSig;
+  }
+  // pickable keeps the flat shape Compare/Tasks/Docs already use.
+  const want = [
+    ...state.localModels.map((m) => ({ v: m.v, label: "Local · " + m.label })),
+    ...(networkEligible ? (window.KaiNetwork?.info.product === "prepaid-usd-v1" && Array.isArray(KaiNetwork.info.models)
+      ? KaiNetwork.info.models.filter(m => m.available).map(m => ({ v: "koinos-network:" + m.model, label: "Network · " + (m.label || m.model) }))
+      : [{ v: "koinos-network", label: "Koinos Network · Auto" }]) : []),
+  ];
+  pickable = want;
+  window.KaiNetwork?.paint();
+  if (["openai", "anthropic"].includes(src.value)) {
+    const providerModels = KaiProviders.models().filter(m => m.alias.startsWith("desktop:" + src.value + ":"));
+    const sig = JSON.stringify(providerModels);
+    if (pick.dataset.sig !== sig) {
+      const prev = pick.value.startsWith("desktop:" + src.value + ":") ? pick.value : KaiProviders.read("kai-chat-model-" + src.value);
+      pick.replaceChildren(...providerModels.map(m => { const o = document.createElement("option"); o.value = m.alias; o.textContent = m.label; return o; }));
+      if (providerModels.some(m => m.alias === prev)) pick.value = prev;
+      pick.dataset.sig = sig;
+    }
+    updateProviderNote();
+    return;
+  }
+  if (src.value === "network") {
+    await fillNetworkModelPick();
+    return;
+  }
+  const sig = "local:" + state.localModels.map((w) => w.v).join(",");
+  if (pick.dataset.sig !== sig) {
+    const prev = pick.value;
+    pick.innerHTML = "";
+    for (const w of state.localModels) {
+      const o = document.createElement("option");
+      o.value = w.v;
+      // 👁 marks vision-capable models — the ones that accept image attachments.
+      o.textContent = state.visionAliases?.has(w.v) ? `${w.label} 👁` : w.label;
+      pick.appendChild(o);
+    }
+    pick.dataset.sig = sig;
+    // Keep the user's explicit choice when still offered; otherwise track
+    // the READY model — defaulting to the first option regardless caused
+    // chats to target a model that wasn't downloaded yet.
+    if ([...pick.options].some((o) => o.value === prev)) pick.value = prev;
+    else if (state.alias && [...pick.options].some((o) => o.value === state.alias)) pick.value = state.alias;
+  }
+}
+
+/** Network source: the model box lists what live providers serve NOW. */
+async function fillNetworkModelPick() {
+  const pick = $("model-pick");
+  if (window.KaiNetwork?.info.configured) {
+    const current = KaiNetwork.info;
+    if (current.product === "prepaid-usd-v1" && Array.isArray(current.models)) {
+      const options = current.models.map(m => ({ value: "koinos-network:" + m.model, label: m.label || state.aliasLabels?.[m.model] || m.model, available: m.available === true && KaiNetwork.availabilityFresh() }));
+      // Only an explicit model choice is sticky. A new customer starts with a
+      // currently available model, even when the packaged default is offline.
+      // Keep revisiting an automatic default as the first catalog arrives.
+      const previous = localStorage.getItem("kai-credit-model");
+      const automatic = pick.dataset.sig?.startsWith("paid-catalog:") ? pick.value : null;
+      const defaultModel = "koinos-network:" + current.model;
+      const selected = previous || options.find(o => o.value === defaultModel && o.available)?.value || options.find(o => o.available)?.value || automatic || defaultModel;
+      // A disappearing/offline explicit choice remains visible; never replace it.
+      if (selected && !options.some(o => o.value === selected)) options.push({ value: selected, label: selected.replace(/^koinos-network:/, ""), available: false });
+      const sig = "paid-catalog:" + JSON.stringify(options);
+      if (pick.dataset.sig !== sig) {
+        pick.replaceChildren(...options.map(m => { const o = document.createElement("option"); o.value = m.value; o.textContent = m.label + (m.available ? "" : " · Unavailable"); o.disabled = !m.available; return o; }));
+        pick.value = selected;
+        pick.dataset.sig = sig;
+      }
+      KaiNetwork.paintPrice();
+      return;
+    }
+    const model = KaiNetwork.info.model;
+    pick.replaceChildren();
+    if (model) { const option = document.createElement("option"); option.value = model; option.textContent = model + (["prepaid-v1", "prepaid-usd-v1"].includes(KaiNetwork.info.product) ? " · credits" : " · KOIN"); pick.appendChild(option); }
+    pick.dataset.sig = "paid:" + model; return;
+  }
+  let net = { workersOnline: 0, models: [] };
+  try {
+    net = await coreGet("/core/network/models");
+  } catch { /* offline — Auto only */ }
+  const options = [
+    { v: "auto", label: `Auto — best online${net.workersOnline ? ` (${net.workersOnline} computer${net.workersOnline === 1 ? "" : "s"})` : ""}` },
+    ...net.models.map((m) => ({
+      v: m.model,
+      label: `${state.aliasLabels?.[m.model] || m.model} · ×${m.providers}`,
+    })),
+  ];
+  const sig = "net:" + options.map((o) => o.v).join(",");
+  if (pick.dataset.sig !== sig) {
+    const prev = pick.value;
+    pick.innerHTML = "";
+    for (const w of options) {
+      const o = document.createElement("option");
+      o.value = w.v; o.textContent = w.label;
+      pick.appendChild(o);
+    }
+    pick.dataset.sig = sig;
+    if ([...pick.options].some((o) => o.value === prev)) pick.value = prev;
+  }
+}
+
+function updateProviderNote() {
+  const source = $("src-pick").value, note = $("privacy-note");
+  if (["openai", "anthropic"].includes(source)) {
+    note.dataset.mode = "desktop:" + source;
+    KaiI18n.setText(note, KaiProviders.status.blocked ? "Local-Only blocks this online connection." : `Chat goes directly to ${source === "openai" ? "OpenAI" : "Anthropic"}. Your API account pays for usage.`);
+  }
+}
+window.addEventListener("kai-providers-changed", () => { $("model-pick").dataset.sig = ""; refresh(); });
+window.addEventListener("kai-network-models-changed", () => { if ($("src-pick").value === "network") fillNetworkModelPick(); });
+window.addEventListener("kai-network-use", async event => {
+  await updateModelPick((await coreGet("/core/models")).aliases);
+  if (!networkEligible && !KaiNetwork.info.blocked) { activateView("api"); $("privacy-pick")?.focus(); return; }
+  if (KaiNetwork.info.blocked) {
+    if (KaiNetwork.info.product === "prepaid-usd-v1") { activateView("credits"); window.KaiWalletAccess?.open(); }
+    else if (KaiNetwork.info.activation === "signin-required") { void selectAccountScope(false); activateView("settings"); $("btn-account-signin").scrollIntoView({ block: "center" }); }
+    else activateView("earn");
+    return;
+  }
+  $("src-pick").value = "network"; $("mode-pick").value = "chat";
+  $("src-pick").dispatchEvent(new Event("change")); activateView("chat"); $("input").focus();
+  if (event.detail?.model) { await fillNetworkModelPick(); const wanted = KaiNetwork.info.product === "prepaid-usd-v1" && Array.isArray(KaiNetwork.info.models) ? "koinos-network:" + event.detail.model.replace(/^koinos-network:/, "") : event.detail.model; if ([...$("model-pick").options].some(o => o.value === wanted)) { $("model-pick").value = wanted; $("model-pick").dispatchEvent(new Event("change")); } }
+});
+window.addEventListener("kai-network-account", () => { activateView("recovery"); if ($("product-legacy-account")) $("product-legacy-account").open = true; $("koin-use-tab").click(); $("koin-test-payments").scrollIntoView({ block: "start" }); });
+window.addEventListener("kai-network-recover", async () => {
+  if (state.chatting) return;
+  state.chatting = true; $("btn-send").disabled = true; $("network-recover").disabled = true; $("btn-stop").hidden = false;
+  state.abort = new AbortController(); const stop = () => window.kaiKoinTestBridge.run("stop").catch(() => {});
+  state.abort.signal.addEventListener("abort", stop, { once: true });
+  try {
+    const { completion, messages } = await KaiNetwork.recover();
+    state.abort.signal.throwIfAborted();
+    // Recover into a separate saved conversation, preserving the request's
+    // actual turns rather than inserting its answer into an unrelated chat.
+    state.chatId = null; state.history = messages.filter(m => m.role !== "system");
+    $("messages").replaceChildren();
+    for (const m of state.history) addMsg(m.role, m.content);
+    const content = completion.choices[0].message.content, bubble = addMsg("assistant", content); attachMsgActions(bubble);
+    state.history.push({ role: "assistant", content });
+    if (await saveCurrentChat()) await KaiNetwork.acknowledge(completion.id);
+    activateView("chat");
+  } catch (e) { addMsg("error", String(e.message)); }
+  finally { state.chatting = false; state.abort = null; $("btn-send").disabled = false; $("network-recover").disabled = false; $("btn-stop").hidden = true; window.dispatchEvent(new Event("kai-network-account-changed")); }
+});
+window.addEventListener("kai-provider-use", async event => {
+  await updateModelPick((await coreGet("/core/models")).aliases);
+  $("src-pick").value = event.detail; $("src-pick").dispatchEvent(new Event("change")); activateView("chat");
+});
+$("model-pick").addEventListener("change", () => {
+  if (["openai", "anthropic"].includes($("src-pick").value)) KaiProviders.write("kai-chat-model-" + $("src-pick").value, $("model-pick").value);
+  if ($("src-pick").value === "network" && $("model-pick").value.startsWith("koinos-network:")) localStorage.setItem("kai-credit-model", $("model-pick").value);
+});
+$("src-pick").addEventListener("change", () => {
+  KaiProviders.write("kai-chat-source", $("src-pick").value);
+  $("model-pick").dataset.sig = ""; // force refill for the new source
+  coreGet("/core/models").then((m) => updateModelPick(m.aliases)).catch(() => {});
+});
+
+/** What send() should request, composed from the two boxes. */
+function composedChatModel() {
+  if (["openai", "anthropic"].includes($("src-pick").value)) return $("model-pick").value.startsWith("desktop:" + $("src-pick").value + ":") ? $("model-pick").value : "";
+  if ($("src-pick").value === "network") {
+    const m = $("model-pick").value;
+    if (window.KaiNetwork?.info.product === "prepaid-usd-v1" && Array.isArray(KaiNetwork.info.models)) return m.startsWith("koinos-network:") ? m : "";
+    return m === "auto" || !m ? "koinos-network" : `koinos-network:${m}`;
+  }
+  return $("model-pick").value || state.alias;
+}
+
+function setStatus(kind, text) {
+  $("status-dot").className = `dot ${kind}`;
+  $("status-pane").dataset.state = kind;
+  $("status-pane").removeAttribute("title");
+  KaiI18n.setText($("status-text"), text);
+  $("status-text").title = $("status-text").textContent;
+}
+
+// ---------- views ----------
+
+function expandNavGroup(selected) {
+  for (const header of document.querySelectorAll("#nav .nav-group-label")) {
+    const open = header === selected || (document.body.classList.contains("product-v2") && ["nav-group-workspace", "nav-group-contribute"].includes(header.id));
+    header.setAttribute("aria-expanded", String(open));
+    const items = document.getElementById(header.getAttribute("aria-controls"));
+    items.inert = !open;
+    items.setAttribute("aria-hidden", String(!open));
+  }
+}
+
+for (const header of document.querySelectorAll("#nav .nav-group-label")) {
+  header.addEventListener("click", () => {
+    const open = header.getAttribute("aria-expanded") !== "true";
+    expandNavGroup(open ? header : null);
+    if (open && document.body.classList.contains("product-v2") && header.id === "nav-group-toolkit") {
+      const nav = document.getElementById("nav"), items = document.getElementById(header.getAttribute("aria-controls"));
+      const last = [...items.querySelectorAll(".nav-item:not([hidden])")].slice(0, 3).at(-1);
+      if (last) nav.scrollTop += Math.max(0, last.getBoundingClientRect().bottom - nav.getBoundingClientRect().bottom);
+    }
+  });
+}
+
+function showView(name, { navOnly = false } = {}) {
+  // All seven koinos-* entries share one physical view (the embedded node
+  // app); the highlight still follows the entry itself. Mapped HERE because
+  // every caller — clicks and the boot poll alike — comes through this door.
+  const phys = name.startsWith("koinos") ? "koinos" : name;
+  const headings = {
+    chat: ["Chat", "Your work. Your choice of AI."],
+    credits: ["Credits", ""], "buy-credits": ["Buy credits", ""], "payment-wallet": ["Wallet", ""], "network-overview": ["Network", ""], recovery: ["Account help", ""],
+    docs: ["Documents", "From a first thought to the final draft."],
+    compare: ["Compare models", "One question. A few different perspectives."],
+    models: ["Model library", "Find the right mind for the job."],
+    agents: ["Agents", "Build a service. Connect with other agents."], brain: ["Brain", "Your world, remembered."], workflows: ["Workflows", "Give your routines to KAI."], connections: ["Connections", "Your accounts, your control."],
+    tasks: ["Tasks", "Put your ideas in motion."], tools: ["Tools", "Give your AI a few more abilities."],
+    api: ["Local API", "Your models, connected to your workflow."],
+    earn: ["Earn", "Share your AI. Earn KOIN."],
+    settings: ["Settings", "Make this space your own."], network: ["Network", "Connected on your terms."],
+    code: ["Koinos Code", "Build something you want to exist."], devtools: ["Developer tools", "Everything you need to get hands-on."],
+    koinos: ["Koinos Node", "Your wallet. Your node. Your contribution."], onboarding: ["Welcome to Koinos AI", "Let’s get you ready."]
+  };
+  const selectedNav = document.querySelector(`#nav [data-view="${phys}"]`);
+  if (selectedNav && (!navOnly || !selectedNav.classList.contains("active"))) {
+    expandNavGroup(selectedNav.closest(".nav-group").querySelector(".nav-group-label"));
+  }
+  const heading = headings[phys] || ["Koinos AI", "Think. Build. Grow."];
+  KaiI18n.setText($("workspace-title"), heading[0]);
+  KaiI18n.setText($("workspace-caption"), heading[1]);
+  // Background model polls repaint navigation too. Only change visibility
+  // when it actually changes: repeated hidden writes fire page observers and
+  // used to clear the active Buy password through the hidden Wallet page.
+  for (const v of document.querySelectorAll(".view")) {
+    const hidden = v.id !== `view-${phys}`;
+    if (v.hidden !== hidden) v.hidden = hidden;
+  }
+  // Every navigable thing carries data-view — the full-width nav rows AND
+  // the Settings/Network icons under the status pane.
+  if (window.kaiCompanionBridge) document.getElementById("legacy-tasks-nav")?.setAttribute("hidden", "");
+for (const b of document.querySelectorAll("[data-view]")) {
+    b.classList.toggle("active", b.dataset.view === name);
+  }
+}
+
+/** Which node screen the rail is on — the dashboard until someone picks. */
+function currentNodeScreen() {
+  return document.querySelector("#kn-rail [data-knode].on")?.dataset.knode || "koinos";
+}
+
+/*
+ * Settings draws the things that were moved into it. Each piece already knew
+ * how to render itself; what changed is that they are asked from ONE place a
+ * person can find, instead of as a side effect of opening Earn or Local API.
+ */
+/*
+ * Where this install stands. A packaged build has an updater and says so; a
+ * source checkout has nothing but git, and until now had no way to tell anyone
+ * it was behind — which is how a machine sat eighteen versions back looking
+ * perfectly healthy. Cheap by default: the version line costs nothing, and the
+ * network round trip only happens when someone presses the button.
+ */
+async function renderUpdateStatus({ fetchRemote = false } = {}) {
+  const host = $("update-status");
+  if (!host) return;
+  let s;
+  try {
+    s = await coreGet(`/core/update${fetchRemote ? "?fetch=1" : ""}`);
+  } catch {
+    KaiI18n.setText(host, "Couldn't check — Core is not answering.");
+    return;
+  }
+  const version = $("app-version")?.textContent || "";
+  /*
+   * "What changed?" is the question every update prompt raises and none of
+   * them used to answer. The release notes live on the website, anchored per
+   * version, so this links straight to the entry for the build that is
+   * actually running. target=_blank goes to the system browser — the shell's
+   * window-open handler sends every http(s) link there.
+   */
+  const semver = (/(\d+\.\d+\.\d+)/.exec(version) || [])[1] || "";
+  const notes = document.body.dataset.releaseChannel === "test"
+    ? KaiI18n.html` <a href="https://github.com/therexdev/kaiapp/releases/tag/test-build" target="_blank" rel="noreferrer">Test builds</a>`
+    : KaiI18n.html` <a href="https://koinosai.com/updates${semver ? `#v${semver}` : ""}" target="_blank" rel="noreferrer">What's new</a>`;
+  const say = (text) => { host.innerHTML = "<span></span>" + notes; KaiI18n.setText(host.firstElementChild, text); };
+
+  if (s.kind === "packaged") {
+    if (fetchRemote) {
+      if (!window.koinosShell?.checkForUpdates) {
+        say(KaiI18n.message`${version} — the desktop updater isn't available in this copy.`);
+        return;
+      }
+      let checked;
+      try {
+        checked = await window.koinosShell.checkForUpdates();
+        if (!checked || typeof checked.kind !== "string") throw new Error("Invalid updater response");
+      } catch {
+        say(KaiI18n.message`${version} — couldn't contact the desktop updater. Restart the app and try again.`);
+        return;
+      }
+      if (checked.kind === "current") {
+        say(KaiI18n.message`${version} — up to date. Checked just now.`);
+      } else if (checked.kind === "downloading") {
+        say(KaiI18n.message`Koinos AI ${checked.version || "update"} is available — downloading it now. You'll be asked before restarting.`);
+      } else if (checked.kind === "downloaded") {
+        say(KaiI18n.message`Koinos AI ${checked.version || "update"} is ready and will install when you close the app.`);
+      } else if (checked.kind === "available") {
+        say(KaiI18n.message`Koinos AI ${checked.version || "update"} is available and ready to download.`);
+      } else {
+        say(KaiI18n.message`${version} — ${checked.reason || "couldn't check for updates."}`);
+      }
+      return;
+    }
+    say(KaiI18n.message`${version} — updates install themselves.`);
+    return;
+  }
+  if (s.kind !== "source") {
+    say(KaiI18n.message`${version} — ${s.reason || "update state unknown."}`);
+    return;
+  }
+  const where = s.detached ? "not on a branch" : `on ${s.branch}`;
+  if (s.behind > 0) {
+    say(
+      `${version} — ${s.behind} update${s.behind === 1 ? "" : "s"} behind (${where}). ` +
+      (s.canApply
+        ? "The app will offer to update and restart."
+        : `${s.reason} Fix it from a terminal, then restart.`)
+    );
+  } else if (s.canCheck) {
+    say(KaiI18n.message`${version} — up to date (${where}), installed from source.`);
+  } else {
+    say(KaiI18n.message`${version} — installed from source, ${where}. ${s.reason || ""}`);
+  }
+}
+
+$("btn-update-check")?.addEventListener("click", async (e) => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  KaiI18n.setText(b, "Checking…");
+  try {
+    await renderUpdateStatus({ fetchRemote: true });   // the round trip they asked for
+  } finally {
+    b.disabled = false;
+    KaiI18n.setText(b, "Check for updates");
+  }
+});
+
+function renderSettings() {
+  KaiProviders.renderSettings();
+  renderUpdateStatus();
+  renderAccount?.();
+  renderDev();
+  renderCodeSwitch();
+  window.KaiKoinos?.refresh?.();
+}
+
+/** Switch to a view and draw it. Shared so anything that navigates the user
+ *  (the sidebar, the Koinos switch) goes through one path and leaves
+ *  `state.view` telling the truth. */
+function activateView(name) {
+  if (state.view === "workflows" && name !== "workflows") { if (!window.KaiWorkflows?.canLeave()) return; window.KaiWorkflows?.leave(); }
+  if (name === "tasks" && window.kaiCompanionBridge) name = "workflows";
+  if (name === "network" && document.body.classList.contains("product-v2")) name = "network-overview";
+  state.view = name;
+  state.routed = true; // they chose this; the boot poll must stop overriding it
+  showView(name);
+  // The shell never shares a scroll offset with its pages. Explicit page
+  // navigation starts at the heading; background refreshes preserve position.
+  $("main").scrollTop = 0;
+  const page = $("view-" + name);
+  if (page?.matches(".product-page, #view-earn")) page.scrollTop = 0;
+  if (name.startsWith("koinos")) {
+    // One entry now; the rail inside picks the screen. Re-selecting the rail's
+    // current item keeps the iframe warm and the highlight honest.
+    if (window.KaiKoinosNode) window.KaiKoinosNode.select(currentNodeScreen());
+    return;
+  }
+  if (name === "api") renderApi();
+  if (name === "devtools") window.KaiDevTools?.render();
+  if (name === "code") window.KaiCode?.render();
+  if (["earn", "payment-wallet", "recovery"].includes(name)) renderEarn();
+  if (name === "models") renderModels();
+  if (name === "compare") renderCompare();
+  if (name === "tasks") renderTasks();
+  if (name === "agents") window.KaiAgentNetwork?.render();
+  if (["brain", "workflows", "connections"].includes(name)) window.KaiCompanionHub?.render(name);
+  if (name === "network") renderNetwork();
+  if (name === "settings") renderSettings();
+  if (name === "docs") renderDocs();
+  window.KaiProduct?.render(name);
+}
+
+for (const b of document.querySelectorAll("[data-view]")) {
+  b.addEventListener("click", () => {
+    if (b.disabled) return;
+    activateView(b.dataset.view);
+  });
+}
+
+// ---------- onboarding ----------
+
+async function renderOnboarding(entry) {
+  $("offer-name").textContent = entry.label;
+  KaiI18n.setText($("offer-sub"), KaiI18n.message`alias “${entry.alias}” · verified download`);
+  if ($("hw-summary").childElementCount === 0) {
+    try {
+      const h = await coreGet("/core/health");
+      const hw = h.hardware || {};
+      const gpu = hw.gpus?.[0];
+      const gpuSummary = gpu
+        ? `${gpu.name}${gpu.vramMb ? ` · ${(gpu.vramMb / 1024).toFixed(0)} GB VRAM` : ""}`
+        : hw.capabilities?.metalEligible
+          ? "Apple Silicon · Metal acceleration"
+          : "None detected — running on CPU";
+      const rows = [
+        ["System", `${hw.platform ?? "?"} · ${hw.arch ?? "?"}`],
+        ["CPU", `${hw.cpu?.model ?? "?"} (${hw.cpu?.cores ?? "?"} threads)`],
+        ["Memory", hw.ramBytes ? `${(hw.ramBytes / 1e9).toFixed(0)} GB` : "?"],
+        ["GPU", gpuSummary],
+      ];
+      $("hw-summary").innerHTML = rows
+        .map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`)
+        .join("");
+    } catch {
+      /* health shows up on the next poll */
+    }
+  }
+}
+
+$("btn-download").addEventListener("click", async () => {
+  $("btn-download").disabled = true;
+  onboardError(null);
+  showProgress(null); // instant feedback; real numbers arrive with the next poll
+  const r = await fetch("/core/models/ensure", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ alias: state.alias }),
+  });
+  const j = await r.json();
+  if (!j.ok) {
+    onboardError(j.error);
+  }
+  refresh();
+});
+
+function showProgress(pct, done, total) {
+  $("download-progress").hidden = false;
+  $("btn-download").disabled = true;
+  $("bar-fill").style.width = pct != null ? `${pct}%` : "12%";
+  KaiI18n.setText($("bar-label"), pct != null
+      ? `${pct}% · ${(done / 1e6).toFixed(0)} / ${(total / 1e6).toFixed(0)} MB`
+      : "Preparing…");
+}
+
+function onboardError(msg) {
+  $("onboard-error").hidden = !msg;
+  $("onboard-error").textContent = msg || "";
+  if (msg) {
+    $("download-progress").hidden = true;
+    $("btn-download").disabled = false;
+  }
+}
+
+// ---------- chat ----------
+
+$("composer").addEventListener("submit", (e) => {
+  e.preventDefault();
+  send();
+});
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+$("btn-stop").addEventListener("click", () => state.abort?.abort());
+
+function addMsg(role, text) {
+  const empty = $("chat-empty");
+  if (empty) empty.remove();
+  const div = document.createElement("div");
+  div.className = `msg ${role}`;
+  // Assistant text is markdown (rendered through the escape-first
+  // renderer); user text stays literal.
+  if (role === "assistant") div.innerHTML = mdToHtml(text);
+  else div.textContent = text;
+  // Attached-file turns render collapsed — the model saw all of it; the
+  // human only needs to know it's there.
+  if (role === "user" && text.startsWith("📎 ")) {
+    div.classList.add("msg-file");
+    div.title = "Attached file (sent to the model in full) — click to expand";
+    div.addEventListener("click", () => div.classList.toggle("expanded"));
+  }
+  if (role === "assistant" && text) attachMsgActions(div);
+  $("messages").appendChild(div);
+  $("messages").scrollTop = $("messages").scrollHeight;
+  return div;
+}
+
+/** Hover actions on an assistant bubble: copy, and (on the last) regenerate. */
+function attachMsgActions(bubble) {
+  const bar = document.createElement("div");
+  bar.className = "msg-actions";
+  // Read aloud uses the OS voices Chromium ships (speechSynthesis): offline,
+  // free, no downloads — hidden only if the platform has no voices at all.
+  const canSpeak = "speechSynthesis" in window;
+  bar.innerHTML = KaiI18n.html`<button type="button" class="msg-act" data-act="copy" title="Copy message">Copy</button>
+    <button type="button" class="msg-act" data-act="regen" title="Ask again">Regenerate</button>
+    <button type="button" class="msg-act" data-act="remember" title="Remember the key fact from this message across all chats">📌 Remember</button>${
+      canSpeak ? KaiI18n.html`<button type="button" class="msg-act" data-act="speak" title="Read this reply aloud">🔊 Read</button>` : ""
+    }`;
+  bubble.appendChild(bar);
+}
+
+/** One utterance at a time; clicking again (or another message) stops it. */
+function speakText(btn, text) {
+  const speaking = window.speechSynthesis.speaking;
+  window.speechSynthesis.cancel();
+  for (const b of document.querySelectorAll('.msg-act[data-act="speak"]')) KaiI18n.setText(b, "🔊 Read");
+  if (speaking && btn.dataset.speaking === "1") {
+    delete btn.dataset.speaking;
+    return;
+  }
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = u.onerror = () => {
+    KaiI18n.setText(btn, "🔊 Read");
+    delete btn.dataset.speaking;
+  };
+  KaiI18n.setText(btn, "⏹ Stop");
+  btn.dataset.speaking = "1";
+  window.speechSynthesis.speak(u);
+}
+
+$("messages").addEventListener("click", async (e) => {
+  const codeBtn = e.target.closest(".code-copy");
+  if (codeBtn) {
+    const code = codeBtn.closest(".code-block")?.querySelector("code")?.textContent || "";
+    await navigator.clipboard.writeText(code);
+    KaiI18n.setText(codeBtn, "Copied");
+    setTimeout(() => (KaiI18n.setText(codeBtn, "Copy")), 1200);
+    return;
+  }
+  const act = e.target.closest(".msg-act");
+  if (!act) return;
+  const bubble = act.closest(".msg");
+  if (act.dataset.act === "copy") {
+    // History is the source of truth — the bubble's textContent would
+    // include the action labels themselves.
+    const idx = [...$("messages").querySelectorAll(".msg.assistant")].indexOf(bubble);
+    const assistants = state.history.filter((m) => m.role === "assistant");
+    await navigator.clipboard.writeText(assistants[idx]?.content ?? "");
+    KaiI18n.setText(act, "Copied");
+    setTimeout(() => (KaiI18n.setText(act, "Copy")), 1200);
+  }
+  if (act.dataset.act === "remember") {
+    // Distill the message into ONE short fact worth keeping — the model
+    // does the summarizing so the memory stays a note, not a transcript.
+    const idx = [...$("messages").querySelectorAll(".msg.assistant")].indexOf(bubble);
+    const assistants = state.history.filter((m) => m.role === "assistant");
+    const src = assistants[idx]?.content ?? "";
+    if (!src) return;
+    act.textContent = "…";
+    try {
+      let fact = src.length <= 200 ? src : await askModelOnce([
+        { role: "user", content: `Condense this into ONE short fact worth remembering long-term (max 25 words, no preamble):\n\n${src.slice(0, 2000)}` },
+      ], state.alias);
+      fact = String(fact || "").trim().slice(0, 300) || src.slice(0, 200);
+      if (!window.kaiCompanionBridge) throw new Error("Open the desktop app to save memories in Brain.");
+      const saved = await window.kaiCompanionBridge.manage("note", { text: fact, pinned: true });
+      if (!saved?.ok) throw new Error(saved?.error || "Brain could not save this memory.");
+      KaiI18n.setText(act, "📌 Remembered");
+      setTimeout(() => (KaiI18n.setText(act, "📌 Remember")), 1600);
+    } catch (error) {
+      alert(error.message || "Brain could not save this memory.");
+      KaiI18n.setText(act, "📌 Remember");
+    }
+  }
+  if (act.dataset.act === "regen" && !state.chatting) {
+    // Drop the answer being redone and replay the question.
+    const lastUser = [...state.history].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
+    while (state.history.length && state.history[state.history.length - 1].role !== "user") state.history.pop();
+    state.history.pop();
+    rebuildMessages();
+    send(lastUser.content);
+  }
+  if (act.dataset.act === "speak") {
+    const idx = [...$("messages").querySelectorAll(".msg.assistant")].indexOf(bubble);
+    const assistants = state.history.filter((m) => m.role === "assistant");
+    speakText(act, assistants[idx]?.content ?? bubble.textContent ?? "");
+  }
+});
+
+async function send(replayText) {
+  const text = replayText ?? $("input").value.trim();
+  if (!text || state.chatting) return;
+  const chatModel = composedChatModel();
+  if (!chatModel) { addMsg("error", "Choose an available model. For OpenAI or Anthropic, connect and refresh models in Settings; Local-Only blocks online connections."); return; }
+  if (KaiProviders.isModel(chatModel) && getChatMode().startsWith("team:")) {
+    addMsg("error", "Desktop providers work in Chat, Research and Agent. Choose one of those modes, or use a local/network model for Teams."); return;
+  }
+  const creditRun = !replayText && chatModel.startsWith("koinos-network") && getChatMode() !== "chat";
+  if (creditRun) {
+    if (state.attachment?.kind === "image") { addMsg("error", "The current network model does not support images. Choose a local vision model."); return; }
+    try { if (!await window.KaiCreditRuns.begin(getChatMode().startsWith("team:") ? "team" : getChatMode())) return; }
+    catch (e) { addMsg("error", e.message); return; }
+  }
+  if (!replayText) $("input").value = "";
+  // An attached IMAGE rides on the question turn itself (vision input) —
+  // gated to models that can actually see (the gateway enforces this too;
+  // client-side is just the instant, friendlier refusal).
+  let pendingImages = null;
+  if (!replayText && state.attachment?.kind === "image") {
+    if (chatModel.startsWith("koinos-network") || (!KaiProviders.isModel(chatModel) && !state.visionAliases?.has(chatModel))) {
+      addMsg("error", "That model can't see images — pick a vision-capable model (👁 in the picker), then send again.");
+      $("input").value = text;
+      return;
+    }
+    pendingImages = [state.attachment.dataUri];
+    clearAttachment();
+  } else if (!replayText && state.attachment) {
+    // An attached text file becomes its own user turn right before the
+    // question, so it round-trips through history and re-renders faithfully.
+    const a = state.attachment;
+    const fileMsg = `📎 ${a.name}${a.trimmed ? " (trimmed)" : ""}\n\n\`\`\`\n${a.text}\n\`\`\``;
+    state.history.push({ role: "user", content: fileMsg });
+    addMsg("user", fileMsg);
+    clearAttachment();
+  }
+  state.history.push({ role: "user", content: text, ...(pendingImages ? { images: pendingImages } : {}) });
+  const userEl = addMsg("user", text);
+  if (pendingImages) renderMsgImages(userEl, pendingImages);
+
+  const bubble = addMsg("assistant", "");
+  let verifiedPartial = "";
+  bubble.classList.add("streaming");
+  // Three swelling dots until the first token lands — a blank bubble read as
+  // "stuck" during model load / network dispatch (field feedback).
+  bubble.innerHTML = KaiI18n.html('<span class="typing-dots" aria-label="thinking"><i></i><i></i><i></i></span>');
+  state.chatting = true;
+  $("btn-send").disabled = true;
+  $("btn-stop").hidden = false;
+  state.abort = new AbortController();
+  const t0 = performance.now(); // include routing, tools, memory and model load
+
+  // 🌐 research first (search → read → answer). The web context is a
+  // TRANSIENT turn: it shapes THIS request but never enters state.history —
+  // persisting kilobytes of snippets would bloat every later request's
+  // 4k-token context. The citations persist on the assistant message.
+  let webCitations = null;
+  let reqHistory = state.history;
+  const answerMode = replayText ? "chat" : getChatMode();
+
+  // 👥 AI Teams (task #58): the team produces the FINAL answer itself —
+  // plan, tool-using workers, writer, critic — streamed as a live trace.
+  // No second completion pass happens; this branch owns the whole turn.
+  if (answerMode.startsWith("team:")) {
+    const template = answerMode.slice(5);
+    const trace = document.createElement("div");
+    trace.className = "web-status";
+    bubble.before(trace);
+    try {
+      // Code-running teams get ONE upfront, explicit consent for the run —
+      // the same trust boundary as confirming a sensitive tool, stated in
+      // plain words before anything executes.
+      let allowSensitive = false;
+      if (template === "analyst") {
+        allowSensitive = confirm(
+          "The Analyst team writes and runs code in the sandbox (its own scratch folder, no network, no other programs). Allow for this run?"
+        );
+      }
+      const teamBody = { template, question: text, model: chatModel, allowSensitive };
+      const resp = creditRun ? await KaiCreditRuns.execute("team", teamBody, { signal: state.abort.signal }) : await fetch("/core/teams/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: state.abort.signal,
+        body: JSON.stringify(teamBody),
+      });
+      if (!resp.ok || !resp.body) throw new Error(`teams endpoint answered ${resp.status}`);
+      const decoder = new TextDecoder();
+      let buf = "";
+      let done = null;
+      for await (const chunk of resp.body) {
+        buf += decoder.decode(chunk, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 2);
+          if (!line.startsWith("data: ")) continue;
+          const ev = JSON.parse(line.slice(6));
+          if (ev.trace) KaiI18n.setText(trace, KaiI18n.message`👥 ${ev.trace.stage}: ${String(ev.trace.detail).slice(0, 140)}`);
+          if (ev.done) done = ev;
+        }
+      }
+      if (!done) throw new Error("the team stream ended without an answer");
+      if (done.error) throw new Error(done.error);
+      KaiI18n.setText(trace, KaiI18n.message`👥 team finished in ${done.modelCalls} model calls`);
+      bubble.innerHTML = mdToHtml(done.answer);
+      attachMsgActions(bubble);
+      state.history.push({ role: "assistant", content: done.answer });
+      saveCurrentChat();
+    } catch (e) {
+      if (e.name === "AbortError") {
+        trace.remove();
+        state.history.push({ role: "assistant", content: "(team run stopped)" });
+        KaiI18n.setText(bubble, "(team run stopped)");
+        saveCurrentChat();
+      } else {
+        trace.remove();
+        bubble.remove();
+        state.history.pop();
+        addMsg("error", String(e.message));
+        $("input").value = text;
+      }
+    } finally {
+      if (creditRun) await KaiCreditRuns.finish();
+      bubble.classList.remove("streaming");
+      state.chatting = false;
+      $("btn-send").disabled = false;
+      $("btn-stop").hidden = true;
+      state.abort = null;
+    }
+    return;
+  }
+
+  try {
+    const turnHistory = state.history.slice(-5, -1).map(m => m.role + ": " + m.content).join("\n");
+    const paidChat = chatModel.startsWith("koinos-network") && window.KaiNetwork?.info.configured;
+    const route = paidChat && !creditRun ? { lane: "chat", needsTools: false } : KaiAgents.routeTurn(text, { mode: answerMode, history: turnHistory });
+    if (!route.needsTools) {
+      reqHistory = [{ role: "system", content: KaiAgents.fastContext(route) }, ...state.history];
+    }
+    if (!replayText && (answerMode === "research" || route.needsTools && (route.lane !== "web" || answerMode === "agent"))) {
+      // Research / Agent phase: gather first (multi-round, tool calls), then
+      // the final answer streams through the normal path below. The gathered
+      // context is a TRANSIENT turn — same rule as the 🌐 flow.
+      const status = document.createElement("div");
+      status.className = "web-status";
+      bubble.before(status);
+      try {
+        if (!state.chatId) await saveCurrentChat();
+        const actionHost = document.createElement("div"); bubble.before(actionHost);
+        const connectedJSON = window.KaiCompanionClient?.toolJSON(chatModel, async (url, options) => {
+          const response = await fetch(url, { ...options, signal: state.abort.signal }); return response.json();
+        }, state.abort.signal, { question: text, conversationId: state.chatId || "main-new", host: actionHost });
+        const rt = KaiAgents.makeRuntime({
+          askModelOnce,
+          confirmTool,
+          json: connectedJSON,
+          signal: state.abort.signal,
+          route,
+          setStatus: (t) => { status.textContent = t; },
+        });
+        const phase = answerMode === "research" ? await rt.deepResearch(text, chatModel) : await rt.runAgent(text, chatModel, turnHistory);
+        if (phase) {
+          webCitations = phase.citations?.length ? phase.citations : null;
+          status.textContent = phase.trace || "";
+          reqHistory = [...state.history.slice(0, -1), { role: "user", content: phase.context }, state.history[state.history.length - 1]];
+        }
+      } catch (e) {
+        if (e.name === "AbortError" || creditRun) throw e;
+        KaiI18n.setText(status, KaiI18n.message`⚠ ${String(e.message || e).slice(0, 140)} — answering without tools.`);
+      } finally {
+        if (!status.textContent) status.remove();
+      }
+    } else if (!replayText && route.lane === "web" && state.webSearch) {
+      const status = document.createElement("div");
+      status.className = "web-status";
+      bubble.before(status);
+      try {
+        const research = await webResearch(text, status, state.abort.signal);
+        if (research) {
+          webCitations = research.citations;
+          reqHistory = [...state.history.slice(0, -1), { role: "user", content: research.context }, state.history[state.history.length - 1]];
+        }
+      } finally {
+        if (!status.textContent) status.remove();
+      }
+    } else if (!replayText && route.lane === "web") {
+      reqHistory = [{ role: "system", content: "No live lookup ran: the web toggle is off. Do not invent current results. Explain that enabling the globe allows this lookup, or answer only the parts supported by existing knowledge." }, ...state.history];
+    }
+
+    // Shared provider enrichment retrieves local memory once, on the final
+    // answer only. Both main Chat and desktop KAI use that same path.
+    state.abort.signal.throwIfAborted();
+    const resp = await KaiProviders.chatFetch("/core/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: state.abort.signal,
+      body: JSON.stringify({
+        model: chatModel,
+        stream: true,
+        // Persona + remembered facts ride as ONE system turn; history itself
+        // stays user/assistant. toWire converts image-bearing turns to OpenAI
+        // content parts and strips UI-only fields (citations) off the rest.
+        messages: toWire(
+          (() => {
+            const sys = personaText();
+            return sys ? [{ role: "system", content: sys }, ...reqHistory] : reqHistory;
+          })()
+        ),
+      }),
+    });
+    if (!resp.ok) {
+      const j = await resp.json().catch(() => null);
+      throw new Error(j?.error?.message || `Core answered ${resp.status}`);
+    }
+    let acc = "";
+    let servedBy = null;
+    let servedModel = null;
+    let lastPaint = 0;
+    let tFirst = null;
+    let replyWarning = "";
+    for await (const { content, model, served, warning } of sseDeltas(resp.body)) {
+      if (warning) replyWarning = warning;
+      if (model) servedBy = model;
+      if (served) servedModel = served;
+      if (content) {
+        if (tFirst == null) tFirst = performance.now();
+        acc += content;
+        verifiedPartial = acc;
+        // Markdown live during the stream, throttled so re-rendering
+        // doesn't chew CPU the model needs.
+        const now = performance.now();
+        if (now - lastPaint > 80) {
+          bubble.innerHTML = mdToHtml(acc);
+          lastPaint = now;
+          $("messages").scrollTop = $("messages").scrollHeight;
+        }
+      }
+    }
+    bubble.innerHTML = mdToHtml(acc);
+    if (replyWarning) {
+      const note = document.createElement("div"); note.className = "route-tag"; note.setAttribute("role", "status");
+      note.textContent = replyWarning; bubble.appendChild(note);
+    }
+    if (acc) attachMsgActions(bubble);
+    $("messages").scrollTop = $("messages").scrollHeight;
+    // §29 transparency: a Local-First answer that overflowed to the network
+    // says so on the message itself — silence would hide that the prompt
+    // left the machine.
+    if (servedBy === "koinos-network") {
+      // §29 both directions: overflow discloses leaving the machine, and an
+      // explicit network chat names which class actually answered.
+      const cls = servedModel ? state.aliasLabels?.[servedModel] || servedModel : null;
+      const tag = document.createElement("div");
+      tag.className = "route-tag";
+      KaiI18n.setText(tag, !chatModel.startsWith("koinos-network")
+        ? `answered via Koinos Network${cls ? ` (${cls})` : ""} — local model was unavailable`
+        : cls
+          ? `served by the network's ${cls}`
+          : "");
+      if (tag.textContent) bubble.appendChild(tag);
+    }
+    if (KaiProviders.isModel(chatModel)) {
+      const tag = document.createElement("div"); tag.className = "route-tag";
+      tag.textContent = "Answered by " + KaiProviders.label(chatModel) + " · private desktop connection"; bubble.appendChild(tag);
+    }
+    if (webCitations) renderCitations(bubble, webCitations);
+    // Speed transparency (field request): show how long the wait actually
+    // was and the delivered rate, so "slow" becomes a number we can chase.
+    if (acc && tFirst != null) {
+      const firstS = (tFirst - t0) / 1000;
+      const genS = Math.max(0.001, (performance.now() - tFirst) / 1000);
+      const tokPerSec = acc.length / 4 / genS; // ~4 chars/token estimate
+      const meta = document.createElement("div");
+      meta.className = "msg-meta";
+      KaiI18n.setText(meta, resp.headers.get("x-kai-buffered") === "true" ? `Verified answer in ${firstS.toFixed(1)}s` : KaiI18n.message`first reply in ${firstS.toFixed(1)}s · ~${tokPerSec.toFixed(0)} tok/s`);
+      bubble.appendChild(meta);
+    }
+    state.history.push({ role: "assistant", content: acc, ...(webCitations ? { citations: webCitations } : {}) });
+    const saved = await saveCurrentChat();
+    const paidRequest = resp.headers.get("x-kai-paid-request");
+    if (paidRequest && saved) await KaiNetwork.acknowledge(paidRequest).catch(() => {});
+  } catch (e) {
+    if (verifiedPartial) {
+      const partial = verifiedPartial;
+      bubble.innerHTML = mdToHtml(partial); attachMsgActions(bubble);
+      state.history.push({ role: "assistant", content: partial, interrupted: true });
+      await saveCurrentChat();
+      addMsg("error", "Reply interrupted. The received text is saved; recover the original request to check its verified usage.");
+    } else if (e.name === "AbortError" && !(chatModel.startsWith("koinos-network") && window.KaiNetwork?.info.configured)) {
+      state.history.push({ role: "assistant", content: bubble.textContent });
+      if (bubble.textContent) attachMsgActions(bubble);
+      saveCurrentChat();
+    } else {
+      bubble.remove();
+      state.history.pop(); // drop the failed user turn so retry is clean
+      addMsg("error", e.name === "AbortError" ? "Stopped. Send the same message again to check or recover the original request." : String(e.message));
+      $("input").value = text;
+    }
+  } finally {
+    if (creditRun) await KaiCreditRuns.finish();
+    bubble.classList.remove("streaming");
+    state.chatting = false;
+    $("btn-send").disabled = false;
+    $("btn-stop").hidden = true;
+    state.abort = null;
+  }
+}
+
+/** Parse an OpenAI SSE stream into {content, model} chunk views. */
+async function* sseDeltas(body) {
+  const decoder = new TextDecoder();
+  let buf = "";
+  for await (const chunk of body) {
+    buf += decoder.decode(chunk, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      for (const line of frame.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") return;
+        try {
+          const j = JSON.parse(data);
+          yield { content: j.choices?.[0]?.delta?.content || "", model: j.model || null, served: j.servedModel || null, warning: j.warning };
+        } catch {
+          /* keep-alive or non-JSON frame */
+        }
+      }
+    }
+  }
+}
+
+// ---------- api view ----------
+
+async function renderApi() {
+  const origin = location.origin;
+  $("api-snippet").textContent = [
+    "from openai import OpenAI",
+    "",
+    `client = OpenAI(base_url="${origin}/v1", api_key="none-needed-yet")`,
+    `resp = client.chat.completions.create(`,
+    `    model="${state.alias ?? "dev-tiny"}",`,
+    '    messages=[{"role": "user", "content": "Hello!"}],',
+    ")",
+  ].join("\n");
+  renderDev(); // developer-tools toggle + panel (task #61)
+  renderCodeSwitch(); // Koinos Code toggle + its own sidebar item (task #72)
+  renderRemote(); // remote access toggle + public URL (task #94)
+  const j = await coreGet("/core/keys");
+  $("key-list").innerHTML = "";
+  for (const k of j.keys) {
+    const li = document.createElement("li");
+    const left = document.createElement("span");
+    left.textContent = k.name + " ";
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    // §8 developer view: usage this month, developer-dashboard style.
+    const u = k.usage || { requests: 0, inTok: 0, outTok: 0, costUsd: "0" };
+    meta.textContent =
+      `${u.requests} req · ${u.inTok.toLocaleString()} in / ${u.outTok.toLocaleString()} out tok · $${Number(u.costUsd).toFixed(4)}` +
+      (k.budgetUsdMonthly != null ? ` / $${k.budgetUsdMonthly} budget` : "");
+    left.appendChild(meta);
+
+    const budget = document.createElement("button");
+    budget.className = "linklike";
+    KaiI18n.setText(budget, "budget");
+    /*
+     * An INLINE editor, not prompt(): window.prompt does not exist in Electron
+     * — it returns null without showing anything, so this button did nothing
+     * at all in the packaged app. Same trap as the MCP folder entry and the
+     * first Koinos Code panel; core/test/electron-dialogs.test.js now greps
+     * for it, because no browser test can reproduce a missing browser API.
+     */
+    budget.addEventListener("click", () => {
+      if (li.querySelector(".budget-edit")) return;
+      const wrap = document.createElement("span");
+      wrap.className = "budget-edit";
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.step = "0.01";
+      input.className = "small";
+      input.placeholder = "USD / month — empty = no limit";
+      input.value = k.budgetUsdMonthly ?? "";
+      const save = document.createElement("button");
+      save.className = "small primary";
+      KaiI18n.setText(save, "Save");
+      const cancel = document.createElement("button");
+      cancel.className = "small";
+      KaiI18n.setText(cancel, "Cancel");
+      const close = () => wrap.remove();
+      const commit = async () => {
+        const v = input.value.trim();
+        save.disabled = true;
+        await fetch(`/core/keys/${k.id}/budget`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ budgetUsdMonthly: v === "" ? null : Number(v) }),
+        });
+        close();
+        renderApi();
+      };
+      save.addEventListener("click", commit);
+      cancel.addEventListener("click", close);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") close();
+      });
+      wrap.append(input, save, cancel);
+      li.appendChild(wrap);
+      input.focus();
+    });
+
+    const del = document.createElement("button");
+    KaiI18n.setText(del, "revoke");
+    del.addEventListener("click", async () => {
+      await fetch(`/core/keys/${k.id}`, { method: "DELETE" });
+      renderApi();
+    });
+    li.append(left, budget, del);
+    $("key-list").appendChild(li);
+  }
+}
+
+$("btn-new-key").addEventListener("click", async () => {
+  const r = await fetch("/core/keys", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: `key ${new Date().toISOString().slice(0, 10)}` }),
+  });
+  const j = await r.json();
+  $("new-key-reveal").hidden = false;
+  $("new-key-value").textContent = j.secret;
+  renderApi();
+});
+
+// ---------- developer tools (task #61/#64) ----------
+// The CONTENT lives in its own sidebar view now (ui/devtools-view.js) —
+// what stays here is the switch in Local API and the nav reveal, the same
+// pattern as the Koinos Node toggle.
+
+async function renderDev() {
+  try {
+    const d = await coreGet("/core/dev");
+    const on = d.enabled === true;
+    $("btn-dev-toggle").setAttribute("aria-checked", String(on));
+    $("nav-devtools").hidden = !on;
+  } catch {
+    /* core not up yet — the next renderApi retries */
+  }
+}
+
+// ---------- Koinos Code (task #72) ----------
+// Its OWN switch and its OWN sidebar item. It used to ride on the developer
+// switch, but they answer different questions: developer tools reveal
+// multi-agent systems and a benchmark; Koinos Code writes files where you
+// point it and runs commands as you. Core seeds this switch from dev.tools the
+// first time it is read, so nobody who already had it loses it.
+
+async function renderCodeSwitch() {
+  try {
+    const d = await coreGet("/core/code-switch");
+    const on = d.enabled === true;
+    $("btn-code-toggle").setAttribute("aria-checked", String(on));
+    $("nav-code").hidden = !on;
+    // Turning it off while looking at it should not strand the user on a
+    // hidden view.
+    if (!on && state.view === "code") activateView("chat");
+  } catch {
+    /* core not up yet — the next renderApi retries */
+  }
+}
+
+$("btn-code-toggle").addEventListener("click", async () => {
+  const on = $("btn-code-toggle").getAttribute("aria-checked") === "true";
+  await fetch("/core/code-switch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: !on }),
+  });
+  renderCodeSwitch();
+});
+
+$("btn-dev-toggle").addEventListener("click", async () => {
+  const on = $("btn-dev-toggle").getAttribute("aria-checked") === "true";
+  await fetch("/core/dev", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: !on }),
+  });
+  renderDev();
+});
+
+// ---------- remote access (task #94) ----------
+// One switch: the app long-polls koinosai.com outbound and the local API
+// answers at a stable public URL. Core refuses to enable it while no API
+// key exists — that refusal lands in #remote-error, not a silent no-op.
+
+async function renderRemote() {
+  try {
+    const r = await coreGet("/core/remote");
+    const on = r.enabled === true;
+    $("btn-remote-toggle").setAttribute("aria-checked", String(on));
+    $("remote-info").hidden = !on;
+    if (on) {
+      $("remote-base").textContent = r.base || "connecting…";
+      KaiI18n.setText($("remote-state"), r.state === "connected" ? "Connected — this URL works from anywhere your key goes."
+        : r.state === "offline" ? "Reconnecting to koinosai.com…"
+        : "Connecting…");
+    }
+  } catch {
+    /* core not up yet — the next renderApi retries */
+  }
+}
+
+$("btn-remote-toggle").addEventListener("click", async () => {
+  const on = $("btn-remote-toggle").getAttribute("aria-checked") === "true";
+  $("remote-error").hidden = true;
+  const r = await fetch("/core/remote", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: !on }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || j?.ok === false) {
+    $("remote-error").textContent = j?.error || "Could not change remote access";
+    $("remote-error").hidden = false;
+  }
+  renderRemote();
+  // The URL settles a moment after the first hello round-trips.
+  setTimeout(renderRemote, 1500);
+});
+
+
+// ---------- utils / start ----------
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+refresh();
+
+/*
+ * Reveal the switched-on sections AT BOOT.
+ *
+ * Field report: "Koinos Code and Developer Tools don't seem to pop up until I
+ * click the earn tab." Exactly right — both nav items start `hidden` in the
+ * markup and were only unhidden by renderDev/renderCodeSwitch, which ran
+ * nowhere but inside renderApi(). So the reveal was a SIDE EFFECT OF VISITING
+ * A VIEW, and a feature the person had already switched on looked switched
+ * off until they wandered somewhere unrelated. Anything that decides what the
+ * sidebar contains has to run on the way in, not on the way past.
+ */
+renderDev();
+renderCodeSwitch();
+
+// ---------- earn view (M2 alpha) ----------
+
+let earnTimer = null;
+let walletUiEpoch = 0;
+function resetWalletUiSecrets() {
+  walletUiEpoch++; walletSendArmed = null; window.KaiLegacyDrop?.clear();
+  for (const id of ["earn-pass", "earn-pass2", "earn-unlock-pass", "earn-reveal-pass", "earn-restore-wif", "earn-restore-pass", "earn-restore-pass2", "wallet-send-pass", "payment-wallet-import-key", "payment-wallet-import-pass", "payment-wallet-import-confirm", "product-purchase-unlock-pass"]) if ($(id)) $(id).value = "";
+  $("earn-wif-value").textContent = ""; $("earn-wif").hidden = true; $("earn-reveal-row").hidden = true;
+  walletMsg("");
+}
+window.KaiWalletPrivacy = { reset: resetWalletUiSecrets, get version() { return walletUiEpoch; } };
+
+async function renderEarn() {
+  const walletEpoch = walletUiEpoch;
+  clearTimeout(earnTimer);
+  let s;
+  try {
+    s = await coreGet("/core/earn");
+  } catch {
+    if (walletEpoch !== walletUiEpoch) return;
+    window.KaiLegacyDrop?.clear();
+    earnErr("Core unreachable");
+    return;
+  }
+  if (walletEpoch !== walletUiEpoch) return;
+  window.KaiPaymentWallet?.observe(s.wallet);
+  window.KaiLegacyDrop?.observe(s);
+  const wifShowing = !$("earn-wif").hidden;
+  $("earn-setup").hidden = s.wallet.exists && !wifShowing;
+  $("earn-unlock").hidden = !s.wallet.exists || s.wallet.unlocked;
+  $("earn-ready").hidden = !(s.wallet.exists && s.wallet.unlocked) || wifShowing;
+  if ($("product-earlier-provider")) $("product-earlier-provider").hidden = $("earn-ready").hidden;
+  if (!$("earn-unlock").hidden) {
+    // Which wallet file is this? If the creation time isn't when you made
+    // (or last restored) your wallet, the file is the problem, not the password.
+    KaiI18n.setText($("earn-unlock-hint"), s.wallet.address
+      ? `Account ${s.wallet.address} — wallet file created ${s.wallet.createdAt ? new Date(s.wallet.createdAt).toLocaleString() : "unknown"}`
+      : "");
+  }
+
+  if (!$("earn-ready").hidden) {
+    if (document.activeElement !== $("earn-sched") && !$("earn-sched").value) {
+      $("earn-sched").value = s.schedulerUrl || "";
+    }
+    // The light tells the truth at a glance (like a node): green pulsing =
+    // online and earning, amber = earning but struggling, red = offline.
+    const dot = $("earn-dot");
+    const stateEl = $("earn-state");
+    if (!s.worker.running) {
+      dot.className = "dot err";
+      KaiI18n.setText(stateEl, "Offline — not earning");
+    } else if (s.worker.backoff) {
+      // Courtesy pause, not a fault: the load guard saw other applications
+      // working the GPU and got out of their way. Without this branch a
+      // paused worker renders as silently broken — the next bug report.
+      dot.className = "dot busy";
+      KaiI18n.setText(stateEl, "Paused — your computer is busy with other work; earning resumes when it's free");
+    } else if (s.worker.lastError) {
+      dot.className = "dot busy";
+      KaiI18n.setText(stateEl, KaiI18n.message`Online — ${s.worker.lastError}`);
+    } else {
+      dot.className = "dot ok pulse";
+      const ago = s.worker.lastPollOkAt
+        ? Math.max(0, Math.round((Date.now() - new Date(s.worker.lastPollOkAt).getTime()) / 1000))
+        : null;
+      KaiI18n.setText(stateEl, KaiI18n.message`Online — serving${ago != null ? ` · last contact ${ago}s ago` : ""}`);
+    }
+    // Honest power guidance: if the OS suspended us, say so and name the
+    // fix — a silently flapping node looks like our bug, but it's a
+    // Windows sleep setting, and only the user can change it.
+    const standby = $("earn-standby-note");
+    if (standby) {
+      if (s.worker.standbyResumes > 0) {
+        standby.hidden = false;
+        standby.textContent =
+          `Windows standby paused earning ${s.worker.standbyResumes}× — the app reconnects on wake, but for 24/7 serving set ` +
+          `Sleep to “Never” while plugged in (Windows Settings → System → Power & battery).`;
+      } else {
+        standby.hidden = true;
+      }
+    }
+    const earnErrMsg = s.earnings?.error || null;
+    const rows = [
+      ["Account", s.wallet.address ?? "—"],
+      ["Jobs completed", String(s.worker.jobsDone ?? 0)],
+      ["Receipts accepted", String(s.worker.receiptsAccepted ?? 0)],
+      [
+        // Which models this machine offers the network, and — when one is
+        // held back — the exact rule that held it (Pi field finding: an
+        // empty advertisement used to be invisible from the app).
+        "Serving models",
+        s.worker.modelGate?.length
+          ? (s.worker.modelGate.filter((g) => g.advertised).map((g) => g.alias).join(", ") || "none") +
+            (s.worker.modelGate.some((g) => !g.advertised && g.reason)
+              ? ` · not offered: ${s.worker.modelGate
+                  .filter((g) => !g.advertised && g.reason)
+                  .map((g) => `${g.alias} — ${g.reason}`)
+                  .join("; ")}`
+              : "")
+          : "—",
+      ],
+      /*
+       * What this machine is telling the network about its Koinos block
+       * producer — which is exactly what draws the card on the dashboard.
+       *
+       * It lives here rather than only on the website because an absent card
+       * has several possible causes and none of them were visible: the node
+       * may be stopped, its log unreadable, or — the one that catches people —
+       * Earning may simply be off, since the producer report rides along with
+       * the worker's registration and there is no registration without it.
+       */
+      [
+        "Block producer",
+        !s.worker?.running
+          ? "Reported while Earning is on — start it to show this on your dashboard"
+          : s.worker.producer
+            ? `${Number(s.worker.producer.producingVhp).toFixed(2)} VHP` +
+              (s.worker.producer.blocksPerDay != null ? ` · ~${Number(s.worker.producer.blocksPerDay).toFixed(2)} blocks/day` : "") +
+              /*
+               * The one thing here that is not cosmetic. A node can be entered
+               * in the block lottery with a fraction of the stake its wallet
+               * holds, and nothing else on any screen says so — both numbers
+               * are individually correct, so only the comparison finds it.
+               */
+              (s.worker.producer.stakeBehind
+                ? ` · ⚠ producing with ${Number(s.worker.producer.stakeShortfallPct).toFixed(0)}% less VHP than your wallet holds — restart the Koinos node so it re-reads your stake`
+                : " · shown on your dashboard at koinosai.com")
+            : s.worker.producerNote || "—",
+      ],
+    ];
+    const legacyRows = [
+      ["Legacy test KAI balance", earnErrMsg ? earnErrMsg : s.earnings?.kai != null ? `${s.earnings.kai} KAI` : "—"],
+      ["Legacy prepaid balance", s.earnings?.balanceUsd != null ? `$${Number(s.earnings.balanceUsd).toFixed(4)}` : "—"],
+      [
+        "Legacy epoch",
+        s.earnings && !earnErrMsg
+          ? `${s.earnings.pendingReceipts} jobs${s.earnings.tokensProcessed != null ? ` · ${s.earnings.tokensProcessed.toLocaleString()} tokens processed` : ""}${s.earnings.pendingKai != null ? ` · ≈${Number(s.earnings.pendingKai).toFixed(4)} KAI pending` : ""}`
+          : "—",
+      ],
+      [
+        "Network usage",
+        s.earnings?.usage
+          ? `${s.earnings.usage.inputTokens.toLocaleString()} in / ${s.earnings.usage.outputTokens.toLocaleString()} out tokens · $${Number(s.earnings.usage.costUsd).toFixed(4)}`
+          : "—",
+      ],
+      [
+        "Free allowance",
+        s.earnings?.freeTokensRemaining != null ? `${s.earnings.freeTokensRemaining.toLocaleString()} tokens left this epoch` : "—",
+      ],
+    ];
+    $("earn-legacy-stats").innerHTML = legacyRows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    $("earn-stats").innerHTML = rows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    // The wallet card's receive address — same wallet the worker earns with.
+    if ($("wallet-address") && s.wallet.address) $("wallet-address").value = s.wallet.address;
+    KaiI18n.setText($("btn-earn-toggle"), s.worker.running ? "Stop Earning" : "Start Earning");
+    $("btn-earn-toggle").dataset.running = s.worker.running ? "1" : "";
+  }
+  if (["view-earn", "view-payment-wallet", "view-recovery"].some(id => $(id) && !$(id).hidden)) {
+    earnTimer = setTimeout(renderEarn, s.worker?.running ? 2000 : 5000);
+  }
+}
+
+function earnErr(msg) {
+  $("earn-error").hidden = !msg;
+  $("earn-error").textContent = msg || "";
+  if (msg) $("earn-error").classList.remove("ok");
+  if ($("product-legacy-error")) { $("product-legacy-error").hidden = !msg; $("product-legacy-error").textContent = msg || ""; }
+}
+
+/** Success note in the same slot errors use — one place to look. */
+function earnOk(msg) {
+  $("earn-error").hidden = false;
+  $("earn-error").textContent = msg;
+  $("earn-error").classList.add("ok");
+}
+
+async function earnPost(path, body) {
+  earnErr(null);
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const j = await r.json();
+  if (!j.ok) {
+    earnErr(j.error);
+    throw new Error(j.error);
+  }
+  if (path === "/core/earn/wallet/restore" || path === "/core/earn/wallet") {
+    sidebarWalletSummary = null;
+    paintSidebarWallet(null);
+    refreshSidebarWallet();
+  }
+  return j;
+}
+
+// Show/hide toggles for wallet secret fields — an invisible stray space in a
+// password field is a delayed lockout; being able to look kills the mystery.
+document.addEventListener("click", (e) => {
+  const b = e.target.closest?.(".showpw");
+  if (!b) return;
+  const inp = document.getElementById(b.dataset.target);
+  if (!inp) return;
+  inp.type = inp.type === "password" ? "text" : "password";
+  KaiI18n.setText(b, inp.type === "password" ? "show" : "hide");
+});
+
+$("btn-earn-create").addEventListener("click", async () => {
+  const viewEpoch = walletUiEpoch;
+  if ($("earn-pass").value !== $("earn-pass2").value) {
+    return earnErr("Passwords don't match — type the same password in both fields");
+  }
+  try {
+    const j = await earnPost("/core/earn/wallet", { password: $("earn-pass").value });
+    $("earn-pass").value = "";
+    $("earn-pass2").value = "";
+    if (viewEpoch !== walletUiEpoch) return;
+    $("earn-wif-value").textContent = j.wif; // shown once, never stored by the UI
+    $("earn-wif").hidden = false;
+  } catch { /* error shown */ }
+});
+
+$("btn-earn-wif-done").addEventListener("click", () => {
+  $("earn-wif-value").textContent = "";
+  $("earn-wif").hidden = true;
+  renderEarn();
+});
+
+// Enter submits wallet forms (a second Enter when an input method is mid-
+// composition: the first one commits, e.isComposing guards the difference).
+for (const [field, btn] of Object.entries({
+  "earn-pass2": "btn-earn-create",
+  "earn-unlock-pass": "btn-earn-unlock",
+  "earn-restore-pass2": "btn-earn-restore",
+})) {
+  $(field).addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) $(btn).click();
+  });
+}
+
+// Live count beside the unlock field: the user sees exactly what the app
+// sees — an empty or short value can't masquerade as a typed password.
+$("earn-unlock-pass").addEventListener("input", () => {
+  const n = [...$("earn-unlock-pass").value].length;
+  $("earn-unlock-count").textContent = n ? `${n} character${n === 1 ? "" : "s"} entered` : "";
+});
+
+$("btn-earn-unlock").addEventListener("click", async () => {
+  const pw = $("earn-unlock-pass").value;
+  if (!pw) {
+    return earnErr("The password field is empty — type your password, then press Enter or Unlock.");
+  }
+  try {
+    await earnPost("/core/earn/unlock", { password: pw });
+    $("earn-unlock-pass").value = "";
+    $("earn-unlock-count").textContent = "";
+    renderEarn();
+  } catch { /* error shown */ }
+});
+
+$("btn-earn-reveal").addEventListener("click", () => {
+  const row = $("earn-reveal-row");
+  row.hidden = !row.hidden;
+  if (!row.hidden) $("earn-reveal-pass").focus();
+});
+
+$("btn-earn-reveal-go").addEventListener("click", async () => {
+  const viewEpoch = walletUiEpoch;
+  const pw = $("earn-reveal-pass").value;
+  if (!pw) return earnErr("Type your wallet password to reveal the backup code.");
+  try {
+    const j = await earnPost("/core/earn/wallet/reveal", { password: pw });
+    $("earn-reveal-pass").value = "";
+    $("earn-reveal-row").hidden = true;
+    if (viewEpoch !== walletUiEpoch) return;
+    // Reuse the one-time backup panel — same warning copy, same dismiss.
+    $("earn-wif-value").textContent = j.wif;
+    $("earn-wif").hidden = false;
+    renderEarn();
+  } catch { /* error shown */ }
+});
+
+$("btn-earn-lock").addEventListener("click", async () => {
+  try {
+    await earnPost("/core/earn/lock");
+    renderEarn();
+  } catch { /* error shown */ }
+});
+
+/* ---- Wallet: send & receive KOIN/VHP on mainnet (Pi request 2026-08-19).
+ * Rides the node bridge's chain:balances / chain:send channels, which work
+ * on every build — no node required. The sidebar reads the balance while
+ * visible; sending still needs the password every time. */
+function walletMsg(text, ok) {
+  const el = $("wallet-msg");
+  el.hidden = !text;
+  el.textContent = text || "";
+  el.style.color = ok ? "var(--ok, #3dbf7a)" : "";
+}
+
+async function walletRpc(channel, payload) {
+  const r = await fetch("/core/koinos/rpc", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ channel, payload: payload || {} }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) {
+    throw new Error(j.error || `HTTP ${r.status}`);
+  }
+  return j.data;
+}
+
+let sidebarWalletTimer = null;
+let sidebarWalletPending = false;
+let sidebarWalletSummary = null;
+function paintSidebarWallet(summary) {
+  const card = $("sidebar-wallet");
+  const dollars = $("sidebar-wallet-usd");
+  const amount = $("sidebar-wallet-koin");
+  const vhp = $("sidebar-wallet-vhp");
+  const locale = document.documentElement.lang || "en";
+  const tokenAmount = value => {
+    if (typeof value !== "string" || !/^(0|[1-9]\d*)(\.\d{1,8})?$/.test(value)) return null;
+    const [whole, fraction = ""] = value.split(".");
+    const trimmed = fraction.replace(/0+$/, ""), decimal = new Intl.NumberFormat(locale).formatToParts(1.1).find(part => part.type === "decimal").value;
+    return BigInt(whole).toLocaleString(locale) + (trimmed ? decimal + trimmed : "");
+  };
+  const usd = summary?.usd;
+  dollars.textContent = Number.isFinite(usd) && usd >= 0
+    ? (usd > 0 && usd < 0.01 ? "<" : "") + new Intl.NumberFormat(locale, { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol" }).format(usd > 0 && usd < 0.01 ? 0.01 : usd)
+    : "—";
+  const koin = tokenAmount(summary?.koin);
+  if (koin !== null) {
+    amount.textContent = `${koin} ${summary.tokenSymbol || "KOIN"}`;
+  } else {
+    KaiI18n.setText(amount, summary && !summary.address ? "Set up wallet" : "— KOIN");
+  }
+  vhp.textContent = `${tokenAmount(summary?.vhp) ?? "—"} VHP`;
+  let note = "Open wallet";
+  if (!summary) note = "Wallet balance unavailable";
+  else if (!summary.address) note = "Set up wallet";
+  else if (summary.network !== "mainnet") note = "Testnet balance has no USD value";
+  else if (summary.price?.stale) note = "KOIN price is out of date";
+  else if (usd == null) note = "KOIN price unavailable";
+  else note = "Estimated wallet value in USD";
+  card.title = KaiI18n.t(note);
+  card.setAttribute("aria-label", `${card.title}: ${dollars.textContent}, ${amount.textContent}, ${vhp.textContent}`);
+}
+async function refreshSidebarWallet() {
+  clearTimeout(sidebarWalletTimer);
+  if (sidebarWalletPending || document.hidden) return;
+  sidebarWalletPending = true;
+  try {
+    const response = await fetch("/core/koinos/rpc", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "wallet:summary", payload: {} }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error("Wallet unavailable");
+    sidebarWalletSummary = result.data;
+  } catch {
+    sidebarWalletSummary = null;
+  } finally {
+    sidebarWalletPending = false;
+    paintSidebarWallet(sidebarWalletSummary);
+    sidebarWalletTimer = setTimeout(refreshSidebarWallet, 30000);
+  }
+}
+async function openPaymentWallet() {
+  activateView("payment-wallet");
+  await renderEarn();
+  if ($("view-payment-wallet").hidden) return;
+  const target = !$("earn-setup").hidden ? $("earn-setup") : !$("earn-unlock").hidden ? $("earn-unlock") : $("wallet-address");
+  if (!target.matches("input")) { target.scrollIntoView({ block: "nearest" }); target.querySelector("input,button")?.focus({ preventScroll: true }); }
+  refreshSidebarWallet();
+}
+$("sidebar-wallet").addEventListener("click", openPaymentWallet);
+document.addEventListener("visibilitychange", () => {
+  clearTimeout(sidebarWalletTimer);
+  if (!document.hidden) refreshSidebarWallet();
+});
+document.addEventListener("kai:language-changed", () => {
+  paintSidebarWallet(sidebarWalletSummary);
+  $("status-text").title = $("status-text").textContent;
+});
+refreshSidebarWallet();
+
+$("btn-wallet-copy").addEventListener("click", async () => {
+  const addr = $("wallet-address").value;
+  if (!addr) return;
+  const notify = text => { const note = $("payment-wallet-address-note"); if (note) note.textContent = text; else walletMsg(text, true); };
+  try {
+    await navigator.clipboard.writeText(addr);
+    notify("Address copied — share it to receive KOIN or VHP.");
+  } catch {
+    $("wallet-address").select();
+    notify("Copy blocked by the browser — the address is selected, press Ctrl/Cmd-C.");
+  }
+});
+
+$("btn-wallet-balances").addEventListener("click", () => window.KaiPaymentWallet?.refresh());
+
+/* ---- Koinos AI account (task #49): device-link sign-in + wallet attach.
+ * The app never shows a login form: Sign in fetches a short code, the user
+ * approves it at <site>/link in any browser, and the app polls until its own
+ * session arrives. All calls go through Core, which refuses them in
+ * Local-Only privacy mode with words. */
+let accountFetchedAt = 0;
+let accountPolling = false;
+let websiteAccount = false;
+let accountEpoch = 0;
+const accountPath = suffix => (websiteAccount ? "/core/website-account" : "/core/account") + suffix;
+function selectAccountScope(website) {
+  websiteAccount = !!website;
+  accountEpoch++;
+  accountPolling = false;
+  accountFetchedAt = 0;
+  accountGrantId = null;
+  for (const id of ["account-code-row", "account-web", "account-signedin", "account-signedout"]) $(id).hidden = true;
+  for (const id of ["btn-account-signin", "btn-account-linkwallet", "btn-account-signout"]) $(id).disabled = false;
+  accountMsg("");
+  return renderAccount(true);
+}
+window.selectAccountScope = selectAccountScope;
+$("btn-account-scope").addEventListener("click", () => selectAccountScope(!websiteAccount));
+// The grant this window may revoke: this machine's wallet, resolved server-
+// side in account.status(). Held here so the revoke button never has to guess
+// which of several grants it means.
+let accountGrantId = null;
+
+function accountMsg(text, ok) {
+  const el = $("account-msg");
+  el.hidden = !text;
+  el.textContent = text || "";
+  el.style.color = ok ? "var(--ok, #3dbf7a)" : "";
+}
+
+async function renderAccount(force) {
+  if (!force && Date.now() - accountFetchedAt < 30000) return; // egress — don't ride the 2s earn timer
+  accountFetchedAt = Date.now();
+  const epoch = accountEpoch;
+  const so = $("account-signedout");
+  const si = $("account-signedin");
+  let j = {};
+  try {
+    const r = await fetch(accountPath(""));
+    j = await r.json();
+    if (epoch !== accountEpoch) return;
+    if (!r.ok || !j.ok) throw new Error(j.localOnly ? "Privacy is set to Local-Only — accounts need network access (Local API → Network & privacy)." : j.error || `HTTP ${r.status}`);
+  } catch (e) {
+    if (epoch !== accountEpoch) return;
+    so.hidden = true;
+    si.hidden = true;
+    return accountMsg(e.message);
+  }
+  $("account-heading").textContent = j.scope === "credits" ? "AI credit account" : "Koinos AI account";
+  $("account-hint").textContent = j.scope === "credits"
+    ? "Connect your existing credit account using its browser sign-in. Wallet connection in Credits and device setup in Earn also work without this sign-in. Your website and Connections sign-in stays saved separately."
+    : "Sign in to your website account for Connections and web access. Approve the app's short code in your browser, then link this wallet if needed.";
+  $("btn-account-scope").hidden = !j.separateCreditAccount;
+  $("btn-account-scope").textContent = websiteAccount ? "Open AI credit account" : "Website account and Connections";
+  $("account-web").hidden = true;
+  /*
+   * Three different things used to look identical here: signed out, session
+   * rejected, and the account server simply unreachable. The last one is the
+   * common case during a deploy, and telling someone to sign in again when
+   * the site is merely restarting sends them off to redo a device link they
+   * never needed to redo.
+   */
+  if (j.offline) {
+    so.hidden = true;
+    si.hidden = true;
+    return accountMsg(`${j.error || "Can't reach the account server."} Your sign-in is still saved — this should clear by itself.`);
+  }
+  accountMsg(j.sessionRejected ? "That session has ended. Sign in again to reconnect this device." : "");
+  if (j.verifyUrl || j.site) {
+    const link = $("account-verify-link");
+    const url = (j.site || "https://koinosai.com") + "/link";
+    link.href = url;
+    link.textContent = url.replace(/^https:\/\//, "");
+  }
+  if (j.signedIn) {
+    so.hidden = true;
+    si.hidden = false;
+    const a = j.account;
+    const methods = [
+      a.email ? "email" : null,
+      a.google ? "Google" : null,
+      a.passkeys?.length ? `${a.passkeys.length} passkey${a.passkeys.length > 1 ? "s" : ""}` : null,
+    ].filter(Boolean);
+    const rows = [
+      ["Signed in as", a.email || a.id],
+      ["Sign-in methods", methods.join(", ") || "none yet — add a passkey on the account page"],
+      ["Linked wallets", String(a.wallets?.length ?? 0)],
+      ["This wallet", j.thisWalletLinked ? "✓ linked to your account" : "not linked yet"],
+    ];
+    $("account-stats").innerHTML = rows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    $("btn-account-linkwallet").hidden = Boolean(j.thisWalletLinked);
+    if (j.scope !== "credits") renderWebAccess(j);
+  } else {
+    si.hidden = true;
+    so.hidden = false;
+    $("account-web").hidden = true;
+    if (j.pendingCode) {
+      $("account-code-row").hidden = false;
+      $("account-code").textContent = j.pendingCode;
+      startAccountPoll();
+    }
+  }
+}
+
+function startAccountPoll() {
+  if (accountPolling) return;
+  accountPolling = true;
+  const epoch = accountEpoch, pollPath = accountPath("/link/poll");
+  const tick = async () => {
+    if (epoch !== accountEpoch) return;
+    try {
+      const r = await fetch(pollPath, { method: "POST" });
+      const j = await r.json();
+      if (epoch !== accountEpoch) return;
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (j.pending) {
+        setTimeout(tick, 3000);
+        return;
+      }
+      accountPolling = false;
+      $("account-code-row").hidden = true;
+      accountMsg("Signed in.", true);
+      if (!websiteAccount) window.dispatchEvent(new Event("kai-credit-identity-changed"));
+      renderAccount(true);
+    } catch (e) {
+      if (epoch !== accountEpoch) return;
+      accountPolling = false;
+      $("account-code-row").hidden = true;
+      accountMsg(e.message);
+      $("btn-account-signin").disabled = false;
+    }
+  };
+  setTimeout(tick, 3000);
+}
+
+$("btn-account-signin").addEventListener("click", async () => {
+  const epoch = accountEpoch;
+  const btn = $("btn-account-signin");
+  btn.disabled = true;
+  accountMsg("");
+  try {
+    const r = await fetch(accountPath("/link/start"), { method: "POST" });
+    const j = await r.json();
+    if (epoch !== accountEpoch) return;
+    if (!r.ok || !j.ok) throw new Error(j.localOnly ? "Privacy is set to Local-Only — switch it in Local API → Network & privacy first." : j.error || `HTTP ${r.status}`);
+    $("account-code-row").hidden = false;
+    $("account-code").textContent = j.userCode;
+    KaiI18n.setText($("account-poll-status"), "Waiting for approval… this updates by itself.");
+    startAccountPoll();
+  } catch (e) {
+    if (epoch !== accountEpoch) return;
+    accountMsg(e.message);
+    btn.disabled = false;
+  }
+});
+
+$("btn-account-linkwallet").addEventListener("click", async () => {
+  const epoch = accountEpoch;
+  const btn = $("btn-account-linkwallet");
+  btn.disabled = true;
+  accountMsg("");
+  try {
+    const r = await fetch(accountPath("/wallet"), { method: "POST" });
+    const j = await r.json();
+    if (epoch !== accountEpoch) return;
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    accountMsg("Wallet linked — it now shows on your account everywhere.", true);
+    if (!websiteAccount) window.dispatchEvent(new Event("kai-credit-identity-changed"));
+    renderAccount(true);
+  } catch (e) {
+    if (epoch !== accountEpoch) return;
+    accountMsg(e.message);
+  } finally {
+    if (epoch === accountEpoch) btn.disabled = false;
+  }
+});
+
+$("btn-account-signout").addEventListener("click", async () => {
+  const epoch = accountEpoch;
+  try {
+    const r = await fetch(accountPath("/logout"), { method: "POST" });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw Error(j.error || "Sign-out failed");
+  } catch (e) { if (epoch === accountEpoch) accountMsg(e.message); return; }
+  if (epoch !== accountEpoch) return;
+  $("btn-account-signin").disabled = false;
+  if (!websiteAccount) window.dispatchEvent(new Event("kai-account-signed-out"));
+  accountMsg("Signed out on this device.", true);
+  renderAccount(true);
+});
+
+/* ---- web access: a signed spending cap for koinosai.com ----
+ *
+ * The website cannot create this. It has no key — nothing in a browser does —
+ * so the authorisation has to be signed here, on the machine that holds the
+ * wallet. What the site gets is a cap and an expiry, and it can never draw
+ * past either. That is the entire trust model, and it is worth the extra
+ * click it costs.
+ *
+ * Only offered once this wallet is LINKED: granting spend from a wallet the
+ * account has never proven it owns would be authorising a stranger.
+ */
+function renderWebAccess(j) {
+  const box = $("account-web");
+  box.hidden = !j.thisWalletLinked;
+  if (!j.thisWalletLinked) return;
+  const g = j.thisWalletGrant;
+  accountGrantId = g ? g.id : null;
+  $("account-grant-none").hidden = Boolean(g);
+  $("account-grant-live").hidden = !g;
+  if (j.site) $("account-web-open").href = j.site.replace(/\/$/, "") + "/app";
+  if (!g) return;
+  const days = Math.max(0, Math.round((g.expiresAt - Date.now()) / 86400000));
+  const rows = [
+    ["Authorised", `$${g.maxUsd.toFixed(2)} of model usage`],
+    ["Used so far", `$${g.spentUsd.toFixed(4)}`],
+    ["Left", `$${g.remainingUsd.toFixed(4)}`],
+    ["Expires", days > 1 ? `in ${days} days` : days === 1 ? "tomorrow" : "today"],
+  ];
+  $("account-grant-stats").innerHTML = rows
+    .map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+}
+
+$("btn-account-grant").addEventListener("click", async () => {
+  const btn = $("btn-account-grant");
+  const maxUsd = Number($("account-grant-cap").value);
+  const days = Number($("account-grant-days").value);
+  if (!isFinite(maxUsd) || maxUsd <= 0) return accountMsg("Set a spending cap above zero.");
+  // Say the number back before signing it. This is the only moment the cap
+  // is chosen, and it is the only thing standing between the website and the
+  // wallet — a typo here is not something to discover later.
+  if (!confirm(`Authorise koinosai.com to spend up to $${maxUsd.toFixed(2)} of model usage from this wallet over the next ${days} days?\n\nYou can end this at any time, from here or from the website.`)) return;
+  btn.disabled = true;
+  accountMsg("");
+  try {
+    const r = await fetch(accountPath("/grant"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ maxUsd, days }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    accountMsg(`Web access authorised — up to $${maxUsd.toFixed(2)} for ${days} days.`, true);
+    renderAccount(true);
+  } catch (e) {
+    accountMsg(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("btn-account-grant-revoke").addEventListener("click", async () => {
+  const btn = $("btn-account-grant-revoke");
+  if (!accountGrantId) return accountMsg("Nothing to end — reload Settings.");
+  if (!confirm("End web access now? The website stops being able to spend immediately. Anything already spent stays spent.")) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(accountPath("/grant/revoke"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: accountGrantId }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    accountMsg("Web access ended.", true);
+    renderAccount(true);
+  } catch (e) {
+    accountMsg(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Two clicks to move real money: the first arms and repeats the exact
+// amount/token/recipient back; only the second sends.
+let walletSendArmed = null;
+$("btn-wallet-send").addEventListener("click", async () => {
+  const token = $("wallet-send-token").value;
+  const to = $("wallet-send-to").value.trim();
+  const amount = $("wallet-send-amt").value.trim();
+  const password = $("wallet-send-pass").value;
+  walletMsg("");
+  if (!to || !amount) return walletMsg("Fill in the recipient address and the amount.");
+  if (!password) return walletMsg("Your wallet password is required to send.");
+  const context = window.KaiPaymentWallet?.context();
+  if (!context) return walletMsg("Refresh your wallet balance and unlock your wallet before sending.");
+  const viewEpoch = walletUiEpoch;
+  const key = `${context.address}|${context.network}|${token}|${to}|${amount}`;
+  if (walletSendArmed !== key) {
+    walletSendArmed = key;
+    walletMsg(`About to send ${amount} ${token === "koin" ? context.tokenSymbol : "VHP"} to ${to} from ${context.address} on ${context.network === "mainnet" ? "MAINNET" : "HARBINGER TESTNET"}. Click Send again to confirm.`, true);
+    return;
+  }
+  walletSendArmed = null;
+  const btn = $("btn-wallet-send");
+  btn.disabled = true;
+  try {
+    const r = await walletRpc("chain:send", { to, amount, token, password, expectedAddress: context.address, expectedNetwork: context.network });
+    if (viewEpoch !== walletUiEpoch) return;
+    $("wallet-send-to").value = "";
+    $("wallet-send-amt").value = "";
+    walletMsg(`Submitted. Transaction ${r.txId || "pending"} — check transaction history for confirmation.`, true);
+    window.KaiPaymentWallet?.refresh();
+  } catch (e) {
+    if (viewEpoch === walletUiEpoch) walletMsg(e.message);
+  } finally {
+    $("wallet-send-pass").value = "";
+    btn.disabled = false;
+  }
+});
+
+$("btn-earn-show-restore").addEventListener("click", () => {
+  const box = $("earn-restore");
+  box.hidden = !box.hidden;
+});
+
+$("btn-earn-restore").addEventListener("click", async () => {
+  if ($("earn-restore-pass").value !== $("earn-restore-pass2").value) {
+    return earnErr("New passwords don't match — type the same password in both fields");
+  }
+  try {
+    await earnPost("/core/earn/wallet/restore", {
+      wif: $("earn-restore-wif").value,
+      password: $("earn-restore-pass").value,
+    });
+    $("earn-restore-wif").value = "";
+    $("earn-restore-pass").value = "";
+    $("earn-restore-pass2").value = "";
+    $("earn-restore").hidden = true;
+    renderEarn();
+  } catch { /* error shown */ }
+});
+
+$("btn-earn-toggle").addEventListener("click", async () => {
+  try {
+    if ($("btn-earn-toggle").dataset.running) {
+      await earnPost("/core/earn/stop");
+    } else {
+      await earnPost("/core/earn/config", { schedulerUrl: $("earn-sched").value.trim() });
+      await earnPost("/core/earn/start");
+    }
+    renderEarn();
+  } catch { /* error shown */ }
+});
+
+
+$("privacy-pick").addEventListener("change", async () => {
+  await fetch("/core/network/config", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ privacyMode: $("privacy-pick").value }),
+  });
+  refresh();
+});
+
+// ---------- frameless shell chrome ----------
+// Present only under the Electron shell; a plain browser keeps OS chrome.
+if (window.koinosShell) {
+  $("titlebar").hidden = false;
+  document.body.classList.add("framed");
+  $("tb-min").addEventListener("click", () => window.koinosShell.minimize());
+  $("tb-max").addEventListener("click", () => window.koinosShell.toggleMaximize());
+  $("tb-close").addEventListener("click", () => window.koinosShell.close());
+  window.koinosShell.onMaximizeChanged((max) => {
+    $("tb-max").title = max ? "Restore" : "Maximize";
+    document.body.classList.toggle("maximized", max);
+  });
+
+  /* What the X does. Older shells have no prefs bridge and no tray, so the
+     section only appears once the shell says a tray actually exists — an
+     offer to "keep running in the notification area" is a lie without one. */
+  if (typeof window.koinosShell.loginStartup === "function") {
+    const paintStartup = p => {
+      $("settings-startup").hidden = !p?.supported;
+      $("btn-startup-toggle").setAttribute("aria-checked", String(!!p?.enabled));
+    };
+    window.koinosShell.loginStartup().then(paintStartup).catch(() => {});
+    $("btn-startup-toggle").addEventListener("click", async () => {
+      const button = $("btn-startup-toggle"); button.disabled = true;
+      try {
+        paintStartup(await window.koinosShell.setLoginStartup(button.getAttribute("aria-checked") !== "true"));
+        $("startup-error").textContent = "";
+      } catch (error) { $("startup-error").textContent = error.message; }
+      finally { button.disabled = false; }
+    });
+  }
+  if (typeof window.koinosShell.windowPrefs === "function") {
+    const paintTray = (p) => {
+      $("settings-window").hidden = !p || !p.trayAvailable;
+      $("btn-tray-toggle").setAttribute("aria-checked", String(!!p && !!p.closeToTray));
+    };
+    window.koinosShell.windowPrefs().then(paintTray).catch(() => {});
+    $("btn-tray-toggle").addEventListener("click", async () => {
+      const on = $("btn-tray-toggle").getAttribute("aria-checked") === "true";
+      paintTray(await window.koinosShell.setCloseToTray(!on));
+    });
+  }
+}
+
+// ---------- feedback ----------
+$("btn-feedback").addEventListener("click", () => {
+  $("feedback-overlay").hidden = false;
+  $("feedback-error").hidden = true;
+  $("feedback-text").focus();
+});
+$("btn-feedback-cancel").addEventListener("click", () => {
+  $("feedback-overlay").hidden = true;
+});
+$("feedback-overlay").addEventListener("click", (e) => {
+  if (e.target === $("feedback-overlay")) $("feedback-overlay").hidden = true;
+});
+$("btn-feedback-send").addEventListener("click", async () => {
+  const message = $("feedback-text").value.trim();
+  if (!message) {
+    KaiI18n.setText($("feedback-error"), "Write a sentence or two first.");
+    $("feedback-error").hidden = false;
+    return;
+  }
+  const btn = $("btn-feedback-send");
+  btn.disabled = true;
+  KaiI18n.setText(btn, "Sending…");
+  try {
+    const r = await fetch("/core/feedback", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message,
+        email: $("feedback-email").value.trim() || null,
+        includeLog: $("feedback-log").checked,
+      }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j?.error?.message || j?.error || `Send failed (${r.status})`);
+    $("feedback-text").value = "";
+    $("feedback-overlay").hidden = true;
+    // Thank the sender where they'll see it: the status line.
+    setStatus("ok", "Feedback sent — thank you!");
+  } catch (e) {
+    $("feedback-error").textContent = String(e.message);
+    $("feedback-error").hidden = false;
+  } finally {
+    btn.disabled = false;
+    KaiI18n.setText(btn, "Send");
+  }
+});
+
+// ---------- personas (how the AI should answer) ----------
+
+const PERSONAS = {
+  concise: "Be concise. Prefer short, direct answers; skip preamble and filler.",
+  explainer: "Explain clearly for a smart beginner. Use plain language and short, concrete examples.",
+  code: "You are a precise programming assistant. Prefer working code with a brief explanation, in markdown code blocks.",
+};
+
+function personaText() {
+  const v = $("persona-pick").value;
+  if (v === "custom") return $("persona-custom").value.trim();
+  return PERSONAS[v] || "";
+}
+
+$("persona-pick").addEventListener("change", () => {
+  $("persona-custom-row").hidden = $("persona-pick").value !== "custom";
+  if ($("persona-pick").value === "custom") $("persona-custom").focus();
+});
+
+function setPersonaUi(persona, system) {
+  if (persona && PERSONAS[persona]) $("persona-pick").value = persona;
+  else if (system) {
+    $("persona-pick").value = "custom";
+    $("persona-custom").value = system;
+  } else $("persona-pick").value = "";
+  $("persona-custom-row").hidden = $("persona-pick").value !== "custom";
+}
+
+// ---------- chat history (local-first, stored by Core) ----------
+
+function esc2(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
+
+async function saveCurrentChat() {
+  if (!state.history.length) return;
+  try {
+    const v = $("persona-pick").value;
+    const r = await fetch("/core/chats", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: state.chatId,
+        messages: state.history,
+        system: personaText() || undefined,
+        persona: v && v !== "custom" ? v : undefined,
+      }),
+    });
+    const j = await r.json();
+    if (j.ok) state.chatId = j.id;
+    refreshChatList();
+    return !!j.ok;
+  } catch { /* history is a convenience — never interrupt chatting over it */ }
+}
+
+async function refreshChatList() {
+  try {
+    const j = await coreGet("/core/chats");
+    state.chatIndex = j.chats || [];
+  } catch { state.chatIndex = []; }
+  renderChatList();
+}
+
+function renderChatList() {
+  const host = $("chat-list");
+  if (!host) return;
+  const q = ($("chat-search").value || "").trim().toLowerCase();
+  const rows = state.chatIndex.filter(
+    (c) => !q || c.title.toLowerCase().includes(q) || (c.searchText || "").toLowerCase().includes(q)
+  );
+  if (!rows.length) {
+    host.innerHTML = KaiI18n.html`<div class="chat-list-empty">${q ? "No chats match." : "Chats you start appear here."}</div>`;
+    return;
+  }
+  host.innerHTML = rows
+    .map(
+      (c) => KaiI18n.html`<div class="chat-row${c.id === state.chatId ? " active" : ""}${c.pinned ? " pinned" : ""}" data-id="${esc2(c.id)}" title="Double-click to rename">
+        <button class="chat-pin${c.pinned ? " on" : ""}" data-id="${esc2(c.id)}" title="${c.pinned ? "Unfavorite" : "Favorite"}" aria-label="${c.pinned ? "Unfavorite chat" : "Favorite chat"}">${c.pinned ? "★" : "☆"}</button>
+        <span class="chat-row-title">${esc2(c.title)}</span>
+        <button class="chat-edit" data-id="${esc2(c.id)}" title="Rename chat" aria-label="Rename chat">✎</button>
+        <button class="chat-del" data-id="${esc2(c.id)}" title="Delete chat" aria-label="Delete chat">×</button>
+      </div>`
+    )
+    .join("");
+}
+
+// Rename: the ✎ button or double-click swaps the title for an inline input;
+// Enter commits, Escape cancels.
+function startRename(row) {
+  if (!row || row.querySelector("input")) return;
+  const span = row.querySelector(".chat-row-title");
+  const input = document.createElement("input");
+  input.className = "chat-rename";
+  input.value = span.textContent;
+  input.maxLength = 80;
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async (commit) => {
+    if (done) return;
+    done = true;
+    const title = input.value.trim();
+    if (commit && title && title !== span.textContent) {
+      try {
+        await fetch(`/core/chats/${row.dataset.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title }),
+        });
+      } catch { /* keep old title */ }
+    }
+    refreshChatList();
+  };
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") finish(true);
+    if (ev.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+
+$("chat-list").addEventListener("dblclick", (e) => startRename(e.target.closest(".chat-row")));
+
+function rebuildMessages() {
+  const box = $("messages");
+  box.innerHTML = "";
+  for (const m of state.history) {
+    const el = addMsg(m.role === "user" ? "user" : "assistant", m.content);
+    if (m.role === "assistant" && m.citations) renderCitations(el, m.citations);
+    if (m.role === "user" && m.images) renderMsgImages(el, m.images);
+  }
+  if (!state.history.length) {
+    box.replaceChildren($("chat-welcome-template").content.cloneNode(true));
+    window.kaiBrand?.mountCharacters(box);
+  }
+}
+
+function newChat() {
+  state.chatId = null;
+  state.history = [];
+  setPersonaUi(null, null);
+  rebuildMessages();
+  renderChatList();
+  state.view = "chat";
+  showView("chat");
+  $("input").focus();
+}
+
+$("btn-new-chat").addEventListener("click", newChat);
+$("chat-search").addEventListener("input", renderChatList);
+
+$("chat-list").addEventListener("click", async (e) => {
+  const pin = e.target.closest(".chat-pin");
+  if (pin) {
+    e.stopPropagation();
+    const wasOn = pin.classList.contains("on");
+    try {
+      await fetch(`/core/chats/${pin.dataset.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pinned: !wasOn }),
+      });
+    } catch { /* toggle lost — list refresh shows truth */ }
+    refreshChatList();
+    return;
+  }
+  const edit = e.target.closest(".chat-edit");
+  if (edit) {
+    e.stopPropagation();
+    startRename(edit.closest(".chat-row"));
+    return;
+  }
+  const del = e.target.closest(".chat-del");
+  if (del) {
+    e.stopPropagation();
+    await fetch(`/core/chats/${del.dataset.id}`, { method: "DELETE" });
+    if (state.chatId === del.dataset.id) newChat();
+    refreshChatList();
+    return;
+  }
+  const row = e.target.closest(".chat-row");
+  if (!row) return;
+  // Clicking the chat that's ALREADY open must not refetch + rebuild the
+  // list — the rebuild destroyed the row mid-double-click, which is why
+  // dblclick-rename never fired on the active chat (field finding).
+  if (row.dataset.id === state.chatId) {
+    state.view = "chat";
+    showView("chat");
+    return;
+  }
+  try {
+    const j = await coreGet(`/core/chats/${row.dataset.id}`);
+    state.chatId = j.chat.id;
+    state.history = j.chat.messages || [];
+    setPersonaUi(j.chat.persona, j.chat.system);
+    rebuildMessages();
+    renderChatList();
+    state.view = "chat";
+    showView("chat");
+  } catch { /* deleted underneath us — list refresh will reconcile */ }
+});
+
+refreshChatList();
+
+// ---------- models view (trusted catalog) ----------
+
+let modelsTimer = null;
+let machineRamGb = null;
+async function renderModels() {
+  clearTimeout(modelsTimer);
+  let m;
+  try {
+    m = await coreGet("/core/models");
+    if (machineRamGb == null) {
+      const h = await coreGet("/core/health");
+      machineRamGb = h.hardware?.ramBytes ? h.hardware.ramBytes / 1e9 : null;
+    }
+  } catch { return; }
+  const host = $("models-list");
+  const dl = m.download; // {pct,...} while a package downloads
+  const ensuring = m.ensure?.state === "working" ? m.ensure.alias : null;
+  // "Recommended": the biggest model this machine runs comfortably —
+  // largest RAM ask at or below ~2/3 of physical RAM.
+  const recommendedAlias = machineRamGb
+    ? m.aliases
+        .filter((a) => !a.dev && a.minRamGb && a.minRamGb <= machineRamGb * 0.66)
+        .sort((x, y) => y.minRamGb - x.minRamGb)[0]?.alias
+    : null;
+  host.innerHTML = m.aliases
+    .filter((a) => !a.dev || a.alias === state.alias)
+    .map((a) => {
+      const gb = a.sizeBytes ? (a.sizeBytes / 1e9).toFixed(1) + " GB" : "";
+      const inUse = a.alias === state.alias;
+      // Honest hardware guidance: warn when a model is a tight fit for
+      // this machine's RAM, and don't offer downloads that can't run.
+      const tight = machineRamGb != null && a.minRamGb && machineRamGb < a.minRamGb;
+      const hopeless = machineRamGb != null && a.minRamGb && machineRamGb < a.minRamGb * 0.75;
+      const recommended = a.alias === recommendedAlias;
+      let action;
+      if (a.status === "quarantined") action = KaiI18n.html`<span class="model-badge danger">quarantined</span>`;
+      else if (a.status === "missing") {
+        action = KaiI18n.html`<span class="model-badge danger">file moved — re-import</span>`;
+      } else if (a.status === "ready") {
+        action = inUse
+          ? KaiI18n.html`<span class="model-badge ok">in use</span>`
+          : KaiI18n.html`<button class="primary small" data-use="${esc2(a.alias)}">Use</button>`;
+      } else if (ensuring === a.alias) {
+        action = KaiI18n.html`<span class="model-badge">downloading… ${dl?.pct != null ? dl.pct + "%" : ""}</span>`;
+      } else if (hopeless) {
+        action = KaiI18n.html`<span class="model-badge danger">needs ~${a.minRamGb} GB RAM</span>`;
+      } else {
+        action = KaiI18n.html`<button class="primary small" data-get="${esc2(a.alias)}">Download</button>`;
+      }
+      /*
+       * Removing an installed model. Two different things wear the same word,
+       * so the labels do not pretend otherwise: an imported model is the
+       * user's own file and only leaves the list, while a downloaded one is
+       * ours and really goes. A partly-downloaded file counts as installed
+       * too — a cancelled download still occupies the disk, and until now
+       * there was no way at all to get those bytes back.
+       */
+      if (a.custom) {
+        action += KaiI18n.html` <button class="card-del" data-remove-custom="${esc2(a.alias)}" title="Remove from the list (your file is not deleted)">×</button>`;
+      } else if (a.status === "ready" || a.status === "partial") {
+        action += inUse
+          ? KaiI18n.html` <button class="card-del" disabled title="This model is loaded — switch to another first">×</button>`
+          : KaiI18n.html` <button class="card-del" data-uninstall="${esc2(a.package)}" data-uninstall-name="${esc2(a.label.split(" (")[0])}" title="Remove this model from your disk">×</button>`;
+      }
+      const fitNote = tight && !hopeless ? ` · tight fit on this machine (~${a.minRamGb} GB RAM recommended)` : "";
+      // The last load failure shows on the card of the model it hit, so a
+      // single screenshot of Models carries the whole diagnosis.
+      const loadErr = m.runtime?.lastLoadError?.alias === a.alias ? m.runtime.lastLoadError.message : null;
+      return KaiI18n.html`<div class="model-offer model-row${recommended ? " recommended" : ""}">
+        <div>
+          <div class="model-name">${esc2(a.label.split(" (")[0])}${recommended ? KaiI18n.html`<span class="chip-star">★ best for this machine</span>` : ""}</div>
+          <div class="model-sub">${[a.blurb, a.license, !a.blurb && gb, a.status === "ready" && "on this machine"]
+            .filter(Boolean)
+            .map(esc2)
+            .join(" · ")}${esc2(fitNote)}</div>
+          ${loadErr ? KaiI18n.html`<div class="model-load-err">last load failed: ${esc2(loadErr)}</div>` : ""}
+        </div>
+        <div class="model-actions">${action}</div>
+      </div>`;
+    })
+    .join("");
+  // Live hash progress while an import verifies.
+  const imp = $("import-status");
+  if (imp && m.importing) {
+    imp.hidden = false;
+    KaiI18n.setText(imp, KaiI18n.message`Verifying ${m.importing.path.split(/[\\/]/).pop()} — ${m.importing.pct}%`);
+  } else if (imp && m.importError && !imp.textContent.includes("✓")) {
+    imp.hidden = false;
+    imp.textContent = m.importError;
+  }
+  $("models-storage").textContent = m.storage?.usedBytes
+    ? `Models on disk: ${(m.storage.usedBytes / 1e9).toFixed(1)} GB${m.storage.capBytes ? ` of ${(m.storage.capBytes / 1e9).toFixed(0)} GB cap` : ""}`
+    : "";
+  if (!$("view-models").hidden) {
+    modelsTimer = setTimeout(renderModels, dl || ensuring ? 700 : 4000);
+  }
+}
+
+/*
+ * Ask Core what removing this would delete, say so, then do it.
+ *
+ * The size is quoted from the plan rather than the catalog because they can
+ * disagree — a half-finished download frees less than the full model, and
+ * telling someone they will get 4.1 GB back when it is 900 MB is the kind of
+ * small lie that makes people stop trusting the number.
+ */
+async function uninstallModel(packageId, name) {
+  let plan;
+  try {
+    plan = await coreGet(`/core/models/installed/${encodeURIComponent(packageId)}`);
+  } catch (err) {
+    alert(`Could not check that model: ${err.message}`);
+    return;
+  }
+  if (plan.inUse) {
+    alert(`“${name}” is the model in use right now. Switch to another model first, then remove it.`);
+    return;
+  }
+  const frees = plan.freesBytes >= 1e9
+    ? `${(plan.freesBytes / 1e9).toFixed(1)} GB`
+    : `${Math.max(1, Math.round(plan.freesBytes / 1e6))} MB`;
+  if (!confirm(`Remove “${name}” from this machine?\n\nThis frees ${frees}. You can download it again from Models at any time.`)) return;
+
+  const r = await fetch(`/core/models/installed/${encodeURIComponent(packageId)}`, { method: "DELETE" });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || !body.ok) {
+    alert(`Could not remove it: ${body.error?.message || r.statusText}`);
+    return;
+  }
+  renderModels();
+}
+
+$("models-list").addEventListener("click", async (e) => {
+  const rm = e.target.closest("[data-remove-custom]");
+  if (rm) {
+    await fetch(`/core/models/custom/${encodeURIComponent(rm.dataset.removeCustom)}`, { method: "DELETE" });
+    renderModels();
+    return;
+  }
+  const un = e.target.closest("[data-uninstall]");
+  if (un) {
+    await uninstallModel(un.dataset.uninstall, un.dataset.uninstallName);
+    return;
+  }
+  const get = e.target.closest("[data-get]");
+  const use = e.target.closest("[data-use]");
+  if (get) {
+    await fetch("/core/models/ensure", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ alias: get.dataset.get }),
+    });
+    renderModels();
+  } else if (use) {
+    state.alias = use.dataset.use;
+    const pick = $("model-pick");
+    if ([...pick.options].some((o) => o.value === state.alias)) pick.value = state.alias;
+    renderModels();
+    refresh();
+  }
+});

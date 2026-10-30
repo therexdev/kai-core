@@ -1,0 +1,891 @@
+## Testnet KAI and expected KOIN drop
+
+- Added two small, right-aligned lines beside Reward activity: Wallet KAI and KOIN Drop.
+- Uses the current wallet’s existing testnet KAI balance and estimates 1 KOIN per 5 KAI. Hover to see the rate and snapshot caveat. Missing balances display a dash.
+- Reads work with the wallet locked and follow the existing refresh and network-privacy settings. This is an estimate, with no claim or transfer action.
+
+## Stable free-credit availability and compact balances
+
+- Free-credit checks now have an independent server refresh, so slow payment or reward processing no longer makes the allowance disappear. Requires the [server update](FREE_CREDIT_STABILITY_RELEASE.md).
+- Removed redundant “Updates automatically” labels from balances and reward activity.
+- Tightened the sidebar balance card, with status and recovery controls shown only when needed. Background updates remain enabled.
+
+## Daily KOIN earnings and rewards awaiting payment
+
+- Above Reward activity, Earn shows estimated availability earned so far in the current UTC reward day and a separate total awaiting review or automatic payment, with availability/work breakdowns.
+- Signed daily allocations appear during review, before they enter the payment queue. Payment timing uses the reported contract review deadline; no exact send time is promised.
+- Run the [one-time server update](DAILY_REWARD_SUMMARY_RELEASE.md), then update Test. Older services keep their existing payout feed and show estimates as unavailable, never as an invented zero. Reward policy, signing and payment behavior are unchanged.
+
+## Smoother controls and background updates
+
+- Model sharing uses polished, keyboard-accessible switches. The credit-priority preference and existing Settings switches use the same styling, with clear focus and reduced-motion support.
+- Credit balances and earning readiness refresh before their freshness deadlines. Unchanged reads keep the same text, model rows, focus and layout; actual lost connections and expired readiness remain visible.
+- Removed routine Refresh actions from credits, connected wallet access, wallet history, workflow runs, Agent Jobs and automatically updated Brain panels. Retry remains available after errors, and wallet history offers Back to latest when browsing older transactions.
+- The sidebar reserves space for status and recovery actions so background reads do not move Buy credits or navigation. Wallet history retains its rows and focus during automatic updates.
+- This update includes the automatic reward feed below and requires only an app update. No additional Vultr command is needed.
+
+## Automatic reward activity in Earn
+
+- Replaced the separate earnings summary and Connection cards with one reward activity feed beside the earning control. It loads automatically and refreshes while Earn is open; no Refresh earnings click is needed.
+- Each record shows its reward day, KOIN amount and actual payout status. Pending or unavailable confirmation is never displayed as a completed payment. The last successful records remain visible during a temporary connection failure.
+- Connection, authorization and diagnostic controls are available in a collapsed advanced area below the shared-model controls.
+- This is an app-only update. It does not change payout timing, reward calculations, wallet custody or the server configuration, and needs no additional Vultr command.
+
+## Automatic free access and fresh model readiness — combined update
+
+**Update Vultr once, then update Koinos AI Test.** Use the
+[combined update guide](https://github.com/therexdev/kaiapp/blob/test/docs/AUTOMATIC_FREE_ACCESS_RELEASE.md); the earlier commands
+and storage/admission requirements below describe previous releases.
+
+- Network chat connects to the actual service-provided free allowance automatically. No account signup, KOIN wallet, wallet unlock or operating system keyring is needed for free access. This installation retains its spent allowance across restart and reconnection; sponsored funding and eligible-model limits still apply.
+- Buy credits uses the app wallet and asks for connection only when needed, within the purchase flow. On Linux/Pi without a protected system keyring, saved access can now use the app wallet's encrypted credential vault. Unlock once after restarting the app, then lock again while authorized earning continues. Payments retain their separate wallet approval. Existing paid accounts, encrypted connections and payment recovery records are preserved.
+- Shared models now complete two fresh signed runtime checks against their exact approved package, tokenizer and template. The generic twelve-question exam no longer controls readiness. Wrong, incomplete, expired or unsigned responses cannot qualify, and old failed results are never promoted. Evidence renews automatically; no chat is required to start checks, and ready models remain available between checks of other models.
+- Actual pinned Fast, Gemma 3 4B, Llama 3.1 8B and Mistral 7B weights passed 40/40 measured checks with native token-ID agreement and complete generation. The other eleven catalog models were not measured in that run and still require their own fresh checks. Runtime readiness is separate from model-quality scoring and does not multiply dormant-model rewards.
+- Only a genuinely new desktop profile starts in Local-First. Existing privacy settings and headless/Core defaults remain unchanged; Local-Only continues to block network access. Automatic free access is separate from financial wallets and cannot spend purchased credits, authorize earning or administer accounts.
+- The existing AppImage restart fix and desktop launcher remain included. Automated checks are not a claim of physical Raspberry Pi performance or the user's desktop integration; an older running updater may require downloading and launching the new ARM64 AppImage once.
+
+## Earlier release notes
+
+The entries below retain the history of earlier updates. For the current server
+command, automatic free access, keyring-free wallet protection and model
+admission behavior, use the combined guide above.
+
+## Buy credits connects your wallet when needed
+
+- Buy credits uses the app's wallet and continues through connection to the exact payment approval. New and expired connections ask for a wallet proof in the app; no email signup or separate connection page is required. Existing saved connections are reused.
+- A locked wallet can be unlocked directly on Buy credits. The selected amount continues after unlocking. Cancel, Stop, leaving connection setup, or changing the wallet prevents the purchase from continuing.
+- The KOIN estimate updates before connecting, using the pinned public market reference. Model prices also appear before connection from the complete verified pricing policy. Only an explicit Buy requests a signed quote; the exact payment still requires approval.
+- Temporary free-credit access can upgrade to a saved connection once protected credential storage is available. Existing account identities, balances and saved payment recovery remain protected. Checking an existing payment's confirmation does not require unlocking the wallet.
+- This is an app update and uses the existing wallet-access service protocol; it requires no additional Vultr update.
+
+## Raspberry Pi update error recovery
+
+- Fixed the AppImage updater path behind the uncaught JavaScript `EFAULT` write error during installation. Helper diagnostics are captured without replaying them through the running desktop process's error stream; a real installer failure still stops restart and reports failure.
+- Both **Restart now** and automatic installation when closing use the fix. The replacement still waits for the original app to finish cleanup and release its shared Live/Test profile lock.
+- Release checks exercise the actual AppImage updater in native Linux Electron, including a failing parent error stream, successful and failed helper processes, and the packaged ARM64 executable.
+- A currently running older version still contains its older updater. A direct download and launch of the fixed ARM64 AppImage after quitting the old app avoids that first update transition. Your existing profile, wallet and installed models are reused.
+
+## Earning stays available while other models are checked
+
+- Fixed a scheduler loop in which repeated failed model checks could keep replacing an already-qualified model. Qualified selected capacity returns between checks, failed models retry fairly after a bounded pause, and paid requests can run between benchmark answers. A live assigned check is never interrupted or replaced.
+- Idle providers wait between empty polls, keeping network traffic bounded while Stop stays responsive.
+- Earn now shows each model's qualification score and the available failure details. Loading, tokenizer, runtime and reporting errors remain visible across idle polls instead of disappearing behind a generic retry message. Local diagnostics never grant network eligibility.
+- Under the earlier quality policy, an actual run of the pinned Fast model completed quickly with matching token IDs but passed 10 of the required 12 cases; the two failures were JSON formatting and instruction priority. The current runtime-readiness policy above supersedes that admission exam. Installation alone still does not qualify a model.
+- This fix includes a narrow Vultr service update followed by the app update. Use the [exact server update command](EARNING_RECOVERY_RELEASE.md). The service updater preserves the existing configuration, keys, balances, payments, reward records and qualification evidence, and verifies the new scheduler on both loopback and HTTPS.
+
+## Faster payment review with visible confirmation progress
+
+- Buy credits shares repeated deployment and chain checks within each short preparation phase. Approval starts a new verification phase, so current policy, wallet and nonce checks still run before signing. A slow read endpoint can use the pinned backup sooner; a broadcast is never duplicated by that read fallback.
+- An unused quote that is close to expiry is refreshed for the selected dollar amount before wallet approval. The approval shows the exact current KOIN payment. Already-signed payments retain their original quote, transaction and recovery records.
+- A spinner and progress line show preparation, price, wallet approval, signing, submission, block inclusion, final confirmation and credit reconciliation. Stop and errors end the active spinner; cancellation has its own clearly named steps.
+- Quote expiry no longer tells a buyer to cancel a payment that was already included in a block. Existing successful transactions reconcile automatically after irreversible confirmation. Block inclusion and final credit availability are shown separately.
+- This is an app update. The unlimited-quote Vultr update remains compatible and does not need to be repeated after successful installation.
+
+## Local Gemma 3 conversation compatibility
+
+- Fixed Gemma 3's conversation-role error when persona, memory or research adds multiple instruction messages, or an interrupted conversation leaves consecutive user turns. Local requests retain their content in the alternating format required by the original Gemma template; saved chat history remains intact.
+- The fix applies to the installed Gemma 3 models and requires no model download. Other local models and network requests keep their existing message format.
+
+## Buy credits reaches payment approval after background refresh failures
+
+- Fixed a reproduced Buy → price check → reset: a background wallet or payment-status read could invalidate the signed quote before it reached payment approval. Read-only refresh failures no longer cancel the user's purchase. Changing the selected amount, wallet or account and pressing Stop still stop that action.
+- Failed payment checks now remain visible in a red message beside the purchase button. Automatic price updates cannot erase the explanation. Review timeouts, changed payment details and interrupted native dialogs are distinguished from pressing Cancel.
+- Verification now clicks the real Buy button through the registered desktop IPC, payment controller and HTTP credit service, including a failed background balance read during pricing. Controlled native approval and blockchain fixtures confirm exactly one payment and one credit addition; these checks never use a customer's keys or funds.
+- This is an app update. The wallet-access Vultr update supplied with Test 222 remains the matching server version; it does not need to be repeated if already installed.
+
+## Wallet connection, earning and purchases — coordinated Test update
+
+**Update the Vultr credit service first, then update Koinos AI Test.** The complete server-first procedure is in [Wallet flow update](WALLET_FIRST_RELEASE.md). The desktop update includes the wallet-only account connection and earning handoff as well as purchase recovery, pricing, wallet history and Linux restart fixes. A desktop update cannot install the remote service. Live promotion follows successful Test acceptance.
+
+- Buy takes its exact verified quote straight to native payment approval. An unrelated sidebar balance refresh can no longer cancel that handoff, and automatic price updates no longer hide a payment failure. Account, wallet, quote, saved-payment, balance and Mana checks remain in the payment controller before submission.
+- Display-only KOIN estimates continue while the sidebar balance check is slow or unavailable. Windows payment journals use extended-length file paths while preserving their existing locations, recovery records and nonce protections.
+- Credits offers **Connect wallet** without mandatory email or password signup. Existing linked account identity, purchased balances and the service's free-credit policy remain authoritative. Opening a page never enrolls a wallet or grants credits.
+- Earn offers **Set up earning**, **Enable earning**, then **Start/Stop earning**. One native wallet review authorizes a separate device key for provider work; ordinary wallet Lock does not stop an authorized device. The key cannot spend KOIN, purchase credits or change the reward wallet. Expiry, revocation, privacy settings and fresh model qualification are enforced by both client and server.
+- This earlier release offered an explicit session-only choice on Raspberry Pi/Linux without protected credential storage. The current release adds automatic free access and wallet-protected saved connections as described above; this historical temporary mode did not promise restart access.
+- Current USD credit actions work in both release channels; historical custody and deployment controls remain Test-only. Live/Test profile identity, payment journals and updater separation are preserved.
+
+## Reliable Linux update restarts
+
+- Restarting after an AppImage update waits for the running app to exit before opening its replacement. Live and Test retain their shared profile lock throughout shutdown.
+- Fixed a shutdown exception caused by accessing an already-destroyed desktop window. Cleanup continues if one component fails, and failed startup exits instead of leaving a hidden process blocking the next launch.
+- Launching the Linux AppImage creates a desktop and application-menu entry for that channel and refreshes its target after an update. An intentionally removed desktop icon stays removed; unrelated shortcuts are preserved. The standalone shortcut installer remains available for an existing AppImage.
+
+## Choose which installed models to share
+
+- Earn defaults to **Share all compatible installed models**. You can choose a smaller set directly on Earn; the selection is saved for this wallet and deployment on this computer. Newly installed compatible models are included automatically in the default mode.
+- Each installed model shows whether it is selected and its network readiness, or why the package is incompatible. A model is marked ready for paid requests only while its verified network status is fresh. Installed or selected models are not automatically qualified.
+- Applying a selection while earning waits for current work to finish before reconnecting with the new model set. Stop remains available. Network jobs and presence reports are restricted to the selected approved packages; local Chat can still use other installed models.
+- The earlier Vultr update extended Smart's twelve-answer qualification criteria to all 15 exact catalog packages, with a 30-second limit per answer and one-day evidence. The current combined update replaces that admission exam with fresh per-model runtime-readiness checks; the old quality evidence remains historical.
+- Earning automatically loads selected models for their checks without sending a chat. Model preparation has its own bounded 120-second window before the timed questions begin, so loading is not counted as answer latency. Stop remains available.
+- Once a selected model is individually qualified, the updated provider can load it on demand for an assigned request. Models need not all stay in RAM or VRAM together. The network advertises only fresh signed qualifications; availability rewards count the actual loaded capacity, preventing installed or dormant models from multiplying rewards. Free-credit grants, payout economics and reward-wallet funding remain unchanged.
+
+## Automatic KOIN estimates and model prices on Buy credits
+
+- Buy credits now shows a read-only KOIN market estimate with the currently deployed credit service, recalculates when the USD amount changes, and refreshes every 30 seconds while visible. A market estimate is approximate; Buy still obtains the exact signed payment for wallet approval.
+- Removed the repeated wallet-balance card and the normal Ready to buy card. Actionable payment errors and saved-payment recovery remain visible.
+- Model pricing appears below the purchase area, showing input and output rates in credits and dollars per million tokens. The table uses the complete configured tariff policy, including models that are not currently online. Loading model prices does not block a purchase.
+
+## A clearer wallet with native transaction history
+
+- The app wallet uses the node wallet's address card and separate KOIN, VHP and Mana balance boxes, followed by native transaction history. It does not include the node's Ethereum funding wallet or token controls.
+- Incoming and outgoing KOIN/VHP activity, burns and block rewards are read from the selected network's account history. Confirmation is checked against irreversible history; missing dates or unavailable history are shown honestly. Older activity can be loaded without changing the wallet.
+- Balances and history remain readable while locked. Send, Lock, Copy address, Explorer and password-protected backup access stay together. A send review is tied to the displayed address and network, and changing either requires review again.
+
+## Automatic price previews, credit preferences and clearer earning controls
+
+- Buy credits calculates the KOIN estimate when an amount is entered, refreshes it every 30 seconds while the page is visible, and discards expired or out-of-date responses. Display-only price reads never create signed purchase quotes or use the quote allowance. Buy still opens one wallet approval for the exact current payment.
+- Settings contains **Use paid credits before free credits when using the network**, off by default. Free credits remain first unless this is enabled. Eligible free credits can cover the remainder after purchased credits run out; saved requests and approved multi-step runs keep their original priority.
+- Paid-first priority and merchant-validated price previews require the matching credit-service update. Older services keep normal purchases and free-first chat working; the app now supplies a separate read-only market estimate and does not enable an unsupported paid-first preference. Publishing this desktop release does not deploy the server update.
+- The Earn button is red while sharing is off and green while sharing is on, with a larger click target and an off-state start hint. Verified ONLINE status remains a separate network observation.
+- Removed obsolete payment rehearsals and simulated reward displays. Real saved Research, Agent and Team outputs are under **Account help → Research & agent results**, with automatic history loading. Payment recovery and model diagnostics are preserved.
+
+## Keep local diagnostics from interrupting network qualification
+
+- A local provider check waits for an in-flight network request to finish, pauses new network work while it checks the model, and resumes sharing automatically afterward. Cancelling or failing the diagnostic also releases the pause. The earning preference stays on.
+- The Earn page shows the network check's passed and completed counts and its scheduled retry time separately from the local diagnostic result. A local 12/12 result does not imply that the signed network check passed its delivery deadline.
+- Earlier release verification ran the actual desktop worker against the reviewed twelve-case Smart quality policy, including successful signed results and late-answer rejection with controlled inference. Current verification also exercises the separate runtime-readiness protocol described above.
+
+## Buy credits, start earning and use Network chat
+
+- **Buy credits** fetches the current price and opens one wallet approval showing the exact KOIN payment and credits. Confirmation continues automatically. An existing payment uses the same button to continue its saved transaction; background checks no longer lock the purchase screen.
+- Fresh purchases review a usable Mana ceiling before signing. Once a transaction is irreversibly confirmed, its verified actual Mana cost replaces the reserved ceiling so a later purchase can use the remaining daily allowance.
+- **Start earning** chooses the initial model automatically and offers installed, supported models with matching network packages. It starts without a chat. Model loading and registration respond to Stop; unavailable network qualification remains visible.
+- Network chat initially selects an available model. Send uses the shared credit balance; optional Free only is under Spending options. An explicit model choice is preserved if that model later goes offline.
+- Installer verification now includes the real desktop purchase, provider and chat controllers connected to the scheduler over local HTTP: two purchases, interrupted confirmation, a signed streamed reply and restart recovery without a duplicate charge. Blockchain finality, qualification and inference are controlled test fixtures in this check.
+
+Earlier service releases qualified Smart only. The coordinated server update above extends the same objective checks to the pinned catalog; every provider/model still needs its own fresh successful qualification. Contract deployment, free-credit grants and payout economics are unchanged.
+
+## Finish cancellation without overloading RPC
+
+- Payment recovery now spaces its RPC requests and removes repeated full purchase checks while a cancellation is pending. Background confirmation checks also avoid those duplicate reads.
+- A signed cancellation that has never been submitted says so explicitly. Network errors identify the recovery step and distinguish rate limiting from other RPC failures.
+- **Resume cancellation** continues to use the exact saved signature and nonce, with one broadcast attempt per approval and irreversible confirmation required before another purchase.
+
+## Recover an expired credit purchase
+
+- Buy credits now has a working **Cancel expired payment** button. Its wallet review transfers **0 KOIN** and uses the old payment's nonce. New purchases become available only after the cancellation is irreversibly confirmed; if the original payment already completed, its credits are recovered instead.
+- Original payment signatures, any Mana correction, and the cancellation stay saved across updates and restarts. **Resume cancellation** reuses the saved transaction. Check again shows its confirmation status and transaction ID.
+- If an unexpired purchase needs a higher Mana ceiling, **Review Mana limit** opens the existing separate wallet review for the same purchase and nonce, using the allowance remaining after today's earlier payments and cancellations.
+- Payment confirmation remembers a working RPC backup instead of restarting at an unavailable primary on every poll.
+- Confirmed cancellations appear as cancelled in this desktop's activity rather than continuing to count as pending purchases. Purchased-credit expiry wording now clearly refers to credits, not the short-lived price quote.
+
+## Start sharing directly from Earn
+
+- Earn has its own Provider model choice. Turning sharing On loads that model and starts qualification without sending a chat. The choice and On/Off preference survive restart.
+- Existing providers can recover a previously qualified installed model from a fresh account status when upgrading from an older preference file. A saved choice is checked against current approved packages and hardware before loading; an unavailable choice requires attention instead of silently switching models.
+- Buy credits shows the saved payment's public transaction ID and available failure details. Simulation failures remain visible after restart, expired quote times are identified, and a pending local payment blocks another purchase. A pending service record is described as unconfirmed rather than implying that a broadcast succeeded.
+
+## Identify blocked credit purchases
+
+- Buy credits reports which payment check stopped, with a safe reference for support. Network outages, quote expiry, changed approval and saved-payment conflicts no longer all say to refresh the quote.
+- Unknown failures ask for the displayed message before another purchase. Recovery continues to use the original payment; raw RPC responses, signatures and local paths are not displayed.
+- This update improves purchase diagnostics. It does not confirm that a previously failed purchase has succeeded; Balance & activity still requires verified payment confirmation.
+
+## Responsive provider setup
+
+- Reload setup now shows when it is checking and when the check finishes. A lost response times out and allows another check instead of leaving Reload silently stuck.
+- Earn shows the current wallet or account requirement beside the sharing switch. An older connection error no longer hides the need to unlock or link the reward wallet, and successful checks while sharing is Off clear obsolete errors.
+- Open AI credit account and Reward wallet provide direct setup actions. Sharing still requires the linked unlocked wallet, an approved model and fresh network qualification before it can show ONLINE.
+
+## Use the verified tokens for model checks and network work
+
+- Fixes a mismatch between tokenizer verification and inference: the app now sends the verified token IDs to llama.cpp. Sending the rendered text again could insert an extra beginning-of-text token for models such as Llama, changing the input after it had been checked.
+- Applies the same correction to local provider checks, signed qualification, and streaming/non-streaming network jobs. Reports record the exact input-token count and hash submitted for each test answer.
+- Run the local check again on the loaded model to measure results with the corrected input. Existing reports remain historical measurements; this update does not grant network qualification or change accepted answers.
+- Includes dependency security updates for Electron networking, HTTP processing, and mail parsing.
+
+## Connect to the deployed AI credit service
+
+- Test now includes the verified mainnet USD credit contracts and connects to credits.koinosai.com without importing a deployment file or private invitation.
+- Settings opens **AI credit account** for the new service. Sign in / create account, approve the device code in your browser, and link your wallet. Buy credits, Chat and Earn use that same credit session.
+- **Website account and Connections** opens your existing website account separately. Its saved login, wallet, older balances and payment recovery records remain in place.
+- Purchases still require a fresh verified quote and your wallet approval. Sharing needs successful model qualification and fresh network confirmation before it can show ONLINE.
+
+## Correct local model checks
+
+- Corrects the Qwen-family token references to preserve the same Unicode characters as the native model engine. The earlier reference normalized accented text and could stop a correctly installed Koinos Fast model with a tokenizer mismatch.
+- Corrects Mistral 7B's whitespace handling and verifies all 15 models' reference strings and test prompts against the native engine before packaging them.
+- An already-loading local model can finish before the check continues. Stopped engines, failed loads and a running engine with an unidentified model now have distinct messages and safe report details; installed model count is reported separately.
+- An incomplete tokenizer check no longer labels the engine unstable. Windows and Linux packages retain identical evidence-pack bytes and hashes.
+
+The check still verifies exact token IDs before measuring answers. These corrections do not grant provider qualification or activate credit purchases.
+
+## Check this computer from Earn
+
+- Earn now runs a local model check from **Check this computer**, with progress, cancellation, and **Copy report** / **Save report** when evidence is available. No ports, model paths, developer benchmark page, sign-in, or credits are needed.
+- The check uses the installed model and produces a local support report. Network setup can be refreshed separately with **Reload setup**; service connection errors do not overwrite the local check result.
+- Local check results do not qualify a provider or turn sharing on. The green ONLINE label still requires fresh network confirmation.
+- Buy credits shows the exchange observation time and a compact **Price details** section with the verified purchase rate. The displayed details are bound to the signed quote and the configured pricing policy. Retrying a quote preserves its purchase intent; a later purchase can use the same amount without reusing the earlier payment.
+
+## One credit balance across approved network models
+
+- Network Chat lists each model supplied by the activated credit service, with availability and input/output credit rates. Your selected model stays selected when it goes offline; the app asks you to choose another instead of silently changing it.
+- All model prices are checked against the service policy packaged with the app. Each reply is verified against the selected model's exact rate and limits, with one shared credit balance and free credits used first where eligible.
+- Research, Agents and Teams keep the selected model and total budget for the entire run. Saved replies retain their approved price information and can be recovered after restart even when current model availability cannot be read.
+- Sharing uses an installed approved model, preferring the one already loaded. Provider status checks each model and shows ONLINE when at least one is freshly ready; a failed or offline model cannot make the others appear ready.
+
+The approved commercial plan covers all 15 public catalog models. Live use still requires the separate credit service, exact per-model metering and fresh provider qualification; this desktop update alone does not activate purchases or qualify models.
+
+## Clear Earn, Wallet and Network pages
+
+- The lower-left Network button opens Network overview directly. Earn focuses on sharing status, earnings and provider setup; its duplicate network shortcut and older reservation/payment section are removed from the normal flow.
+- Wallet management opens its own page from the sidebar balance or Buy credits. Earlier account activity remains under Account help, with its original records and balances preserved.
+- Earn, Buy credits and the other account pages use a single page scrollbar. Headings stay below the app bar, and opening a page starts at its top.
+- Public network status can load independently of credit-service activation or an earlier payment account. Online providers are distinguished from verified paid-service readiness; unavailable work/activity statistics are not shown as invented totals.
+
+Credit purchases still require the new service and contracts to be activated. The activation handoff includes a read-only server check and the remaining purchase, free-credit and two-computer acceptance steps.
+
+## Restored wallet card and Chat history panel
+
+- The main sidebar shows wallet KOIN and VHP balances again, separately from AI credits. Its dollar estimate values KOIN only. Clicking the wallet card opens the wallet controls directly; unknown balances stay unknown.
+- Recent chats, search and New chat return to their own panel inside Chat. The history panel has its own scrolling and responsive open/close controls, leaving the main navigation available on other pages.
+
+Fixes publication after the shared Test release reached GitHub's 1,000-file limit. New installers use a separate release for each build; existing downloads and the app's Test update channel remain available.
+
+## Wallet balance and clear purchase availability
+
+Buy credits now shows the payment wallet's KOIN balance, address and network independently of the AI credit balance. Refresh and Open wallet are available on the purchase screen. A failed balance read is not shown as zero, and wallet changes invalidate an earlier purchase quote.
+
+The purchase screen checks public service availability when opened. It explains when purchases are not activated, sign-in is required or a current exchange quote is unavailable, instead of presenting an apparently working checkout with blank fields. The public USD-credit service is still not activated; this release does not deploy contracts, set commercial pricing or transfer KOIN.
+
+## White KAI design, simpler menus and visible credit status
+
+- Restores the original white KAI character, blue brand mark and pearl-and-blue app theme. KAI is back on Chat, with the compact desktop KAI button kept in its new header position. Window controls, app bars, form controls and scrollbars follow the same light palette.
+- Chat appears above Koinos Code. Workflows, Agents and Documents sit in the main menu; Models and Connections & tools sit under More. More opens and closes when clicked again. Recent chats remain in the sidebar. Settings and Network sit side by side at the bottom, and Earn keeps its View network shortcut.
+- Credit status refreshes when the app opens, including an already configured USD-credit account. Loading, a verified zero balance, unavailable service and a last-known balance are distinct states, with refresh and account help available. Earlier KOIN balances retain their original units.
+
+The packaged public credit service is still awaiting activation. This update does not invent free credits, convert earlier balances, change contracts or move KOIN. An existing verified USD-credit account can display its actual balance; an unavailable account shows the reason instead of an unexplained dash.
+
+## Purchase sync and outage recovery follow-up
+
+Purchase synchronization now checks which signed transaction actually won before registering it, avoiding a losing Mana correction consuming the last confirmation slot. Historical provider availability survives long outages and restart regardless of which provider reconnects first. These changes do not activate network credits or earning; backend deployment and acceptance gates remain pending.
+
+## Purchase recovery and availability fairness fixes
+
+Fixes a purchase-recovery case where an original payment finalized while a same-nonce Mana correction was being simulated. After restart, confirmation sync now registers the verified winning transaction, preserving both signed envelopes without another signature or broadcast. Expired-quote safety checks remain unchanged.
+
+Availability evidence now waits through the existing heartbeat-gap window before closing each minute, so equivalent healthy providers are not ranked by heartbeat arrival order. Catch-up is bounded and sealed history stays unchanged.
+
+The matching backend fixes confirmation/settlement queue starvation, linked-wallet self-work, closed-epoch reconciliation and midnight sponsorship capacity. Backend production services are unchanged. Live USD-credit/earning activation still requires the previously documented decisions, review, deployment/funding and real two-computer/payout acceptance.
+
+## Revision 2 test implementation
+
+The seven-screen redesign adds recent chats and search in the sidebar, shared credits, Buy credits, guided provider setup, recovery and a secondary Network view with fresh/stale status. Back to Earn preserves sharing. Existing chats, files, workflows, settings, wallets, models and earlier balances remain in place.
+
+Network Chat supports verified streaming and encrypted partial-reply recovery. Research, Agents and Teams use an explicit total credit budget, Free only and saved intermediate results when the connected service confirms support. Provider setup includes explicit model download, saved On/Off and automatic qualification renewal when reviewed criteria are configured.
+
+**Service activation is still pending.** This build does not supply a live USD tariff, free-credit entitlement, safe purchase quote or new qualification. Missing configuration shows unavailable states. Old KOIN obligations remain separate and accessible; reward day 20742 is not reset or retried. Independent financial review, authorized fresh deployment/funding, real two-computer testing and payout observation remain outstanding. See `docs/koin-network/REVISION_2_CONTINUATION.md`.
+
+## USD-valued credits and independently funded rewards
+
+Adds the separate `prepaid-usd-v1` contract product. Buy credits shows the exact KOIN payment, USD credit value, current signed rate, expiry and Master Node destination before signing. 1,000 display credits represent $1; purchased credits retain that value. The native transaction pays purchase KOIN directly to `15CM9Qr4GKREDgqnyXJ8tckPj2biERTM1T` and attributes the credits atomically.
+
+Normal Chat uses these credits without session approvals. Consumption records USD usage without transferring KOIN. Daily provider rewards come from a separately funded pool, budgeting 5% of uncommitted KOIN with the existing 70% availability / 30% work split. Existing accounts and payment records retain their original product and units.
+
+This is deployment support, not a live contract upgrade or a funded launch. New purchases require fresh market quotes; stale/unavailable quotes cannot change existing balances. The current public KOIN feeds did not pass freshness/availability checks on October 16, so production pricing remains a deployment blocker. See `docs/koin-network/USD_CREDITS.md` for exact units, trust boundaries, funding and remaining acceptance.
+
+The isolated native-chain rehearsal now covers the complete USD purchase, normal Chat, restart recovery and automatic provider payout. Contract builds use invocation-scoped allocation after native testing exposed a pause-control runtime incompatibility; repeated pause/resume and bounded reward-proof tests are included.
+
+## Prepaid credits implementation
+
+Adds a separate prepaid account mode: Buy credits with KOIN, see a credit balance, and use normal Chat without reservation approvals. Purchased credits do not expire; failed requests release their temporary credit hold automatically. Purchases and usage appear in account history. Existing credit use is independent of blockchain settlement and provider payouts.
+
+This mode requires a verified new prepaid deployment and account connection. It does not convert existing KOIN reservations, replace live contracts, or move old balances. Existing pilot records remain preserved for migration.
+
+## Reuse KOIN from expired spending allowances in Chat
+
+- Shows an expired reservation's remaining KOIN and actual contract release time beside normal Chat. A reservation still in its settlement window no longer asks you to add another deposit. New reservation approvals also show the release deadline up front.
+- When release is permitted by both the desktop clock and blockchain time, **Send** opens the existing native release review, confirms that transaction, then prepares a new allowance using the released balance. Cancelling stops the flow; an uncertain release keeps its original transaction for recovery.
+- Refreshes balances after confirming an earlier payment, including a release recovered after restart. Active allowances and pending chat requests keep their existing identities.
+- The contract's settlement window remains unchanged: normally 24 hours after session expiry. This update cannot unlock funds early, and it does not alter the server's outstanding reward transaction.
+
+## Clearer network spending-approval recovery
+
+- Shows when reserved KOIN is waiting for irreversible blockchain confirmation, and when a changing block interrupts the account check.
+- Keeps the original funding observation across temporary read failures, so retrying does not unnecessarily restart its finality wait. Changed funding or an expired observation still requires fresh verification.
+- Bounds each session HTTP request and explains how to continue the saved reservation after a timeout or stopped chat. Normal Chat removes the Electron error wrapper.
+- Requires the matching pilot backend timing fix: completed verification receives its completion timestamp, and parallel account reads still require an unchanged head and RPC endpoint generation. No finality, native approval, spending limit or payment-recovery checks are relaxed.
+
+## Clearer KOIN funding and reservation
+
+- Explains beside normal Chat that **Add KOIN** deposits from your wallet; **Send** uses your existing balance and asks for a reservation approval when needed. You do not need another deposit to reserve an available balance.
+- Labels the deposit amount and marks its example as an example. Empty, zero or malformed amounts show a helpful message and focus the field before any payment action opens. Valid amounts still require native approval.
+- Removes the Electron invocation prefix from payment errors while preserving the actual reason.
+
+## KOIN in normal Chat and a clear provider switch
+
+- Adds **Add KOIN** and your available/reserved balances beside the normal chat composer. Select Koinos Network or use **Open Chat** from your network account.
+- Your first message prepares a bounded reservation and opens the existing native spending reviews. Confirmation checks run automatically. Subsequent messages reuse the approved allowance and preserve conversation history.
+- Shows verified KOIN usage on the reply, with settlement still identified as pending until confirmed. Replies are displayed after verification; the app does not report a misleading streaming token speed.
+- **Recover last reply** recovers the saved request after interruption or restart. Requests and retained answers are encrypted locally; recovery reuses the original request ID. An unresolved request blocks a different request, and native Stop/visibility/privacy cancellation still applies.
+- Adds a large **ONLINE** provider status and **Turn on / Turn off**. Green requires fresh network confirmation of eligibility, qualification, model readiness and signed worker registration. Missing or expired confirmation is never green. Starting loads the installed approved model and stops the older earning worker after native approval.
+- Moves manual session setup and old test-prompt recovery into Advanced. The main Use AI screen opens ordinary Chat.
+- Requires the matching pilot backend provider-status update. An older backend shows **CHECKING CONNECTION**. Expired provider qualification still requires operator renewal; this build does not extend it automatically. Paid Test sessions currently support the Chat mode.
+- See `docs/KOIN_SIMPLE_FLOW.md` for acceptance checks and deployment dependencies. This change does not promote the pilot to Alpha or enable public enrollment.
+
+## KOIN recovery on slow RPC servers
+
+- Gives each pinned RPC server more time to verify the chain and finish an account check, so a slow but working backup can complete release recovery after the primary fails.
+- Keeps checks bounded and preserves the saved transaction, approval, nonce and deployment. Broadcasts are still attempted only once per approved submission.
+- Stops a pending credit submission when the payment window is hidden or stopped, including while it waits for slow verification reads. Its saved signature remains available for a later explicit review.
+
+## Node reliability — October 13, 2026
+
+- Recovery runs in the background and resumes after reopening the app. It remembers a deliberately stopped node and leaves it stopped.
+- Master and Live/Test check who owns the Docker project before any node operation. An app cannot restart, stop, restore, or adopt another profile’s node, including during a later restart gap.
+- Reconnects an installed Docker Desktop after an engine outage. Restores unexpectedly missing containers, repairs individual failed services first, and backs off when a failure persists.
+- Keeps the RPC in memory-saver mode. Timeout logs cannot restart a chain that is still making progress; failed restarts and ordinary parse errors cannot trigger a corruption diagnosis.
+- Adds **Repair services** on the Node screen, preserving chain data, wallet and producer keys. **Quick Sync** remains separate for a verified chain-data failure.
+- Adds **Start at Windows sign-in** in Settings for installed Windows builds. A running blockchain node now prevents idle sleep even when AI earning is off.
+- Gives database services 120 seconds to stop cleanly and limits Docker log growth. An unavailable data drive is never replaced with a new empty node.
+- See `docs/NODE_RELIABILITY_AUDIT_2026-10-13.md` for evidence, validation and remaining host checks.
+
+## KOIN reserved-credit release recovery
+
+- Handles the RPC server's disconnected message broker as a temporary outage and checks the next pinned, chain-verified endpoint for reads. Broadcasts still require explicit review and are never automatically retried.
+- Identifies releases, reservations, refunds and revocations in Payment activity. Confirmation distinguishes a transaction reported by the node from one it cannot find with an unchanged wallet nonce, and directs the latter to **Review saved transaction**.
+- Reports uncertain submission responses and Mana rejections instead of silently returning the same signed message. Recovery keeps the original transaction, signature, nonce and spending limits.
+- An already configured account directs users to **Refresh** when they try to import its network configuration again.
+
+## KOIN deposit confirmation recovery
+
+- Handles HTML error pages and temporary RPC failures with bounded fallback across the deployment's pinned endpoints for account reads, confirmation and non-broadcast simulations. Each endpoint must match the pinned chain. Account snapshots restart after a switch; transaction broadcasts are never automatically retried.
+- Adds **Review Mana correction** for a saved mainnet deposit whose Mana limit is too low. A native approval keeps the KOIN amount and nonce unchanged, saves the corrected signature, and requires a successful simulation before submission. The corrected transaction remains visible in Payment activity until its credits are confirmed.
+- Reads funding checks concurrently and retries an interrupted snapshot when a new block arrives. A snapshot spanning different blocks is still rejected.
+- Handles time spent waiting for RPC responses correctly, while preserving clock, contract, backing and irreversible-confirmation checks.
+- Shows when a saved deposit needs more confirmation checks or **Review saved transaction**. Recovery keeps the original signed transaction and does not require another credit purchase.
+- Distinguishes uncertain submission responses and reported Mana limits without treating either as a confirmed payment.
+
+## KOIN SDK compatibility
+
+- Updates Koilib to 9.4 so native KOIN contract calls work with the patched Protobuf dependency.
+- Adds checks for real SDK contract construction and exact balance/transfer encoding. Contract bytecode and payment approval rules are unchanged.
+
+## A clearer KOIN account
+
+- Separates **Use AI** and **Earn KOIN**, with available/reserved credits, spending limits, a full-width message box and automatic reward status.
+- Keeps connection setup separate and moves backups, reward-pool funding, recovery and developer previews into expandable sections. Unknown balances remain unavailable instead of appearing as zero.
+- Shows **Not connected** until a deployment is verified. Mainnet clearly identifies real KOIN; testnet remains labelled as test KOIN. The old default testnet label no longer appears before setup.
+- Native payment approvals, exact transaction recovery and the shared wallet/node profile remain in place. This layout does not activate payments or change the deployed contracts.
+
+## Mainnet KOIN pilot in Test
+
+- Updates flagged installer and runtime dependencies before packaging this Test build.
+
+- Import a verified **mainnet-pilot** manifest and your separate private invitation to use real mainnet KOIN in Test. The payment panel and native dialogs identify real funds, show exact amounts and spending limits, and default to Cancel.
+- Mainnet sessions and provider results are bound to the imported contracts. The optional worker needs explicit mainnet participation; rehearsal approvals and ordinary earning workers cannot authorize mainnet jobs.
+- Lost-response recovery retains the original transaction and spending reservation. Retrying cannot reset the approved budget or create a second charge. Automatic rewards retain their review period and finality checks.
+- Installation alone does not deploy contracts, fund wallets or activate a mainnet service. The dedicated backend, funded role wallets and a qualified separate provider must be ready first. Legacy KAI earnings continue during this Test pilot; their cutoff and 10:1 snapshot belong to the later Alpha transition.
+
+Earlier changes follow chronologically below.
+
+## Foundation testnet payment controls
+
+- Adds a Test-only panel for native purchase, reward funding, bounded session reservation, session revocation, release and refund reviews. Import a verified public deployment manifest and a separate OS-encrypted Test invitation first. Mainnet manifests are rejected.
+- Test requests and the optional Test inference worker use their own backend connection. Live account credentials, the existing profile, earning settings and normal chat routing remain unchanged.
+- Pending transactions stay blocked after an uncertain response. Review the original saved transaction, recover it from chain history, or review irreversible evidence that another transaction consumed its nonce. A conflict never credits a purchase as successful.
+- Backups contain both funding and nonce journals. Restore requires the retained recovery anchor and a backup current with that anchor; older backups cannot reset spending history. Copying journals to another host or OS is blocked by their stored binding. A persistent Test backend lease also binds each invited wallet to one encrypted installation identity. Going offline does not release that lease or authorize another host. Moving a Test wallet requires reviewed migration.
+- Rewards are automatic; the previous disabled Claim placeholder is removed. Purchases remain inactive on the live network. The Test backend and custody contracts must be configured and verified separately before the new panel can transact.
+- Check a pending Test request after Stop or a lost response. Confirmed cancellation or settlement permits a new request; unknown or dispatched work stays pending. Each approved session keeps its own request recovery record.
+
+## Node startup and local RPC recovery
+
+- Node startup waits for the internal RabbitMQ service to be ready. Health checks now include RabbitMQ and the local RPC, including unhealthy containers that still appear running.
+- Memory-saver mode reduces service jobs and keeps the local RPC available. Monitoring resumes for an already-running node when the app reopens.
+- Failed restarts and software panics no longer label chain data as corrupted or recommend repeated Quick Sync. Current-process chain validation failures still require attention.
+- Slow producer requests no longer trigger a restart while the chain is advancing. Health checks ignore errors from before a container's latest restart. Recovery reports restart failures and waits for RPC confirmation before calling the node healthy. Manual Stop and snapshot restore remain protected from concurrent recovery.
+
+## KOIN session chat and settlement rehearsal
+
+- An approved, explicitly configured KOIN session can now serve normal Network chat through opted-in workers. Its model and spending limits apply to every request without another wallet dialog.
+- The desktop verifies the approved tariff, worker signature, token usage and charge before showing the answer. The master prepares an unsigned settlement record; no KOIN moves and existing token prices remain unchanged.
+- Stop releases work that has not been dispatched. Dispatched work stays held if the connection is lost, and retries cannot create another job with the same request ID. Revocation stops new work while preserving earlier liabilities.
+- This developer path remains off by default. Worker participation requires `KAI_KOIN_FUNDED_REHEARSAL_JOBS=1`; installation does not activate payments. Replies are buffered until verification and labelled as rehearsals.
+
+## One approval per KOIN session
+
+- Adds private desktop controls for a deliberately configured funded-session accounting rehearsal: review limits once, refresh status, retry a saved approval or revoke it. The native confirmation lists the wallet, account, model, budget, per-request cap, request count, expiry and deployment pins; Cancel is the default.
+- The master verifies the wallet signature and finalized funding evidence. Multiple reservations can reuse the session approval without per-message wallet prompts. Existing USD account grants are not converted into KOIN authority.
+- A saved approval survives a lost response or restart. Retry checks the existing approval first; it cannot reset the budget. Revocation releases queued reservations and preserves dispatched or uncertain work. Closing during submission reports an uncertain result and offers recovery.
+- These controls appear only with explicit developer configuration. They do not fund a session, enable paid chat, broadcast transactions or spend KOIN. The live network and normal chat continue on their current paths.
+
+## KOIN rehearsal through existing chat
+
+- Developers can connect normal Network chat to an explicitly configured KOIN rehearsal master using the existing account login and wallet spending grant. Each request runs within a separate simulated session budget; no per-message review dialog is required.
+- Answers are shown only after the master accepts the work and the desktop verifies the worker signature, request, token usage and quoted cost. Chat labels these answers as a rehearsal with no KOIN spent. This path buffers the answer until verification completes.
+- Local-Only and Stop cancel pending requests. Errors never retry through legacy billing; reusing a request ID retrieves the existing result without creating another job. Existing grants are not permission to spend real KOIN.
+- This developer path is off by default. Set `KAI_KOIN_SHADOW_CONSUMER_URL` only for an isolated, configured master; the normal scheduler setting must match exactly. Installing Test does not activate KOIN payments or change live token prices.
+
+## KOIN spending review preview
+
+- Open **KOIN → Preview review** in the desktop app to inspect an example model, token limits, maximum cost, session budget and expiry in a native dialog. The prices and wallet shown are illustrative, not live rates or your wallet balance.
+- Cancel is the default. Expired, changed, revoked or over-budget terms fail review; hiding, minimizing or reloading the app also cancels it. A second click cannot open another review while one is pending.
+- This is a local preview only: it does not unlock a wallet, sign, send a request or spend KOIN. It is an example of reviewing session terms, not a required popup for every chat. Paid requests still need funded authorization, verified deployment and real tariffs before they can be enabled.
+- Fixes an Ethereum price-lookup cleanup issue that left failed RPC retries running and blocked the previous Test installer verification. RPC discovery now has a timeout, and completed background price lookups release their connection.
+
+## KOIN shadow job protocol
+
+- Adds an opt-in developer path for testing quoted network jobs. It requires `KAI_KOIN_SHADOW_JOBS=1` and an explicitly configured master; normal earning continues on the existing protocol.
+- Shadow jobs use an approved public model, an exact output limit and a prompt/tokenizer comparison before generation. Stop cancels shadow inference. Signed results bind the quote and dispatch attempt and do not authorize wallet spending.
+- Shadow jobs are separate from legacy job/reward totals. KOIN purchases, paid requests and payouts remain inactive while real pricing, funding and deployment are prepared.
+
+## KOIN earnings and wallet foundation
+
+- Earn KAI becomes **KOIN**, with the existing mainnet wallet and separate rows for reward estimates, claimable rewards and AI usage credits. Legacy test KAI stays in a collapsed history section; it is not converted to KOIN.
+- KOIN rewards are in preparation. Purchases and claims remain inactive, and the old test-KAI deposit action is disabled. Worker service continues on the existing network; the online indicator now says “serving.”
+- While serving, the app can send signed reports of its currently loaded public model to the new master shadow endpoint. These reports cannot authorize wallet spending and are insufficient by themselves to qualify for rewards. Local-Only and Stop retain their existing boundaries.
+- Includes separate credits and rewards contract prototypes, integer accounting, replay checks, a 24-hour root review period and 48-hour policy notice. The contract build is attached to CI for review; nothing is deployed or funded by installing Test.
+
+## Brain memory corrections and tasks from chat
+
+- Ask main Chat or desktop KAI to correct a saved personal memory. KAI searches for the existing note, shows the old and new text for review, and updates that note while keeping its identity, tags and pins. Imported source material and longer notes remain editable through their Brain screens.
+- Ask “What are my open tasks?”, “Add a Brain task to review the launch”, or “Mark my launch task as done.” KAI can create, update, complete and reopen personal Brain tasks, set due dates and link them to existing goals. Updates preserve fields you did not change and appear in Brain → Goals & tasks.
+- Corrections and task changes require their own exact review; the existing Always allow remember preference does not authorize them. If a note, task or linked goal changes during review, KAI stops and asks for a fresh lookup.
+- Recall now includes source sync dates and failed-sync status. Saved source text is explicitly a snapshot, so KAI should check the connected app when current data is needed.
+- Brain tasks record work to do. A due date does not schedule a notification, and creating or completing a task does not run a workflow or connected-app action. These tools remain private to eligible desktop models.
+
+## Wallet card navigation fix
+
+- Clicking the sidebar balance now loads the wallet controls and keeps Earn KAI open through background refreshes. Wallet setup, unlock and send/receive views follow the same navigation as the Earn KAI menu button.
+
+## Sidebar wallet balance and compact model status
+
+- A wallet card between Launch KAI and the model row shows the estimated USD value of your app wallet's liquid KOIN, with the KOIN amount underneath. Click it to open the wallet in Earn KAI.
+- Balances refresh every 30 seconds while the window is visible, including while the wallet is locked. Pricing reuses the node dashboard's cached KOIN quote; unavailable or expired prices show a dash. Testnet tokens receive no USD valuation, and external producer balances, VHP and KAI credits are excluded.
+- Model status and the model name share one compact row. Long errors still expand so their details remain readable.
+
+## Koinos AI mainnet API with backups
+
+- Mainnet wallet, node dashboard and Koinos chain tools now try `https://api.koinosai.com` first, then `https://api.koinosblocks.com`, then `https://api.koinos.io`.
+- Requests move to a backup after a timeout, transport/HTTP failure, invalid response or missing RPC method. Each endpoint gets one attempt per request, and later requests try the primary again.
+- Existing custom RPC settings stay first. Default installations pick up the new order automatically without changing wallet or node data. Local-node health checks still test only the local node, and Harbinger/testnet earning connections keep their existing endpoints.
+- Signed transaction retries reuse the same transaction. Chain or contract rejections keep their original error and do not trigger submission through a different provider.
+- Master continues serving its API from its local node; its public gateway and metadata fallback configuration do not need changing for this client update.
+
+## App interface languages
+
+- Choose English, Español, Português (Brasil), Français or Deutsch when first opening the app. The dialog previews your choice and remembers it after Continue. Existing users see it once after this update.
+- Change it later in **Settings → Language**, without restarting or losing an unsent message. The desktop companion and tray follow the same preference.
+- Translations are included in the app and work offline. User content, wallet addresses, model choices and voice settings stay as entered. Some advanced help and service diagnostics still fall back to English; native-speaker feedback on the initial translations is welcome.
+
+## Koinos Node with Local-Only AI
+
+- Enabling Koinos Node now opens its UI while AI Privacy stays Local-Only. Node synchronization, production and explicit wallet actions use their own controls without requiring online AI.
+- AI web tools, cloud connections and account access still follow AI Privacy. Wallet password checks and local API access controls remain enforced.
+- Settings now explain the separate node networking behavior instead of directing node operators to enable online AI.
+
+## Continuous voice playback clock
+
+- Pocket, Windows and Kokoro/native WAV replies now share one turn-scoped Web Audio clock instead of opening a new player for each sentence. When the next sentence is ready, it is scheduled directly after the current one with no artificial media-element or audio-device gap.
+- Quick start remains quick: KAI still begins with the first complete sentence. The queue can now place one prepared sentence ahead on the same clock while retaining one synthesis job and bounded audio memory.
+- Listening receives the clock's exact audible window, queued duration and 1.2-second acoustic tail. Speaker echo remains marked during that tail, while only currently audible speech can be paused by a barge-in candidate.
+- Stop, hide, turn replacement and wake-guarded interruption cancel the complete clock and discard scheduled or late audio by turn identity. System browser voices retain their native playback path and the existing local-only/no-fallback rules.
+- Pocket diagnostics now report both synthesis-buffer underruns and output-clock gaps, helping distinguish a slow voice engine from a playback scheduler problem.
+
+## KAI Eyes · screen and camera context
+
+- KAI can now see the screen he is sitting on or a camera you explicitly enable. Open **KAI Eyes**, choose Screen and/or Camera, approve the session, then ask naturally: “What is this error?” or “What am I holding?”
+- A visible orange indicator stays on whenever either source is active. Capture is session-only and stops on Off, hide, return to the app, quit or a brain change.
+- Each source keeps only six small frames in memory at about one frame per second. Only the freshest frame is attached to the current turn; frames are not saved in chat history or written to a video/image archive.
+- KAI can take one fresh higher-detail look when small text or an object needs closer inspection. Looking does not grant permission to click, type or control the desktop; those approvals remain separate.
+- Eyes works only with an installed local vision model or a configured private OpenAI/Anthropic vision model. Network/text-only models are blocked, Local-Only still blocks private-provider egress, and local visual turns cannot overflow to Koinos Network workers.
+
+## Working manual update checks
+
+- **Settings → Check for updates** now contacts the installed app's actual Test update feed instead of only re-reading its packaged/source status.
+- The row says whether Test is current, an installer is downloading, or the update service could not be reached. Automatic startup and four-hour checks continue unchanged, and source checkouts keep their existing git-based check.
+
+## Smart-Turn semantic listening
+
+- KAI now distinguishes a quiet pause from a finished thought with the local Smart-Turn v3.2 acoustic model. A breath after “Can you help me…” can stay part of the same question instead of being sent early.
+- Smart-Turn runs in parallel with local Whisper inside an isolated worker and reuses KAI's existing ONNX/Transformers runtime. Audio stays on the computer, the worker releases after idle time, and no second heavyweight inference stack was added.
+- Quick, Natural and Patient now tune the complete turn policy: trailing pause, semantic confidence and a bounded 2.5/4/6-second wait. Keep speaking to continue, or tap the mic to send immediately.
+- If the semantic model cannot start, KAI visibly falls back to the proven silence endpoint. Wake phrases, the one-minute follow-up window, guarded “KAI” interruption and local transcription are unchanged.
+
+## Silero listening for KAI Live Senses
+
+- KAI now uses local Silero VAD v5 as its primary `speech / not speech` detector. It reuses the microphone stream and ONNX runtime KAI already owns, with one capture worklet and one inference lane rather than a parallel audio stack.
+- Quiet room, Everyday room and TV nearby now tune speech probability instead of raw loudness. Conversation pause choices, Hey KAI, the 60-second follow-up window, local Whisper, echo rejection and the spoken “KAI” interruption rule stay in place.
+- If Silero cannot initialize on a computer, listening starts with KAI's previous calibrated detector instead. Voice & listening shows which detector is active so Test feedback can distinguish the two paths.
+- The Silero model, runtime code and worklet are bundled locally. Microphone audio is not sent to a VAD service, no CDN is used, and the installer reuses KAI's existing ONNX runtime instead of including a duplicate copy.
+
+## KAI Live Senses architecture foundation
+
+- KAI's listening, model work, tools, streamed text, voice synthesis and playback now share one turn identity and cancellation boundary. Stop, a wake-guarded interruption, or a newer request retires the whole old turn so late text or audio cannot reappear.
+- Spoken replies remain active until both the model and the scoped audio queue finish. Voice failures leave the text answer intact, and tool approvals pause recovery timers while you review them.
+- New local, content-free timing diagnostics measure capture, speech recognition/endpointing, first model text, first audible speech and total turn time. First-response and stream-stall watchdogs recover KAI instead of leaving the companion indefinitely busy.
+- This is the shared turn/session boundary underneath Silero and Smart-Turn listening. Optional camera/screen senses will migrate onto it in later Test revisions.
+
+## Verified Windows releases
+
+- Test and alpha Windows releases now require Azure signing and Windows verification of the installer, portable app, packaged app and helper executables before upload.
+- Updates verify the existing Michael Milas publisher identity. Signed releases include timestamps and a versioned signature report with checksums.
+- SmartScreen can still show an “unrecognized app” reputation warning for a correctly signed download.
+
+## Send from the KAI wallet with external producer custody
+
+- Fix KOIN and VHP sends from the local KAI wallet being blocked when an external producer wallet is selected. Sends still require the local wallet password; external producer transfers still require external signing.
+
+## Wallet submission results
+
+- Show Koin Vault’s actual submission error and transaction ID instead of hiding the reason behind a generic failure message.
+
+## Zero VHP allowance fix
+
+- Accept the protobuf empty response for a zero allowance. Full-balance approvals and manual burn-plus-allowance requests now prepare correctly before an allowance has been set. RPC failures still stop preparation.
+
+## Full VHP allowance with manual burns
+
+- Koin Vault manual burns offer “Also allow my full VHP balance for production” (checked by default). The same phone-approved transaction burns KOIN and sets the PoB allowance to the VHP balance read during preparation plus the newly burned amount. Uncheck it to burn only.
+- The allowance action offers “Use full VHP balance”; KAI reads the balance when preparing the review. Other deposits or burns outside this flow do not automatically change the allowance.
+
+## Koin Vault VHP production allowance
+
+- Add a phone-approved, limited VHP allowance for the official Proof-of-Burn contract. Choose an amount up to the current VHP balance; 0 revokes it. This replaces the remaining allowance and does not grant token-transfer authority to the hot key. Requires the companion Koin Vault backend update.
+- Show failed block submissions separately from healthy running services. A VHP burn rejection remains visible until a successful submission is observed; it does not trigger Quick Sync or automatic restarts.
+
+## Koin Vault signing feedback
+
+- Signing setup errors now appear beside Review and sign and in a notification. If the connected wallet has not been selected as producer, KAI explains which button to click before preparing registration.
+
+## Koin Vault producer signing
+
+- Node → Producer wallet custody → Koin Vault now connects your phone with a QR code. Scan with Koin Vault's Connect App, approve the connection, then click Use this producer wallet while the node is stopped.
+- Generate the separate hot key and use Review and sign with Koin Vault to register it. Koin Vault shows the full public key and requests your fingerprint/device passkey before submitting. The same flow supports burns and KOIN/VHP transfers.
+- Producer selection persists across restarts. The temporary phone connection expires after 30 minutes and reconnects with a new QR. Production continues without the phone once registration is verified.
+- Pending approval blocks conflicting custody/key/network changes. Rejections, expiry, uncertain delivery and disconnect failures retain clear status; requests are never automatically retried. KAI checks submitted operations on-chain and still requires matching on-chain registration before production.
+- Mainnet only. The Koin Vault and original wallet backend updates enable this integration; an older backend shows an update-needed message. Existing Kondor/offline signing remains available.
+
+## Kondor producer signing
+
+- Keep the producer account key in Kondor on a separate computer. The new Mainnet Producer Signer at https://koinosai.com/producer-signer/ reviews and signs registration, KOIN burns, and KOIN/VHP transfers.
+- Node → Producer wallet custody → External signing now includes the signer link, unsigned JSON download and signed JSON import. No WIF export or KAI installation is needed on the Kondor computer.
+- Accept Kondor mana reductions within the prepared maximum while verifying the new transaction ID and producer signature. All operations, accounts, recipients, amounts, chain ID, nonce and hot public key stay protected. Keep Kondor Use free mana off.
+- The browser signer checks canonical Mainnet contracts and exact burn approvals. Signing requests and broadcasting remain separate explicit user actions; registration still needs on-chain verification before starting production.
+
+## Cleaner node dashboard
+
+- Node Details now has its own titled card directly below the running status, followed by Node value, Profit & projected return, Koinos network and Activity feed.
+- Removed the network source, connected-peer and block-definition footer text. Loading, stale and unavailable counts still show a short status in the network header.
+- Added consistent spacing between section headings, action buttons and tiles, including View block producers.
+
+## Live network producer counts
+
+The blockchain Dashboard now displays live numbers directly: active producers over the last 28,800 blocks (about 24 hours), producers with a block in the last 2 hours (the green status rule), and total tracked producer accounts. Tracked includes VHP holders who may not be producing; these are accounts, not a census of every running node.
+
+Data comes from KoinosScan’s public producer API, refreshes at most once a minute, and loads independently of wallet/node status. Counts remain available when your local node is stopped. Failed refreshes show explicitly stale data for at most ten minutes, then unavailable; missing data is never shown as zero. Mainnet counts are not shown for other networks. Local-Only blocks the request.
+
+Definitions verified from [the explorer’s producer display](https://github.com/interfecto/koinos-token-tracker/blob/aa11ddfc19adb9ef0afa0e244b363706fcb732fd/internal/api/explorer.html) and [its indexed producer query](https://github.com/interfecto/koinos-token-tracker/blob/aa11ddfc19adb9ef0afa0e244b363706fcb732fd/internal/store/sqlite.go). The live API response is checked during Test release verification.
+
+## Network information on the Dashboard
+
+- Moved connected-peer information into a dedicated Koinos network section on the blockchain Dashboard.
+- Added a supplementary button opening KoinosScan’s producer list. Local peer connections remain distinct from the live network producer counts above.
+
+## Node health, Quick Sync and storage
+
+- Replay validation failures, fatal chain errors and repeated producer request timeouts now show warnings on Node and Dashboard, even when Docker containers look running or automatic recovery is off. Replay mismatches stop automatic restart loops. Exited containers are included in status.
+- Quick Sync removes stopped node containers to release mounts, checks data folder locks before downloading, and explains when a full Windows restart may be needed. Failed installs roll original databases back; an interrupted restore blocks node starts until recovered.
+- Manage backups on the Node screen lists previous chain copies with dates and sizes. Delete individual copies after confirming the restored node works. Cleanup is never automatic and does not target active data, wallets or producer keys.
+- Node status shows connected peers from the latest P2P report (about once a minute). A capped list shows a lower bound with “+”; missing reports show unavailable. This is this node's connections, not the total network size.
+- These changes do not establish or fix the underlying Koinos replay-validation cause. Save full chain logs and Docker image versions if it repeats after a verified restore.
+
+## Brain permissions and node controls
+
+- Choose “Always allow this action” when chat or KAI asks to save a Brain memory. Revoke it in Connections → Connection settings → Always allowed actions. Forgetting remains separately approved.
+- The node screen shows only Stop node while running, or Start node while stopped. Controls are disabled during node operations, including quick sync.
+
+# Brain is now the single memory store
+
+Chat and desktop KAI save and recall memories through Brain. Earlier facts migrate automatically into encrypted Brain storage; the legacy store is cleared only after a successful save. Manage memories in Brain → Memories. The old Core memory API and tools are retired. Brain remains private to eligible desktop models and is not available to network workers.
+
+### Azelma Pocket by default
+
+- KAI now selects Azelma Pocket on Windows x64 and Linux x64 for new profiles and profiles still using the former Bella default. Existing alternative voices and later manual choices are preserved.
+- When KAI opens with Azelma selected, its pinned voice pack (about 201 MB) downloads automatically if missing. Progress and retry remain available in the compact companion. Existing voice files are reused; hiding KAI pauses setup and reopening resumes it.
+- Voice reply and microphone toggles keep their existing settings. Unsupported computers retain their existing voice setup. English speech stays local.
+
+### Release checks and code completion
+
+- Koinos Code keeps its completed status when an approval acknowledgement arrives after the answer. A delayed-response browser regression now checks the full approval, file write and final answer.
+- Test publication now requires macOS app tests and the explicit MCP Agent-mode replay, in addition to the existing Linux and Windows checks. The native drag check respects macOS pointer hit testing.
+
+### Faster chat and local recall
+
+- Main Chat and desktop KAI now share intent routing. A personal-memory question such as “What is my daughters name?” bypasses the tool planner, web search, memory writes and connected-account sessions, including when the globe is enabled. Ordinary conversation also answers directly.
+- Local memory is retrieved once per store for the final reply, not repeatedly during planning. Family plurals/possessives match reliably; the legacy memory search index is reused until memories change. Model-proposed memory saves require explicit approval and are not available for recall requests.
+- Real actions retain bounded planning and recent conversation context. Connected workflows keep their longer budget and fresh read-after-write verification; unrelated account tools no longer receive an unconditional ranking boost. Repeated discovery, malformed planner output and repeated failures stop sooner.
+- Connected sessions and result polling now start lazily, only for actual connected work. Stop cancels research and recall, and a stopped planning phase cannot start a second answer request. The displayed first-reply time now includes planning and retrieval.
+- Partial connected tasks report actual returned results instead of incorrectly claiming that nothing changed. See [the routing audit, regression coverage and remaining performance checks](CHAT_OPTIMIZATION_2026-09-11.md). Hardware/model latency still needs measurement on the target Windows machine.
+
+### Reliable connected actions and voice approvals
+
+- Local-business requests now use structured OpenStreetMap place data instead of trying to infer practice names from directory pages and search advertisements. KAI receives spreadsheet-ready names, addresses, phones, websites and source links, keeps those rows through the connected-action plan, and does not count a newly created blank Sheet as completion.
+- DuckDuckGo and Bing advertisement/tracking redirects are excluded from search results and citations.
+- Minimizing or hiding KAI stops microphone capture and speech but no longer cancels an active text reply or an already-approved connected action. Stop, closing the window and navigation still cancel; an unapproved action still waits for visible review rather than running invisibly.
+- Public research now falls back from DuckDuckGo to Bing's compact search feed before the narrower Wikipedia fallback, uses browser-compatible request headers, recognizes block/challenge pages, and tries more independent sources instead of letting one inaccessible site derail the answer.
+- Approval dialogs for public research and a specific connected-account action now offer **Always allow this action**. The grant is encrypted locally, stays scoped to that capability and account/action revision, and can be revoked under Connections → Connection settings.
+- Compound requests such as researching local businesses and putting the results into Google Sheets now stay in one connected workflow. Natural phrases such as “look up” and “put in a Sheet” are recognized, public research remains separately reviewed, and ordinary chats no longer inherit the connected planner's long retry loop.
+- Pocket voice now uses an adaptive jitter buffer throughout each sentence. Fast generation still begins early; slower generation waits for a clean sentence, and a mid-reply CPU slowdown rebuilds an audio lead before resuming instead of stuttering through tiny fragments.
+- Direct connected-app requests now expose only the relevant connected-action tools to KAI's planner. An unrelated Brain lookup can no longer replace a Drive or Calendar action, and KAI gives a short failure statement instead of manual instructions when no write actually ran.
+- When KAI must leave the public network for a connected action, it now prefers a configured private OpenAI or Anthropic model over silently selecting a weaker local model. A local model explicitly selected by the user remains selected.
+- Explicit Drive, Calendar and other connected-app requests now begin with actual account discovery. Small local models get a bounded corrective planning pass instead of falling back to a generic “I do not have access” reply after an enabled account was found.
+- Calendar, Google Drive and other explicit connected-app requests now leave Koinos Network inference and use an available local/private desktop model before any account data is read. If none is available, KAI explains the required model instead of falling into desktop observation and showing a misleading error.
+- Compact and expanded KAI use the same connected-action path. Keeping the text box open is no longer relevant.
+- Voice playback and listening stop cleanly while private tools and native approvals are active, preventing Pocket KAI audio from overlapping an approval or the following reply.
+- Connected accounts still need **Use in conversations** and the required actions enabled under Connections → Connected apps → Manage access. Actions prompt once unless you explicitly choose an action-scoped always-allow grant.
+
+### Smoother GPU earning and accurate producer status
+
+- Automated network probes now prefer one resident model per earning session, avoiding background model unload/reload cycles every few minutes. User-selected network models remain available.
+- Block-producer checks inspect the actual node service when recent log output has no VHP estimate. A temporary or noisy log gap no longer claims the node may have stopped, while stopped, syncing and recovering states remain distinct.
+
+### Security and reliability sweep
+
+- Hardened remote API access, local browser access, desktop window permissions, wallet files and public web requests.
+- Fixed truncated or incorrectly typed Agent Network results, lingering network requests after Stop, stalled MCP responses, and download failures that could crash the app.
+- Local-Only earnings status stays offline while earning is stopped. Email requires encrypted delivery; calendar connections and event text have stronger validation.
+- Updated vulnerable dependencies and added security regression checks to the Test release workflow. Scheduler authorization and request-handling fixes are included in the repository and require a separate server deployment.
+- See the [audit findings, validation and remaining coverage](SECURITY_SWEEP_2026-09-10.md).
+
+### Clearer navigation and node status
+
+- Sidebar menu groups now expand one at a time. Open Workspace, Your toolkit or Contribute to reveal its options; the previous group retracts.
+- Quick sync clearly shows that the node is stopped for a snapshot restore. Start/stop controls stay unavailable during the restore, and saved key registration no longer implies active block production.
+- Dashboard status uses one colored dot, including an amber state for quick sync.
+
+### Agent Network private service preview
+
+- Agents content scrolls within its workspace while the app navigation stays in place.
+- Added Agents with Discover, My agents, Jobs, Earnings, Activity and separate relay settings. Create a service from a template or reviewed workflow, request a signed free quote, run it, and inspect the encrypted result.
+- Includes a headless client and independent relay implementation. Hosted workflows use isolated job data and installed local models; private Brain, app credentials and the earning wallet are unavailable to callers.
+- This is the first foundation for the Agent Network v1 proposal. Paid services remain disabled: the new custody contracts, sponsorship and paid-network acceptance still need deployment and integration. No KAI is moved and no new rewards are emitted. See [setup and current coverage](agent-network/README.md).
+
+### Cleaner producer wallet controls
+
+- Producer address and public-key fields now match the node settings, with rounded borders and room to read their values. The Copy button sits beside the public key, actions wrap on smaller windows, and external signing has clearer spacing.
+
+### Connected chat and instant workflows
+
+- Main Chat and desktop KAI can discover connected accounts, inspect selected action inputs, and chain app actions using returned file/message IDs. Ask for a folder and spreadsheet, a document, an appointment, or a message. Each external call still uses exact native review.
+- Ask KAI to find, inspect, run, check, stop or resume a saved workflow. Unreviewed drafts must first be saved in the builder; running a workflow does not enable a schedule.
+- One-time action chains can run from chat and be saved as disabled workflow drafts. The tool loop now allows up to 24 steps.
+- Action receipts appear in chat and under Connections → Connected apps. Partial and uncertain outcomes remain visible after restart; uncertain writes cannot auto-retry. Inspect the destination before acknowledging an uncertain receipt.
+- Manage access now includes guidance and action-search shortcuts for Google Calendar/Docs/Sheets/Drive, Discord Bot, Slack, Gmail, Teams, Notion, GitHub issues, Todoist and OneDrive/Excel.
+- Public research can continue after a private Brain lookup through a desktop-only tool that reviews the exact public query or URL. Private observations still cannot flow into ordinary Core/MCP tools.
+- Your accounts must have the required selected actions and **Use in conversations** enabled. Provider scopes and actual account compatibility still need testing in your installation. Discord messages use the bot/app identity. No new hosting environment variables are needed.
+
+See [connected chat setup and testing](KAI_CONNECTED_CHAT.md).
+
+### External producer wallets
+
+- Koinos Node now supports a watch-only producer address separate from the KAI earning wallet. Generate/copy/rotate the hot block key, verify registration on-chain, and prepare externally signed registration, burn and transfer transactions. Automatic funds operations are disabled in external mode. See [setup and offline signing](EXTERNAL_PRODUCER.md).
+
+### Steadier KAI animations
+
+- The Launch KAI card no longer jumps during desktop-provider status refreshes.
+- Speaking keeps one continuous arm/head pose between audio phrases and buffering pauses. The mouth still follows audible playback, and the status bubble keeps a consistent size.
+
+### KAI-managed connection fix
+
+- Fixed the desktop account-service wiring that incorrectly showed managed connections as disabled even when the server was enabled. Connections now shares the account server and sign-in service used by Settings. Existing server environment variables and personal Composio keys need no changes.
+
+### Workflows with a visual flow builder
+
+- **A cleaner sidebar.** Brain, Workflows and Connections sit flush beside the main navigation, with compact left-aligned menus.
+- **Build connected routines.** Drag nodes, connect branches, edit their settings, zoom/pan, auto-arrange and undo changes. Includes conditions, switches, merges, loops, sub-workflows, parsing, transformations and isolated JavaScript.
+- **Build with KAI.** Describe a routine, review Copilot's graph proposal or choose from nine templates. Discover suggestions from selected context, optionally once a day.
+- **Run when it matters.** Manual input, time-zone schedules, app/source change watches and Composio app events. Inspect each run's data, timing, retries and approvals on the canvas or in history.
+- **Tasks moves into Workflows.** Existing scheduled prompts migrate with their timing and previous chat links; old timers stop to prevent duplicates. Brain's personal to-dos remain.
+- **Review before changes.** App and Brain writes pause for approval, including individual items and nested flows. Preview uses simulated capability outputs without external changes.
+
+Read the [Workflows guide](KAI_WORKFLOWS.md) and [OpenHuman coverage comparison](OPENHUMAN_WORKFLOW_COVERAGE.md). Live Composio events need the matching server update and KAI sign-in. Existing connection environment values remain valid; no new Composio API key is required. Schedules and workflow reasoning run on your desktop while KAI is open, using installed local models.
+
+### A connected Brain, with Awareness
+
+- **The same 1,516-app catalog in both connection modes.** Search the full list immediately, filter eight stable categories or authentication types, and browse compact logo cards. Category changes no longer repeat or grow the menu.
+- **Sidebar navigation.** Brain, Workflows and Connections now use a left rail like Koinos Node.
+- **A richer Brain.** Explore source/topic relationships, search by source/topic/date, maintain goals and tasks, and compare memory changes with their original text.
+- **More sources.** Select local text folders, KAI conversations, public websites, RSS/Atom feeds and GitHub repositories, alongside your connected app reads. Each source has its own refresh control.
+- **Awareness.** Choose Off, Observe or Assist, select what KAI can read, add custom background checks and use an installed local model for summaries, briefings and reviewable suggestions.
+- **Visible background work.** Inspect the queue, results, retry/stop controls and activity; start reviewed workflows for follow-through.
+- **Portable knowledge.** Export a new Markdown/Obsidian folder with linked sources, topics and memories.
+
+Read the [Brain and Awareness guide](KAI_BRAIN_AWARENESS.md) and [OpenHuman feature coverage](OPENHUMAN_BRAIN_COVERAGE.md). The full app catalog includes OAuth, API credentials and other connection types; provider/project setup still applies. This update needs no new server environment variables.
+
+### Connect without a settings loop
+
+- **App cards keep the chosen app open.** Connect checks the current server status and explains whether KAI sign-in, a personal key, or a privacy change is needed.
+- **Server setup and desktop sign-in are shown separately.** When the server enables Composio, KAI-managed connections need only your KAI account sign-in. Expired sessions get a clear sign-in prompt.
+- **Key errors identify the right setting.** A rejected server Composio key asks the administrator to check it, without reporting your desktop sign-in as expired.
+- **Fresh status without losing your place.** Refresh picks up a newly enabled server, keeps useful errors visible, and preserves a key or connection method being edited.
+
+### Easier app connections
+
+- **Explore your apps.** Search a catalog with platform logos, categories, and a guided browser sign-in. See your connected accounts and manage each one separately.
+- **Choose who manages the connection.** Use **KAI-managed** connections after the server administrator enables Composio, or save your own Composio project key. Both use the same catalog and sign-in flow.
+- **Choose what KAI can use.** Select actions, allow conversation access, and bring selected read-only data into Brain through ordinary input fields. Optional source refresh runs every 20 minutes while KAI is open. Actions that can make changes still require review.
+- **Keep account boundaries clear.** Switching methods keeps projects separate. Personal keys stay encrypted on the desktop; the shared key stays on the server. Custom APIs remain available in their own tab.
+
+## Companion workspaces: Brain, Workflows and Connections
+
+- **Brain:** editable notes, people/projects/preferences, tags, pins, goals, a category map, text imports, selected API sources, optional 20-minute sync, and Markdown export. Relevant context supports private/local chat and desktop KAI.
+- **Workflows:** visual ordered steps, local-model drafting, templates, manual/recurring schedules, API steps, conditions, approvals, cancellation and persistent run history. Reasoning uses installed local models; private provider keys remain reserved for attended chat.
+- **Connections:** self-managed tokens/API keys, starter GitHub/Notion/Slack/Home Assistant operations, custom APIs, request testing and separate agent/background-read grants. Keys are encrypted in the desktop app; writes and model-requested calls ask for approval.
+- Includes a [setup guide](KAI_COMPANION_QUICKSTART.md) and [full companion feature inventory/roadmap](KAI_COMPANION_ROADMAP.md), distinguishing this implementation from future OpenHuman-inspired capabilities.
+
+
+### Tidier Developer Tools
+
+- **Aligned fields and actions.** Multi-agent, Playground and Pipelines now use consistent labels, field heights and spacing. Saved-team controls stay together, and forms stack cleanly in smaller windows.
+- **Compact agent cards.** Tool lists expand when needed, show the selected count, and keep checkboxes beside readable names. Role instructions stay in a normal text font; JSON editors keep their code formatting.
+- **Clearer JSON controls.** Builder updates sit beside each JSON editor, with a reminder that saving and running use the JSON. Existing team definitions and execution behavior stay the same.
+
+### More natural conversations and fewer provider cut-offs
+
+- **Room to finish your question.** In **Voice & listening → Conversation pauses**, Natural allows a short thinking pause, Quick sends sooner, and Patient gives you more time. Natural is the default. Words spoken while KAI is still recognizing your question stay together in one request. This uses the existing local listener; no extra download is needed.
+- **Interruptions still need “KAI.”** Recognizing the name stops the old reply, even if you are still finishing your new question. Ordinary dialogue during a reply cannot interrupt it. Stop and hiding KAI cancel pending input and reply audio. Microphone Off and listening-setting changes discard unfinished input.
+- **Fix for frequent “output limit” errors.** Private Anthropic/OpenAI action planning has a larger allowance. If a plan hits that limit, KAI makes one attempt with more room before any action runs. Incomplete plans cannot reach the tool runner, and existing approvals still apply.
+- **Long answers can finish.** A confirmed output limit can continue the answer once with the same provider. Recovery uses the original Stop button and deadline. If the answer is still too long, KAI keeps the partial text and explains how to continue, instead of cancelling its speech. A recovery request uses your provider account and may add usage; account errors and disconnected streams do not automatically retry or switch providers.
+
+Pocket's continuous audio, character effects and voice selection stay in place. Conversation pauses change how long KAI waits after you speak, not the voice's synthesis speed. This is pause handling, not speaker identification or a new semantic turn-detection model.
+
+### Pocket voice setup, right where you need it
+
+- **A visible download button beside the voice selector.** Pocket setup now sits at the top of **Voice & listening**, with a clear blue **Download Pocket voices** button and progress. There is no need to scroll past the other voice settings.
+- **Download directly from KAI’s prompt.** When a selected Pocket voice is missing, the desktop message includes the download button, progress and retry. Once ready, click **Try Alba** (or your selected Pocket voice) right there.
+- **An easy sample after setup.** The same voice panel offers a named sample button after the download. Downloads still require your click, and installing alone keeps your existing voice selected.
+
+### Try Pocket voices with KAI
+
+- **Four optional English voices.** Download Pocket once in KAI’s **Voice & listening** panel, then choose Alba, Marius, Javert or Azelma. Your existing voice stays selected until you change it. The download is about 201 MB; no account, Python installation or subscription is needed.
+- **Audio starts while the sentence is still generating.** Pocket sends small audio chunks to a continuous player. Cute, Squeak and Classic effects keep their pitch and timing across those chunks. Your usual reply-timing choice returns when you select another engine.
+- **Compare on your computer.** “Hear a hello” uses the real engine, and the panel reports the last sentence’s startup time and buffering pauses. This is a trial, not a promise of faster speech on every computer. The first use after loading is slower.
+- **Local and easy to stop.** Pocket runs in an isolated CPU process. Stop, voice-off and hiding KAI stop its audio; unused voices release their memory. Existing microphone behavior and the spoken “KAI” interruption rule are unchanged. This English bundle does not add Korean speech.
+
+### Smoother thinking and clearer spoken answers
+
+- **A proper hand at his chin.** KAI now rests a curled hand under his face, with upright knuckles. The same grip holds his magnifying glass while searching.
+- **Steady thinking and searching.** His arm eases into position, his head nods gently, and web searches keep their animation between lookup steps. A greeting ends when KAI starts working, so the poses do not compete.
+- **Answers without spoken web addresses.** Voice replies skip full URLs, numbered citations and source lists. Useful source links remain clickable in the text chat.
+- **Emoji in plain words.** Common emoji get short names such as “smiley face emoji,” “thumbs up emoji” or “robot emoji.” Combined emoji are handled as one symbol. This works with fast Windows, browser and natural voices, including streamed replies.
+
+### KAI can work in your browser and desktop apps
+
+- **“Open Tubi” just opens Tubi.** Known website commands launch your default browser immediately. You can also give KAI a complete website address.
+- **Ask about what is on your screen.** On Windows, KAI can inspect visible window controls, switch windows, click buttons, type into text fields and scroll. A vision-capable model can also see screenshots and propose visual clicks or drags. Try **“Play the movie on my screen.”** If several movies could match, tell KAI the title or point at it first.
+- **Your existing browser session.** KAI works with the apps and browser where you are already signed in. It checks the updated screen after each action; availability depends on how the app exposes its controls and how well your selected model understands the task.
+- **You stay in control.** Approve each desktop task once. Purchases, rentals, messages, destructive actions, unknown controls and visual clicks require another confirmation. Visual targets are marked on screen. **Ctrl+Alt+Backspace** stops control immediately; KAI reserves **F8** if that shortcut is already taken. The red Stop button and **KAI options → Stop desktop control** also work. Closing or hiding KAI ends permission.
+- **Private to your desktop.** Choose an installed local model or your own OpenAI/Anthropic connection. The permission prompt tells you whether screen text and screenshots will go to your API provider. Desktop observations never overflow to network workers. Screenshots are held in memory for the current task and are not saved as chat attachments.
+
+Passwords, CAPTCHAs, administrator prompts and terminal commands remain manual. Protected video cannot be inspected through screenshots; KAI uses visible player controls. No streaming subscription, rental or paid API connection is included or enabled automatically.
+
+### Clear status bubbles and Korean Windows speech
+
+- **The whole status bubble stays visible.** Thinking, speaking, microphone and Stop changes now update the native desktop window's visible area, including while KAI rests on the bottom edge.
+- **Korean replies use an installed Korean Windows voice.** Your usual voice remains selected for later replies, and Cute, Squeak and Classic effects still apply. If Korean speech is missing, KAI explains how to add it through **Voice & listening → Add Windows voices**, followed by **Refresh voices**. Nothing is installed automatically.
+- **A missing language no longer looks like a broken audio format.** KAI shows one helpful message, keeps the full text answer and lets the next conversation continue normally. Internal Windows IPC error text is removed.
+- **Continuous replies handle different voice sample rates.** An English introduction and Korean answer can play together without a rate-mismatch error.
+
+### A proper wave and faster character voices
+
+- **A natural little wave.** KAI bends his elbow and shows an open palm. His wrist waves gently instead of swinging the entire arm backward. This works on the desktop and while resting along the edge.
+- **Fast Windows voices with real character effects.** Open **Voice & listening → Use fast Cute KAI**. The installed Windows voices now produce local audio that KAI can actually reshape, so Cute KAI, the Squeak slider and Classic deeper KAI work even when the browser voice engine ignores pitch. No neural-model download or new account is needed. The list includes supported installed Windows and desktop voices, which vary by computer.
+- **More installed options.** **Add Windows voices** opens Windows Speech settings. Install an available speech voice there, then **Refresh voices** in KAI. Only voices exposed by Windows' supported speech APIs appear; a Narrator-only voice is not promised to work in other apps.
+- **Choose how replies start.** Quick start plays the first complete sentence and works best with fast voices. Head start prepares two sentences. **Whole reply** prepares and joins the reply audio first, then plays it continuously, avoiding waits for synthesis between sentences. It takes longer to begin; exceptionally long answers are read in bounded sections.
+
+An explicitly selected browser Windows voice is upgraded to its matching installed voice when found. Existing natural voice selections stay selected. The four natural voices share one engine, so switching among them is not a speed upgrade. Stop, KAI-name interruptions, follow-ups, microphone cleanup and the shared wallet/node profile are preserved.
+
+### Pick KAI up and bring him along
+
+- **A little robot in your hand.** Pick KAI up by dragging him. His arms and legs dangle, his cape sways, and his body leans with your movement. Dropping him on the desktop gives a soft settling bounce.
+- **A place on the desktop edge.** Drop KAI near the bottom of the usable screen and he rests with his hands along the edge above the taskbar. Slide him left or right, or pull upward to lift him back onto the desktop. His resting position is remembered.
+- **No more bottom-to-top jump.** Movement follows the monitor under your cursor and keeps the native window inside that monitor's usable area, including when chat is open or displays change.
+- **More expressive activities.** Thinking brings a hand to his chin with a question mark and a little idea bulb. Actual web searches bring a moving magnifying glass and floating pages. Speaking adds hand gestures; the mouth still follows audible playback.
+
+Click KAI to open or minimize chat. **Animation off** and the system's reduced-motion preference stop the movement while retaining the edge pose. Your voice preferences, microphone controls and ongoing conversations continue to work while KAI is moved.
+
+### KAI finds a cute little voice
+
+- **Cute KAI is the new character voice.** Bella with a brighter, higher, lightly squeaky character treatment. The **Squeak** slider in **Voice & listening** goes from Gentle to Extra squeaky. Pitch and pacing are handled separately, so a higher voice does not race through every word. Classic deeper KAI and the unprocessed voices remain available.
+- **Hear it immediately.** With Bella selected, **Hear a hello** uses a tiny bundled recording and applies your current character settings. No model startup or download is needed for that preview. Conversations reuse the same local voice files you already installed; first-time setup still requires a click.
+- **Start with the first sentence.** **Quick start** is now the default. KAI speaks the first complete sentence as soon as its audio is ready while preparing the next. It no longer waits for two sentences. **Extra buffering** remains an option for slower computers; pauses can still occur when local synthesis cannot keep up.
+- **Stay ready to talk.** While KAI is visible with voice replies enabled, the installed voice engine stays loaded. Setup prepares the first-use speech components too. Hiding KAI or turning off voice replies stops the keep-warm requests; idle voice memory is released after two minutes. No background microphone use is added.
+
+This update selects Cute KAI with Bella once. Your choices after that persist. Open **Voice & listening → Hear a hello** to try it. The reference guided the character's pitch and energy; this is an original local character treatment, not a clone or ElevenLabs connection. Voice generation and processing stay on your computer, with no new account, API key or subscription.
+
+### Meet the new KAI
+
+- **A new character, inspired by your reference.** Glossy white armor, a cobalt cape and headset, a K badge, and an expressive cyan face. KAI looks around, blinks, leans in to listen, thinks, nods while speaking and gives a cheerful greeting. The mouth still moves only during audible playback.
+- **A brighter app, from end to end.** Pearl and soft blue surfaces, deep navy text, electric blue controls, a new app icon and clearer navigation groups. Chat, Documents, Compare, Models, Tools, Tasks, Earn, Settings, Code and the embedded wallet/node screens share the new design.
+- **A proper welcome from KAI.** The new chat home has a character greeting and three starting points for questions, building and ideas. Clicking one puts a draft in the composer for you to edit and send. The source/model controls have their own row, with more space for your message.
+- **A lighter desktop companion.** Matching white conversation and voice cards, blue controls and a clear green mic indicator. KAI still launches compact. Chat, listening, interruptions and voice preferences work as before.
+- **Room for smaller windows.** A Conversations button opens chat history in narrow windows. Model controls, forms and cards resize with the workspace. Keyboard focus and reduced-motion preferences are supported.
+
+Install over the existing **Koinos AI Test** app after quitting it from the tray. Your shared profile, chats, wallet, downloaded models, private desktop provider settings and live earning/node data stay in place. This is a visual revision; it adds no new computer permissions or automatic microphone use.
+
+### Your own OpenAI or Anthropic connection
+
+- **Settings → Desktop AI connections** now accepts your own OpenAI and Anthropic API keys. Save a connection, then **Test & refresh models**, or enter a model ID from your provider account. The connection check lists models; it does not generate a paid test reply.
+- **Choose your source in Chat**, then choose a model. **Use in chat** opens that picker from Settings. The desktop KAI **Brain** picker also includes connected models. Chat, Research, Agent and KAI's app tools use your chosen provider, with streamed answers and Stop support.
+- **Private to your desktop.** Keys use encrypted OS storage and are never returned to chat pages, included in network model lists, or used for earning jobs. These connections are unavailable through the local/public API, remote access, Teams or scheduled tasks. Provider failures stop the request without switching to another source.
+- **Your provider account pays for usage.** Questions, conversation context, attachments and relevant app tool results go directly to the selected provider. Local-Only blocks these online requests; choose **Local API → Privacy → Local-First** to allow them. This does not require a network wallet for provider chat. Your earning node retains its existing models and data.
+
+Your API key is separate from your ChatGPT or Claude app login. Models and access depend on your provider account. Choosing a provider does not change KAI's locally generated voice or local microphone transcription.
+
+### Your app, a question away
+
+- **KAI can use the app's tools.** Desktop conversations can search the web, read pages and use connected tools, memory, workspace files, email and calendar through the existing permissions. Web access follows Privacy settings; Local-Only stays offline. Include your city for weather, or KAI can ask for it.
+- **Ask about your real app.** Check KAI balance and pending earnings, KOIN/VHP wallet balances, node health and recent KOIN rewards, installed/downloadable models, documents, saved chats, scheduled tasks and connection status. Unavailable or stale data is reported instead of being treated as zero.
+- **Ask KAI to do things.** Model downloads/removal, earning controls, node start/stop, document editing, scheduled prompts and supported settings changes show a native **Allow once** dialog before running. Tool activity appears in the conversation; web sources are clickable.
+- **“Open up the application.”** KAI can bring up the main app or a specific screen while staying available beside it. Financial transactions, wallet passwords/backups, Docker setup and coding sessions use the existing app forms and their approval steps. Disabled sections open Settings first.
+
+Simple balance/model questions go straight to the relevant app data before answering. Other tool requests may take extra model steps. Stop or hiding KAI cancels pending approvals and further steps; an action the app has already accepted may keep running. KAI's voice, follow-ups, shared wallet and live node data remain in place.
+
+### KAI interruptions, smoother sentences and a deeper robot voice
+
+- **Say “KAI” to interrupt.** Say the name alone to stop the reply, or begin your new question with it. “Hey KAI” still works. Ordinary speech no longer interrupts a reply, including profiles that previously disabled the name requirement.
+- **Keep talking after a reply.** Follow-ups still need no wake phrase for a minute after KAI finishes. A question spoken immediately after a separate “KAI” cue is retained while the cue is being recognized.
+- **Complete sentences before playback.** KAI no longer speaks a short opening fragment while the rest of that sentence is still being synthesized. Longer sentences are assembled into one audio clip, and the next sentences are prepared ahead. This favors smoother speech and can increase the initial wait; slower computers can still pause between sentences.
+- **The same voice, a little more KAI.** Heart stays the default voice. The new **KAI** voice character sounds slightly deeper with a light electronic texture. Choose **Natural · original sound** under **Voice & listening → Voice character** to compare. No additional voice download is needed.
+
+### Calmer listening with a TV nearby
+
+- **TV nearby** is the new default microphone setting. It requires stronger, longer speech and rejects more quiet background dialogue. **Voice & listening** also offers balanced and quiet-room settings, with a live microphone level indicator.
+- **Say “Hey KAI” to interrupt a reply** is on by default. Movie dialogue no longer pauses or replaces a reply unless the name is recognized. You can turn this option off for immediate speech-onset interruption in a quieter room. Follow-up questions after KAI finishes still need no wake phrase; tapping the mic always interrupts directly.
+- The mouth moves only when audio actually starts playing, and stops when audio pauses or ends. Preparing a voice no longer looks like silent talking.
+- KAI prepares a shorter first clause and loads the installed voice engine while listening or thinking. This reduces startup work after text arrives. Local voice generation, particularly compatibility mode, can still take several seconds.
+
+KAI does not recognize your individual voice yet. Sensitivity filters sound level, not speaker identity: a loud movie can still trigger a follow-up after the reply. Keep background sound below the listening level, move the microphone closer, or turn hands-free listening off when needed.
+
+### KAI listening stability repair
+
+- Fixed a reply getting stuck on pause when another sound arrived during transcription.
+- Background noise no longer blocks a voice that is still being prepared. KAI briefly checks your microphone level when listening starts and filters steady hum more reliably.
+- The microphone indicator stays on while listening, recognizing words and replying. Temporary recognition errors keep the same microphone session open.
+- Unconfirmed interruptions have a time limit, so they cannot leave KAI silent indefinitely. Confirmed questions still interrupt and retain the conversation.
+
+### Natural voice startup repair
+
+- KAI now automatically recovers when Windows cannot load its native voice DLL. The compatible engine uses the same local Heart, Bella, Puck and Emma voices and your existing voice download.
+- The setup card shows a clear error and **Retry natural voice** if setup fails, instead of staying on “Warming up.” Retrying verifies and reuses downloaded files.
+- Compatibility mode can take longer to generate speech. Replies still start playing as phrases become ready, and Stop and interruptions cancel pending audio.
+
+### A more natural conversation with KAI
+
+- **Heart is now the default voice.** KAI offers a one-time 93 MB natural-voice download right beside the robot. No account or subscription is needed. The old automatic computer voice no longer takes over silently. You can preview Heart, Bella, Puck and Emma in **Voice & listening**.
+- **Tap the mic and talk.** You do not need a wake phrase or a second tap to send. Pause briefly and KAI answers. The waveform button enables “Hey KAI” when you want to start hands-free.
+- **Keep the conversation going.** After waking KAI, ask follow-up questions without repeating its name. KAI stays in conversation for a minute after each reply. Say “That’s all” to return to wake-only listening, or “Stop listening” to switch the microphone off.
+- **Interrupt naturally.** Start speaking during a reply and KAI pauses its voice. Once your words are recognized, it stops the old response and answers with the earlier conversation and your new request in context. Echo cancellation and a local echo check help prevent KAI from answering itself.
+- **Just the robot by default.** Voice questions do not open the chat panel. Click the chat bubble to open it and the minus button to minimize it again. A Stop button is available beside the robot during replies.
+- **More responsive listening.** Quieter speech is detected, pauses are shorter, and capture continues while earlier audio is being transcribed.
+
+Listening remains opt-in, with a green microphone indicator. Hiding KAI, returning to the full app or quitting turns it off. Microphone audio stays on this computer; accepted questions go to your selected chat model. Local transcription and voice generation still take some processing time, and speaker/microphone hardware affects interruption performance.
+
+Test continues using your existing profile, wallet, models and earning node.
+
+- Updated the Kondor producer signer to match the website and explain extension connection failures without implying a signature was received.
+
+- External signing now shows broadcast progress, transaction IDs and errors directly below Broadcast, with an error notification.
+
+- Dual-boot producer signing: optional 24-hour drafts and Resume saved draft after restarting Windows. Original draft, signature, nonce, network and hot-key checks remain required.

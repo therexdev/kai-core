@@ -1,0 +1,87 @@
+"use strict";
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const assert = require("assert/strict");
+const asar = require("@electron/asar");
+const yaml = require("js-yaml");
+const { TEST_FEED } = require("../core/lib/release-channel");
+const smartTurn = require("../core/runtimes/smart-turn.json");
+
+const archives = fs.readdirSync("dist", { recursive: true }).filter(p => path.basename(p) === "app.asar");
+assert.ok(archives.length, "No packaged app found");
+for (const archive of archives) {
+  const file = path.join("dist", archive);
+  const pkg = JSON.parse(asar.extractFile(file, "package.json"));
+  const core = JSON.parse(asar.extractFile(file, "core/package.json"));
+  assert.equal(pkg.name, "koinos-ai-test");
+  assert.equal(pkg.kaiChannel, "test");
+  assert.equal(pkg.version, core.version);
+  assert.match(pkg.version, /-test\./);
+  // electron-builder creates app-update.yml with an installer target, not
+  // --dir. The final installer check (without --preflight) always requires it.
+  if (!process.argv.includes("--preflight")) {
+    const config = yaml.load(fs.readFileSync(path.join(path.dirname(file), "app-update.yml"), "utf8"));
+    assert.equal(config.provider, "generic");
+    assert.equal(config.url, TEST_FEED);
+    assert.equal(config.channel, "test");
+  }
+  for (const required of ["ui/workflows.js", "ui/workflows.css", "ui/workflow-model.js", "electron/workflow-engine.js", "electron/workflow-events.js", "electron/workflow-assistant.js", "electron/workflow-values.js", "electron/workflow-schedules.js", "core/lib/composio-triggers.js", "electron/pocket-voice.js", "electron/pocket-voice-worker.js", "ui/mascot-pocket.js", "ui/pocket-credits.html", "core/runtimes/pocket.json", "electron/computer-highlight.js", "electron/computer-control.js", "electron/native-computer.js", "ui/computer-tools.js", "electron/providers.js", "electron/provider-http.js", "ui/desktop-providers.js", "electron/mascot.js", "electron/mascot-layout.js", "electron/windows-voice.js", "electron/mascot-preload.js", "ui/mascot.html",
+    "ui/i18n.js", "ui/language-settings.js", "ui/language.css", "ui/locales/catalogs.js", "electron/language.js",
+    "ui/network-chat.js", "electron/credit-models.js", "electron/koin-chat-flow.js", "electron/koin-provider-status.js",
+    "electron/linux-shortcut.js", "ui/wallet-access.js", "core/lib/protected-storage.js", "core/lib/wallet-credit-account.js", "core/lib/sqlite-path.js",
+    "core/lib/koin-network/provider-device-protocol.js", "electron/provider-device.js", "electron/session-free-chat.js",
+    "electron/provider-check.js", "electron/provider-check-ipc.js", "ui/provider-check.js", "core/provider-check/candidates.json",
+    "core/lib/koin-network/purchase-market.js", "core/lib/koin-network/purchase-provenance.js",
+    "ui/brand.js", "ui/brand-mark.svg", "ui/kai-character.css", "ui/assets/kai-character.png", "ui/assets/kai-voice-hello.wav", "ui/node-brand.css",
+    "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js",
+    "ui/mascot-playback.js", "ui/mascot-speech.js", "ui/mascot-turn.js", "ui/mascot-vad.js", "ui/mascot-wake.js", "ui/mascot-live.js", "ui/mascot-eyes.js", "ui/mascot-audio-worklet.js", "ui/mascot-tools.js", "ui/app-navigation.js", "core/lib/app-tools.js", "core/lib/live-senses-assets.js", "electron/mascot-eyes.js", "electron/tool-approval.js",
+    "electron/desktop-actions.js", "core/lib/speech.js", "core/lib/speech-worker.js", "core/lib/speech-wasm.js", "core/lib/speech-wasm-runtime.mjs", "core/lib/smart-turn.js", "core/lib/smart-turn-worker.js", "core/runtimes/kokoro.json", "core/runtimes/smart-turn.json"]) {
+    try {
+      // ASAR's directory walker splits on the host separator. Forward slashes
+      // happen to work at one level on Windows, but fail for core/lib/*.js.
+      assert.ok(asar.extractFile(file, path.normalize(required)).length > 0, "Missing companion asset: " + required);
+    } catch (error) {
+      console.error("Package diagnostic:", JSON.stringify({ archive: file, required, sourceExists: fs.existsSync(required),
+        related: asar.listPackage(file).filter(p => p.includes("core/lib") || /speech|kokoro/.test(p)).slice(0, 100) }, null, 2));
+      throw error;
+    }
+  }
+  // Reference hashes must describe identical evidence on every platform.
+  const candidateBytes = asar.extractFile(file, path.normalize("core/provider-check/candidates.json"));
+  assert.equal(candidateBytes.includes(13), false, "Provider evidence must retain LF bytes on Windows");
+  assert.deepEqual(candidateBytes, fs.readFileSync("core/provider-check/candidates.json"), "Packaged provider evidence differs from reviewed source");
+  const creditService = JSON.parse(asar.extractFile(file, path.normalize("core/lib/koin-network/credit-service.json")));
+  assert.deepEqual(creditService, require("../core/lib/koin-network/credit-service.json"), "Packaged credit deployment differs from reviewed source");
+  require("../electron/credit-service").manifest(creditService);
+  if (process.platform === "win32") assert.ok(fs.statSync(path.join(path.dirname(file), "bin/kai-windows-voice.exe")).size > 0, "Missing bundled fast Windows voice helper");
+  if (process.platform === "win32") assert.ok(fs.statSync(path.join(path.dirname(file), "bin/kai-computer.exe")).size > 0, "Missing private desktop control helper");
+  for (const asset of ["ort.node.min.js", "ort.wasm.min.js", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]) {
+    assert.ok(fs.statSync(path.join(file + ".unpacked", "node_modules/onnxruntime-web/dist", asset)).size > 0, "Missing local compatible voice runtime: " + asset);
+  }
+  const liveSenses = path.join(path.dirname(file), "live-senses");
+  for (const [asset, minimum] of [["vad/bundle.min.js", 50000], ["vad/vad.worklet.bundle.min.js", 2000], ["vad/silero_vad_v5.onnx", 2000000], ["LICENSE.txt", 1000]]) {
+    assert.ok(fs.statSync(path.join(liveSenses, asset)).size > minimum, "Missing packaged Live Senses asset: " + asset);
+  }
+  const turnModel = path.join(liveSenses, "turn", smartTurn.file.path);
+  assert.equal(fs.statSync(turnModel).size, smartTurn.file.sizeBytes, "Packaged Smart-Turn model has the wrong size");
+  assert.equal(crypto.createHash("sha256").update(fs.readFileSync(turnModel)).digest("hex"), smartTurn.file.sha256, "Packaged Smart-Turn model failed its pin");
+  if (process.platform === "win32") {
+    const native = path.join(file + ".unpacked", "node_modules/sherpa-onnx-win-x64");
+    for (const asset of ["sherpa-onnx.node", "onnxruntime.dll", "onnxruntime_providers_shared.dll", "sherpa-onnx-c-api.dll", "sherpa-onnx-cxx-api.dll"]) assert.ok(fs.statSync(path.join(native, asset)).size > 0, "Missing Pocket native runtime: " + asset);
+  }
+  // Execute the isolated evaluator with only the dependencies shipped in this
+  // archive. This catches omitted WASM assets and broken production packaging.
+  const runtime = fs.mkdtempSync(path.join(require("os").tmpdir(), "kai-packaged-flow-"));
+  try {
+    const entries = asar.listPackage(file).map(p => p.replace(/\\/g, "/").replace(/^\//, ""));
+    for (const entry of entries.filter(p => /^node_modules\/(?:@jitl\/quickjs-|quickjs-|cron-parser\/|luxon\/)/.test(p) || ["electron/workflow-values.js", "electron/companion-store.js", "core/lib/memory.js"].includes(p))) {
+      if (!asar.statFile(file, path.normalize(entry)).size) continue;
+      const target = path.join(runtime, entry); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, asar.extractFile(file, path.normalize(entry)));
+    }
+    const script = "const V=require('./electron/workflow-values'); V.evaluate('items.map(x=>({n:x.n*2}))',{items:[{n:21}]}).then(x=>{require('assert/strict').equal(x[0].n,42);require('cron-parser').CronExpressionParser.parse('0 9 * * *');console.log('Packaged workflow WASM and scheduler verified')}).catch(e=>{console.error(e);process.exitCode=1})";
+    const check = require("child_process").spawnSync(process.execPath, ["-e", script], { cwd: runtime, encoding: "utf8", timeout: 30000 });
+    assert.equal(check.status, 0, "Packaged workflow runtime failed: " + check.stderr); console.log(check.stdout.trim());
+  } finally { fs.rmSync(runtime, { recursive: true, force: true }); }
+  console.log(`Verified ${file}: ${pkg.version}`);
+}

@@ -1,0 +1,83 @@
+"use strict";
+const labels = { online: "ONLINE", offline: "OFFLINE", connecting: "CONNECTING", preparing: "PREPARING MODEL",
+  qualifying: "CHECKING MODEL", "qualification-failed": "NETWORK CHECK FAILED",
+  "qualification-expired": "RENEWAL REQUIRED", "review-required": "REVIEW REQUIRED", "update-required": "UPDATE REQUIRED",
+  "model-required": "MODEL REQUIRED", "network-paused": "NETWORK RECONNECTING" };
+async function readProviderAccount({ config, access, signal, fetchImpl = fetch }) {
+  const auth = access.authorize(config.schedulerUrl);
+  const response = access.readStatus ? null : await fetchImpl(config.schedulerUrl + "/koin/test/status", { redirect: "error", signal,
+    headers: { authorization: "Bearer " + auth.sessionToken } });
+  const chunks = []; let size = 0;
+  for await (const part of response?.body || []) { size += part.length; if (size > 65536) throw Error("Provider status response too large"); chunks.push(part); }
+  const value = access.readStatus ? await access.readStatus(signal) : JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  if ((response && !response.ok) || value.mode !== config.mode || value.mainnetPaymentsEnabled !== (config.mode === "mainnet-pilot")) throw Error("Provider status could not be verified");
+  access.authorize(config.schedulerUrl); signal.throwIfAborted(); return value;
+}
+async function readProviderStatus(options) {
+  const { config, access, signal, clock = Date.now } = options, value = await readProviderAccount(options), now = clock();
+  const approved = options.approvedModels === undefined ? [config.model] : options.approvedModels;
+  if (!Array.isArray(approved) || !approved.length || approved.length > 64 || new Set(approved).size !== approved.length || approved.some(m => typeof m !== "string" || !/^[a-zA-Z0-9._-]{1,100}$/.test(m))) throw Error("Approved provider model identities required");
+  if (value.providers !== undefined && (!Array.isArray(value.providers) || value.providers.length > 4096)) throw Error("Invalid provider observations");
+  const matches = (value.providers || []).filter(p => p?.address === config.owner && (approved.includes(p.model) || Array.isArray(p.models)));
+  if (matches.length > 1) throw Error("Ambiguous provider observation");
+  const p = matches[0];
+  // An older backend has no readiness contract. Never paint it green.
+  if (!p) return { state: "checking", label: "CHECKING CONNECTION", detail: "Waiting for the network's provider status update. Online eligibility is not yet confirmed." };
+  const check = row => {
+    if (row?.address !== config.owner || !approved.includes(row.model) || !labels[row.state] || !Number.isSafeInteger(row.asOf) || !Number.isSafeInteger(row.validUntil) ||
+        row.asOf > now + 5000 || now - row.asOf > 30000 || row.validUntil <= now || row.validUntil <= row.asOf || row.validUntil > row.asOf + 15000) throw Error("Provider status is stale or its model identity changed");
+    const result = { model: row.model, state: row.state, label: labels[row.state], detail: row.state === "qualification-failed"
+      ? "The network check has not passed. Keep earning on; another check runs automatically."
+      : String(row.detail || "").slice(0, 400), validUntil: row.validUntil };
+    if (row.qualification !== undefined) {
+      const q = row.qualification;
+      if (!q || !["testing", "failed", "qualified"].includes(q.state) ||
+          ![q.passed, q.completed, q.total].every(Number.isSafeInteger) || q.total < 1 || q.total > 32 ||
+          q.passed < 0 || q.completed < q.passed || q.completed > q.total ||
+          !(q.retryAt === null || Number.isSafeInteger(q.retryAt) && q.retryAt >= 0 && q.retryAt <= row.asOf + 86400000) ||
+          row.state === "qualifying" && q.state !== "testing" || row.state === "qualification-failed" && q.state !== "failed")
+        throw Error("Invalid provider qualification progress");
+      // Only these bounded observations cross into the renderer. Evidence,
+      // prompts, signatures and arbitrary server fields are not UI metadata.
+      result.qualification = { state: q.state, passed: q.passed, completed: q.completed, total: q.total, retryAt: q.retryAt };
+      if (q.kind !== undefined) {
+        if (q.kind !== "runtime-readiness" || q.readinessVersion !== 1 || q.total !== 2 || q.required !== 2) throw Error("Invalid provider readiness policy");
+        result.qualification.kind = q.kind;
+        result.qualification.readinessVersion = q.readinessVersion;
+      }
+      if (q.required !== undefined) {
+        if (!Number.isSafeInteger(q.required) || q.required < 1 || q.required > q.total) throw Error("Invalid provider qualification requirement");
+        result.qualification.required = q.required;
+      }
+      if (q.phase !== undefined) {
+        if (q.state !== "testing" || !["preparing", "answering"].includes(q.phase)) throw Error("Invalid provider qualification phase");
+        result.qualification.phase = q.phase;
+      }
+      if (q.failure !== undefined) {
+        const f = q.failure, codes = ["preparation_timeout", "quality", "deadline", "quality_and_deadline", "response", "response_and_deadline", "unknown"];
+        if (q.state !== "failed" || !f || !codes.includes(f.code) || ![f.wrongAnswers, f.deadlines, f.unknown].every(n => Number.isSafeInteger(n) && n >= 0 && n <= q.total) ||
+            f.wrongAnswers + f.deadlines + f.unknown !== q.completed - q.passed ||
+            f.code === "preparation_timeout" && q.completed === q.total ||
+            ["response", "response_and_deadline"].includes(f.code) && q.kind !== "runtime-readiness" ||
+            ["quality", "quality_and_deadline"].includes(f.code) && q.kind === "runtime-readiness" ||
+            ["quality", "response"].includes(f.code) && !(f.wrongAnswers > 0 && f.deadlines === 0 && f.unknown === 0) ||
+            f.code === "deadline" && !(f.deadlines > 0 && f.wrongAnswers === 0 && f.unknown === 0) ||
+            ["quality_and_deadline", "response_and_deadline"].includes(f.code) && !(f.wrongAnswers > 0 && f.deadlines > 0 && f.unknown === 0)) throw Error("Invalid provider qualification failure");
+        result.qualification.failure = { code: f.code, wrongAnswers: f.wrongAnswers, deadlines: f.deadlines, unknown: f.unknown };
+      }
+    }
+    return result;
+  };
+  const result = check(p);
+  if (p.models !== undefined) {
+    if (!Array.isArray(p.models) || !p.models.length || p.models.length > 64 || new Set(p.models.map(m => m?.model)).size !== p.models.length) throw Error("Invalid per-model provider status");
+    const models = p.models.map(check), readyModels = models.filter(m => m.state === "online").map(m => m.model);
+    if (!Array.isArray(p.readyModels) || JSON.stringify([...p.readyModels].sort()) !== JSON.stringify([...readyModels].sort()) ||
+        (p.state === "online") !== (readyModels.length > 0) || !models.some(m => m.model === p.model && m.state === p.state) ||
+        (readyModels.length && p.validUntil > Math.min(...models.filter(m => m.state === "online").map(m => m.validUntil)))) throw Error("Provider model readiness is inconsistent");
+    result.models = models; result.readyModels = readyModels;
+  }
+  access.authorize(config.schedulerUrl); signal.throwIfAborted();
+  return result;
+}
+module.exports = { readProviderStatus, readProviderAccount };

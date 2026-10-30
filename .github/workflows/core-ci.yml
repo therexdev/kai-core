@@ -1,0 +1,37 @@
+name: Core checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node node_modules/electron/install.js
+      - run: npm test
+      - run: npm run test:compat
+      - name: Verify native shared profile and credential reuse
+        if: runner.os == 'Windows'
+        run: npm run test:native-profile
+      - name: Verify plugin isolation
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:plugin-sandbox
+      - name: Desktop smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:desktop
+      - name: Desktop smoke (Windows)
+        if: runner.os == 'Windows'
+        run: npm run test:desktop
