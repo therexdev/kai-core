@@ -339,19 +339,32 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
     assert.equal(await bubble.textContent(), "3", "a failed background refresh must retain the verified update count");
     assert.equal(await notice.isVisible(), false, "background catalog failure must not create an intrusive notification");
     await application.evaluate(() => { global.__smokeCatalogMode = "ready"; });
-    const reviewsBefore = await application.evaluate(() => global.__smokeWalletReviews.filter(row => row.title === "Install plugin").length);
-    await update("smoke.update-enabled").click();
+    const openUpdateReview = async id => {
+      const opened = application.waitForEvent("window");
+      await update(id).click();
+      const review = await opened; review.setDefaultTimeout(15000); review.on("pageerror", error => pageErrors.push(error.message));
+      await review.waitForFunction(() => document.getElementById("approve-install")?.disabled === false);
+      assert.equal(await review.locator("#review-heading").textContent(), "Update plugin");
+      assert.equal(await review.locator("#approve-install").textContent(), "Update plugin");
+      assert.equal(await review.evaluate(() => document.activeElement.id), "cancel-install", "update review must default to Cancel");
+      const reviewed = await review.evaluate(() => window.kaiPluginInstall.read());
+      assert.equal(reviewed.id, id); assert.equal(reviewed.version, "2.0.0"); assert.equal(reviewed.installedVersion, "1.0.0");
+      assert.equal(await review.locator("#plugin-name").textContent(), reviewed.name);
+      assert.match(await review.locator("#plugin-version").textContent(), /1\.0\.0.*2\.0\.0/);
+      return review;
+    };
+    const cancelledReview = await openUpdateReview("smoke.update-enabled");
+    await cancelledReview.screenshot({ path: path.join(screenshotDir, "plugin-update-review.png"), fullPage: false });
+    await cancelledReview.locator("#cancel-install").click();
     await page.waitForFunction(() => !document.querySelector('#plugins [data-install-plugin="smoke.update-enabled"]').disabled);
-    assert.equal((await application.evaluate(() => global.__smokeWalletReviews.filter(row => row.title === "Install plugin").length)), reviewsBefore + 1, "an update still requires native review");
     assert.equal((await page.evaluate(() => window.kaiCore.call("status"))).plugins.find(row => row.id === "smoke.update-enabled").version, "1.0.0");
     assert.equal(await bubble.textContent(), "3", "cancelling native review leaves the pending update visible");
-    await application.evaluate(() => { global.__smokeApprovePlugin = true; });
     for (const [id, remaining] of [["smoke.update-enabled", 2], ["smoke.update-disabled", 1]]) {
-      await update(id).click();
+      const review = await openUpdateReview(id);
+      await review.locator("#approve-install").click();
       await page.waitForFunction(async ({ id, remaining }) => { const status = await window.kaiCore.call("status"); return status.plugins.find(row => row.id === id)?.version === "2.0.0" && status.pluginUpdates.count === remaining; }, { id, remaining });
       await page.evaluate(() => refresh()); assert.equal(await bubble.textContent(), String(remaining));
     }
-    await application.evaluate(() => { global.__smokeApprovePlugin = false; });
     await page.locator('#plugins [data-plugin="smoke.update-blocked"][data-operation="remove"]').click();
     await page.waitForFunction(() => document.getElementById("plugin-update-count").hidden);
     assert.equal((await page.evaluate(() => window.kaiCore.call("status"))).pluginUpdates.count, 0);
@@ -469,7 +482,7 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
     assert.equal(fs.readFileSync(path.join(dataDir, "companion-hub.json"), "utf8"), '{"synthetic":"preserved-workflows-and-brain"}');
     assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, "settings.json"), "utf8")).fixture, "preserve-me");
     assert.ok(fs.existsSync(path.join(status.profile.backup, "manifest.json")), "configuration backup was not created");
-    console.log(`PASS: real Core desktop starts on a synthetic existing profile; all nine sections, original wallet balances/history/pagination, native canceled transfer with no submission, backup clearing, exact KAI/drop display and unavailable/identity clearing, automatic signed catalog detection, numbered plugin update badges, explicit reviewed updates, marketplace presentation, separate credits/purchase flow, local chat/cancellation, explicit network recovery/cancellation/delivery acknowledgements and provider/network fixtures work; legacy styling and compact layouts checked; close-to-tray preserves the gateway/provider fixture, tray and second-instance reopen, repeated Quit awaits teardown, and unavailable-tray close exits; ${trayMode} Tray (OS icon visibility not asserted); wallet and feature data preserved; ${process.env.KAI_SMOKE_SYNTHETIC_LOCK === "1" ? "synthetic fixture lock (native locking not exercised); " : ""}no renderer errors or external fetches. Screenshot: ${screenshot}`);
+    console.log(`PASS: real Core desktop starts on a synthetic existing profile; all nine sections, original wallet balances/history/pagination, native canceled transfer with no submission, backup clearing, exact KAI/drop display and unavailable/identity clearing, automatic signed catalog detection, numbered plugin update badges, real styled update review with explicit Cancel/Update decisions, marketplace presentation, separate credits/purchase flow, local chat/cancellation, explicit network recovery/cancellation/delivery acknowledgements and provider/network fixtures work; legacy styling and compact layouts checked; close-to-tray preserves the gateway/provider fixture, tray and second-instance reopen, repeated Quit awaits teardown, and unavailable-tray close exits; ${trayMode} Tray (OS icon visibility not asserted); wallet and feature data preserved; ${process.env.KAI_SMOKE_SYNTHETIC_LOCK === "1" ? "synthetic fixture lock (native locking not exercised); " : ""}no renderer errors or external fetches. Screenshot: ${screenshot}`);
   } catch (error) {
     if (output) console.error(output);
     throw error;

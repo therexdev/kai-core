@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Install plugin · KAI</title>
+  <link rel="stylesheet" href="plugin-install.css">
+  <script src="presentation.js" defer></script>
+  <script src="plugin-install.js" defer></script>
+</head>
+<body>
+  <main class="install-dialog" role="dialog" aria-modal="true" aria-labelledby="review-heading plugin-name" aria-describedby="plugin-description">
+    <header class="dialog-header">
+      <div class="header-label"><img src="assets/brand-mark.svg" width="23" height="25" alt=""><h1 id="review-heading">Install plugin</h1></div>
+      <button id="close-install" class="icon-button" type="button" aria-label="Cancel plugin installation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </header>
+    <div id="review-content" class="dialog-content" aria-busy="true">
+      <p id="review-loading" role="status">Preparing plugin details…</p>
+      <div id="review-ready" hidden>
+        <section class="plugin-summary" aria-labelledby="plugin-name">
+          <div class="plugin-identity"><div id="plugin-icon" class="plugin-icon" aria-hidden="true"></div><div class="plugin-title"><h2 id="plugin-name"></h2><p id="plugin-version"></p></div></div>
+          <p id="plugin-description" class="plugin-description"></p>
+          <div class="signature-line"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/><path d="m8 12 3 3 5-6"/></svg><span id="publisher-label">Signed package</span></div>
+        </section>
+        <section class="permissions-section" aria-labelledby="permissions-heading">
+          <div class="section-heading"><h3 id="permissions-heading">Requested access</h3><span id="permission-count"></span></div>
+          <ul id="permission-list" class="permission-list"></ul>
+          <p id="no-permissions" class="no-permissions" hidden>This plugin does not request any permissions.</p>
+        </section>
+        <p class="access-note">Plugins never receive your wallet keys. KAI limits access to the permissions listed here.</p>
+        <details id="review-details" class="review-details">
+          <summary>Publisher &amp; technical details<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary>
+          <div class="details-content"><dl>
+            <dt>Plugin ID</dt><dd id="plugin-id"></dd>
+            <dt>Publisher key fingerprint</dt><dd id="publisher-fingerprint" class="fingerprint"></dd>
+            <dt>Permission IDs</dt><dd><ul id="permission-ids"></ul></dd>
+          </dl><p>A valid signature identifies the publisher’s key. It does not mean KAI has reviewed this plugin or publisher.</p></div>
+        </details>
+      </div>
+      <p id="review-error" class="review-error" role="alert" hidden></p>
+    </div>
+    <footer class="dialog-footer"><p>Install only from publishers you trust.</p><div class="dialog-actions"><button id="cancel-install" type="button" autofocus>Cancel</button><button id="approve-install" class="primary" type="button" disabled>Install plugin</button></div></footer>
+  </main>
+</body>
+</html>

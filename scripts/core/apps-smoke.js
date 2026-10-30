@@ -22,9 +22,11 @@ async function main() {
     { id: "smoke.tasks", name: "Synthetic Tasks" },
     { id: "smoke.disabled", name: "Synthetic Disabled" },
   ];
+  const reviewFixture = { id: "smoke.review", name: "Synthetic <img src=x onerror=alert(1)>",
+    description: "<b data-injected>Metadata must remain plain text.</b> " + "A long signed description must scroll without covering the approval controls. ".repeat(10) };
   const overflowFixtures = Array.from({ length: 8 }, (_, index) => ({ id: `smoke.extra-${index + 1}`, name: `Synthetic App ${index + 1}` }));
-  for (const fixture of [...fixtures, ...overflowFixtures]) {
-    const manifest = { schema: 1, apiVersion: 1, ...fixture, version: "1.0.0", description: "Synthetic persistent app fixture. No real model or account is used.", entry: "index.html", permissions: ["models.read", "inference.local", "storage.read", "storage.write"] };
+  for (const fixture of [...fixtures, ...overflowFixtures, reviewFixture]) {
+    const manifest = { schema: 1, apiVersion: 1, ...fixture, version: "1.0.0", description: fixture.description || "Synthetic persistent app fixture. No real model or account is used.", entry: "index.html", permissions: ["models.read", "inference.local", "storage.read", "storage.write"] };
     const files = {
       "index.html": '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="app.css"></head><body><h1>' + fixture.name + '</h1><p>This isolated test app keeps its draft and running work while you switch KAI pages.</p><label>Draft<textarea id="draft"></textarea></label><p id="work">Ready</p><script src="app.js"></script></body></html>',
       "app.css": 'body{font:15px system-ui;margin:0;padding:32px;background:#f4f7fd;color:#14284e}h1{margin-top:0}label{display:grid;gap:12px;max-width:600px}textarea{font:inherit;background:white;border:1px solid #dbe6f6;border-radius:12px;min-height:180px;padding:16px;color:inherit}',
@@ -46,7 +48,6 @@ const hostModule=require(${JSON.stringify(path.join(appRoot, "electron/core-plug
 hostModule.PluginHost=class extends BaseHost{constructor(...args){super(...args);global.__appsHost=this;}};
 global.__appsCapture=async(file,id)=>{const image=await global.__appsHost.renderer(id).capturePage();require('node:fs').writeFileSync(file,image.toPNG());};
 global.__appsOpenFile=null;electron.dialog.showOpenDialog=async()=>({canceled:!global.__appsOpenFile,filePaths:global.__appsOpenFile?[global.__appsOpenFile]:[]});
-global.__smokeApprovePlugin=true;
 global.__appsInference={started:0,aborted:0,completed:0};
 electron.app.on('quit',()=>require('node:fs').writeFileSync(${JSON.stringify(path.join(root, "apps-quit.json"))},JSON.stringify({inference:global.__appsInference,openApps:global.__appsHost?.windows.size})));
 const fixtureFetch=global.fetch;global.fetch=(url,options={})=>{
@@ -105,9 +106,21 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
     await application.evaluate(() => { setTimeout(() => global.__smokeTrayMenu.find(item => item.label === "Quit KAI Core").click(), 0); });
     await done; application = null;
   }
-  async function install(file) {
+  async function openInstallReview(file) {
     await application.evaluate((_electron, file) => { global.__appsOpenFile = file; }, file);
-    await page.evaluate(() => window.kaiCore.call("plugins.install", {}));
+    const opened = application.waitForEvent("window");
+    const finished = page.evaluate(() => window.kaiCore.call("plugins.install", {})).then(value => ({ value }), error => ({ error }));
+    const review = await opened; review.setDefaultTimeout(15000); review.on("pageerror", error => errors.push(error.message));
+    await review.waitForFunction(() => document.getElementById("approve-install")?.disabled === false);
+    assert.equal(await review.locator("#review-heading").textContent(), "Install plugin");
+    assert.equal(await review.locator("#approve-install").textContent(), "Install plugin");
+    assert.equal(await review.evaluate(() => document.activeElement.id), "cancel-install");
+    return { review, async finish() { const result = await finished; if (result.error) throw result.error; return result.value; } };
+  }
+  async function install(file) {
+    const { review, finish } = await openInstallReview(file);
+    await review.locator("#approve-install").click();
+    assert.ok(await finish(), "Only explicit approval should install a package");
     await page.evaluate(() => refresh());
   }
   try {
@@ -116,6 +129,63 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
       assert.equal(await page.locator("#apps-section").isVisible(), false);
       assert.equal((await page.evaluate(() => window.kaiCore.call("status"))).plugins.length, 0);
     });
+    await check("Styled install review renders signed metadata as text and keeps all permissions reviewable", async () => {
+      const { review, finish } = await openInstallReview(reviewFixture.file);
+      assert.equal(await review.locator("#plugin-name").textContent(), reviewFixture.name);
+      assert.equal(await review.locator("#plugin-description").textContent(), reviewFixture.description);
+      assert.equal(await review.locator("#plugin-name img, #plugin-description [data-injected]").count(), 0);
+      assert.equal(await review.evaluate(() => getComputedStyle(document.body).fontFamily), await page.evaluate(() => getComputedStyle(document.body).fontFamily), "review must use the Core font stack");
+      assert.deepEqual(await review.evaluate(() => ({ node: typeof require, process: typeof process, core: typeof window.kaiCore, plugin: typeof window.kai, review: typeof window.kaiPluginInstall?.read })),
+        { node: "undefined", process: "undefined", core: "undefined", plugin: "undefined", review: "function" });
+      assert.equal(await page.evaluate(() => typeof window.kaiPluginInstall), "undefined");
+      assert.equal(await review.locator("#review-details").getAttribute("open"), null);
+      const reviewed = await review.evaluate(() => window.kaiPluginInstall.read());
+      assert.equal(reviewed.installedVersion, null); assert.equal(reviewed.official, false);
+      assert.equal(reviewed.id, reviewFixture.id); assert.equal(reviewed.version, "1.0.0");
+      assert.deepEqual(await review.locator("#permission-list [data-permission]").evaluateAll(rows => rows.map(row => row.dataset.permission)), reviewed.permissions);
+      await review.locator("#review-details summary").click();
+      assert.equal(await review.locator("#plugin-id").textContent(), reviewFixture.id);
+      assert.equal(await review.locator("#publisher-fingerprint").textContent(), crypto.createHash("sha256").update(key.publicKey.export({ format: "der", type: "spki" })).digest("hex"));
+      for (const permission of reviewed.permissions) assert.ok((await review.locator("#permission-ids").textContent()).includes(permission));
+      for (const id of ["cancel-install", "approve-install"]) {
+        const box = await review.locator("#" + id).boundingBox(), viewport = await review.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+        assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height, "Long metadata must leave both footer buttons in view");
+      }
+      const screenshot = path.join(output, "plugin-review-details.png"); await review.screenshot({ path: screenshot, fullPage: false }); report.screenshots.push(screenshot);
+      await review.locator("#cancel-install").click(); assert.equal(await finish(), null);
+      assert.equal((await state()).windowCount, 1);
+      assert.equal((await page.evaluate(() => window.kaiCore.call("status"))).plugins.length, 0);
+    });
+    await check("Escape, X and the default Enter action cancel installation without changing apps", async () => {
+      for (const action of ["Escape", "close", "Enter"]) {
+        const { review, finish } = await openInstallReview(fixtures[0].file);
+        if (action === "close") await review.locator("#close-install").click();
+        else await review.keyboard.press(action).catch(error => {
+          // Native Escape can destroy its WebContents on keydown, before CDP
+          // sends keyup. The installation result below must still be canceled.
+          if (!review.isClosed() || !/Target page, context or browser has been closed/.test(error.message)) throw error;
+        });
+        assert.equal(await finish(), null, action + " should cancel installation");
+        assert.equal((await state()).windowCount, 1);
+        assert.equal((await page.evaluate(() => window.kaiCore.call("status"))).plugins.length, 0);
+      }
+    });
+    const documents = path.resolve(process.env.KAI_PLUGIN_SOURCES || path.join(appRoot, ".."), "kai-plugin-documents/dist/kai-plugin-documents-0.2.0.kaiplugin");
+    if (fs.existsSync(documents)) {
+      const { review, finish } = await openInstallReview(documents);
+      assert.equal(await review.locator("#plugin-name").textContent(), "Documents");
+      if (process.platform === "linux" && !process.env.DISPLAY) {
+        // Ozone may constrain the initial modal to its minimum size. The
+        // compact layout above is tested; also capture its intended full size.
+        const size = await application.evaluate(({ BrowserWindow }) => {
+          const dialog = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith("/plugin-install.html"));
+          dialog.setContentSize(620, 740); return dialog.getContentSize();
+        });
+        await review.setViewportSize({ width: size[0], height: size[1] });
+      }
+      const screenshot = path.join(output, "plugin-review-documents.png"); await review.screenshot({ path: screenshot, fullPage: false }); report.screenshots.push(screenshot);
+      await review.locator("#cancel-install").click(); assert.equal(await finish(), null);
+    }
     for (const fixture of fixtures) await install(fixture.file);
     await page.evaluate(() => window.kaiCore.call("plugins.change", { id: "smoke.disabled", action: "disable" })); await page.evaluate(() => refresh());
     await check("Every installed plugin has an icon, name and draggable handle", async () => {

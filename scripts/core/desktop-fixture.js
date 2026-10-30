@@ -50,7 +50,7 @@ function install({ appRoot }) {
     signedCatalog = { catalog, publicKey: keyText(registryKey), signature: crypto.sign(null, Buffer.from(registryModule.canonical(catalog)), registryKey.privateKey).toString("base64") };
   };
   publishCatalog();
-  global.__smokeCatalogReads = 0; global.__smokePackageReads = 0; global.__smokeCatalogMode = "ready"; global.__smokeApprovePlugin = false;
+  global.__smokeCatalogReads = 0; global.__smokePackageReads = 0; global.__smokeCatalogMode = "ready";
   global.__smokePublishPluginUpdates = () => { catalogSequence++; publishCatalog(); };
   const BaseManager = managerModule.PluginManager;
   managerModule.PluginManager = class extends BaseManager {
@@ -120,10 +120,21 @@ function install({ appRoot }) {
         changes: [{ asset: net.tokenSymbol, direction: older ? "out" : "in", amount: older ? "100000000" : "250000000" }], status: "confirmed" }] };
   };
   const desktop = require("electron");
+  // Ozone headless advertises a 1×1 screen. Give only this synthetic fixture a
+  // usable display area so the real screen-bounded approval window can render.
+  if (process.platform === "linux" && !process.env.DISPLAY) {
+    app.whenReady().then(() => {
+      const matchingDisplay = desktop.screen.getDisplayMatching.bind(desktop.screen);
+      desktop.screen.getDisplayMatching = bounds => {
+        const display = matchingDisplay(bounds);
+        return display.workArea.width <= 1 || display.workArea.height <= 1 ? { ...display, workArea: { x: 0, y: 0, width: 1280, height: 900 } } : display;
+      };
+    });
+  }
   desktop.dialog.showMessageBox = async (_parent, options) => {
     const value = options || _parent;
     global.__smokeWalletReviews.push({ title: value.title, message: value.message, detail: value.detail, buttons: value.buttons, defaultId: value.defaultId, cancelId: value.cancelId });
-    return { response: value.title === "Install plugin" && global.__smokeApprovePlugin ? 1 : value.cancelId ?? 0, checkboxChecked: false };
+    return { response: value.cancelId ?? 0, checkboxChecked: false };
   };
   let clipboard = "";
   desktop.clipboard.writeText = value => { clipboard = String(value); };

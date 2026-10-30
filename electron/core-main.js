@@ -7,13 +7,13 @@ const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 const { channelConfig, configureDesktop, configureUpdater } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, features, payments, coreChat, coreWallet, catalogMonitor, updater, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
+let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, updater, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
 const { trustedMainDocument, protectNavigation } = require("./window-security");
 function stop() {
   if (!stopping) stopping = (async () => {
     pluginDownload?.abort(); const errors = [];
     // Finish every cleanup even if an earlier service cannot stop normally.
-    for (const dispose of [() => catalogMonitor?.dispose(), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
+    for (const dispose of [() => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
       try { await dispose(); } catch (error) { errors.push(error); }
     }
     desktopTray?.dispose();
@@ -55,6 +55,8 @@ async function start() {
     iconDirectory: path.join(__dirname, "../build"), isQuitting: () => shuttingDown });
   protectNavigation(win.webContents, origin, () => {});
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  pluginReview = require("./core-plugin-install").createPluginInstallReview({ electron, getWindow: () => win, isClosing: () => shuttingDown,
+    isTrustedParent: parent => trustedMainDocument({ sender: parent.webContents, senderFrame: parent.webContents.mainFrame }, win, origin) });
   const manager = new (require("../core/lib/plugins/manager").PluginManager)(dataDir);
   const appOrder = require("./core-app-order").createAppOrder({ dataDir, getInstalled: () => manager.list() });
   const { RegistryClient, verifyRegistryPackage } = require("../core/lib/plugins/registry");
@@ -167,11 +169,12 @@ async function start() {
             verified = require("../core/lib/plugins/package").verifyPackage(fs.readFileSync(file, "utf8"));
           }
           const m = verified.manifest;
-          const review = await dialog.showMessageBox(win, { type: "question", title: "Install plugin", message: `Install ${m.name} ${m.version}?`,
-            detail: `${m.description || ""}\n\nID: ${m.id}\nPublisher key: ${verified.fingerprint}\n\nPermissions: ${m.permissions.join(", ") || "None"}\n\nThis signature identifies a key; it does not mean KAI has reviewed this publisher. Plugins never receive wallet keys. Verified feature plugins can access only their declared feature data. Other plugins cannot read your Brain, account credentials or another plugin’s storage.`,
-            buttons: ["Cancel", "Install"], defaultId: 0, cancelId: 0, noLink: true });
-          if (review.response !== 1 || shuttingDown || win.isDestroyed()) return null;
-          await pluginHost.close(m.id, "update"); const installed = manager.install(verified.package);
+          const approved = await pluginReview.review(verified, manager.list().find(plugin => plugin.id === m.id)?.version || null,
+            firstParty.some(plugin => plugin.id === m.id && plugin.fingerprint === verified.fingerprint));
+          if (!approved || shuttingDown || win.isDestroyed() || !trustedMainDocument(event, win, origin)) return null;
+          await pluginHost.close(m.id, "update");
+          if (shuttingDown || !trustedMainDocument(event, win, origin)) return null;
+          const installed = manager.install(verified.package);
           void features.startInstalledBackground(manager, m.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed;
         } finally { installBusy = false; pluginDownload = null; }
       }

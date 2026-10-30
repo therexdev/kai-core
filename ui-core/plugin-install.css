@@ -1,0 +1,58 @@
+/* The trusted install review uses the same pearl/cobalt palette and type as Core. */
+:root{color-scheme:light;--bg:#f4f7fd;--surface:#fff;--border:#dce5f2;--text:#14284e;--muted:#61728d;--accent:#155eef;font:14px/1.6 Inter,"Segoe UI",Arial,sans-serif;color:var(--text);background:var(--bg)}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#bdcde2 var(--bg)}
+body{margin:0;height:100dvh;overflow:hidden}
+[hidden]{display:none!important}
+button{font:inherit;font-size:12px;font-weight:550;line-height:1.5;min-height:39px;padding:9px 16px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:9px;cursor:pointer;transition:background .15s,border-color .15s}
+button:hover:not(:disabled){background:#edf4ff;border-color:#b7cff6}
+button:disabled{opacity:.5;cursor:not-allowed}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+button.primary{color:#fff;background:var(--accent);border-color:var(--accent);font-weight:650;min-width:112px}
+button.primary:hover:not(:disabled){background:#0c4ed3;border-color:#0c4ed3}
+svg{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.install-dialog{display:flex;flex-direction:column;height:100%;border:1px solid var(--border);overflow:hidden}
+.dialog-header{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:65px;padding:13px 23px;background:var(--surface);border-bottom:1px solid var(--border);flex:none;-webkit-app-region:drag}
+.header-label{display:flex;align-items:center;gap:11px}
+.header-label img{object-fit:contain}
+.dialog-header h1{margin:0;font-size:14px;font-weight:650;letter-spacing:-.1px}
+.icon-button{display:flex;align-items:center;justify-content:center;width:32px;min-height:32px;padding:5px;border:0;background:transparent;color:var(--muted);-webkit-app-region:no-drag}
+.icon-button svg{width:19px;height:19px}
+.dialog-content{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:26px 27px 20px}
+.plugin-identity{display:flex;align-items:center;gap:15px;min-width:0}
+.plugin-icon{display:flex;align-items:center;justify-content:center;width:54px;height:54px;flex:none;color:var(--accent);border:1px solid #d4e3ff;background:#edf4ff;border-radius:14px}
+.plugin-icon svg{width:29px;height:29px}
+.plugin-title{min-width:0}
+.plugin-title h2{font-size:24px;font-weight:650;line-height:1.25;letter-spacing:-.65px;margin:0 0 6px;overflow-wrap:anywhere;unicode-bidi:plaintext}
+.plugin-title p{font-size:11px;color:var(--muted);margin:0;overflow-wrap:anywhere}
+.plugin-description{font-size:12px;line-height:1.7;color:var(--muted);margin:18px 0 11px;white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext}
+.signature-line{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px}
+.signature-line svg{height:14px;width:14px;color:#168469}
+.permissions-section{margin-top:23px}
+.section-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+.section-heading h3{font-size:12px;font-weight:650;margin:0}
+.section-heading>span{font-size:10px;color:var(--muted)}
+.permission-list{list-style:none;margin:0;padding:4px 15px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.permission-list li{display:flex;align-items:center;gap:10px;font-size:12px;line-height:1.5;min-height:33px;padding:7px 0;border-bottom:1px solid #edf1f7;overflow-wrap:anywhere}
+.permission-list li:last-child{border:0}
+.permission-list li:before{content:"";display:block;width:5px;height:5px;border-radius:50%;background:var(--accent);flex:none;opacity:.65}
+.no-permissions{font-size:12px;color:var(--muted);padding:13px 15px;border:1px solid var(--border);border-radius:12px;background:var(--surface);margin:0}
+.access-note{font-size:10px;line-height:1.65;color:var(--muted);margin:11px 2px 20px}
+.review-details{border-top:1px solid var(--border);padding-top:14px}
+.review-details summary{display:flex;align-items:center;justify-content:space-between;gap:16px;cursor:pointer;list-style:none;color:var(--muted);font-size:11px;font-weight:550;border-radius:3px}
+.review-details summary::-webkit-details-marker{display:none}
+.review-details summary svg{width:15px;height:15px}
+.review-details[open] summary svg{transform:rotate(180deg)}
+.details-content{padding:8px 0 0}
+.details-content dl{margin:0}
+.details-content dt{font-size:10px;font-weight:650;color:var(--muted);margin:12px 0 4px}
+.details-content dd{font-size:11px;margin:0;overflow-wrap:anywhere}
+.details-content .fingerprint,.details-content ul{font:10px/1.7 ui-monospace,"Cascadia Code",Consolas,monospace}
+.details-content ul{list-style:none;margin:0;padding:0}
+.details-content p{font-size:10px;color:var(--muted);line-height:1.65;margin:14px 0 0}
+.dialog-footer{display:flex;align-items:center;justify-content:space-between;gap:15px;flex:none;min-height:79px;padding:18px 24px;background:var(--surface);border-top:1px solid var(--border)}
+.dialog-footer p{max-width:175px;font-size:10px;line-height:1.5;color:var(--muted);margin:0}
+.dialog-actions{display:flex;gap:9px;align-items:center;flex:none}
+#review-loading{font-size:12px;color:var(--muted);margin:5px 0}
+.review-error{font-size:12px;color:#c93d4c;background:#fff1f3;border:1px solid #f2c4ce;border-radius:10px;padding:13px 15px;overflow-wrap:anywhere}
+@media(max-width:480px){.dialog-content{padding:21px 19px}.dialog-header{padding-left:18px;padding-right:13px}.dialog-footer{padding:15px 18px;gap:10px;flex-wrap:wrap}.dialog-footer p{max-width:none;flex:1 0 100%}.dialog-actions{margin-left:auto}.plugin-title h2{font-size:22px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
