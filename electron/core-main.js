@@ -7,13 +7,13 @@ const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 const { channelConfig, configureDesktop, configureUpdater } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, features, payments, coreChat, updater, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
+let core, win, pluginHost, features, payments, coreChat, coreWallet, updater, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
 const { trustedMainDocument, protectNavigation } = require("./window-security");
 function stop() {
   if (!stopping) stopping = (async () => {
     pluginDownload?.abort(); const errors = [];
     // Finish every cleanup even if an earlier service cannot stop normally.
-    for (const dispose of [() => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
+    for (const dispose of [() => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
       try { await dispose(); } catch (error) { errors.push(error); }
     }
     desktopTray?.dispose();
@@ -83,6 +83,7 @@ async function start() {
   pluginHost = new (require("./core-plugin-host").PluginHost)({ electron, manager, core, features });
   payments = require("./koin-test-ipc").registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, isTest: false });
   coreChat = new (require("./core-chat").CoreChat)({ core });
+  coreWallet = require("./core-wallet").createCoreWallet({ dataDir, core, electron, getWindow: () => win, isClosing: () => shuttingDown, withSpend: run => payments.withWalletSpend(run) });
   win.webContents.on("render-process-gone", () => { void coreChat.stop(); });
   win.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) void coreChat.stop(); });
   ipcMain.handle("kai-core:call", async (event, method, input) => {
@@ -133,8 +134,15 @@ async function start() {
       case "privacy": {
         const state = core.gateway.network.configure({ privacyMode: input.mode });
         if (state.privacyMode === "local-only") pluginDownload?.abort();
+        coreWallet.privacyChanged(state.privacyMode);
         await features.privacyChanged(state.privacyMode); return state;
       }
+      case "wallet.summary":
+      case "wallet.history":
+      case "wallet.copyAddress":
+      case "wallet.openExplorer":
+      case "wallet.reveal":
+      case "wallet.send": return coreWallet.call(method, input);
       case "wallet.unlock": return core.gateway.earn.unlock({ password: input.password });
       case "wallet.lock": return core.gateway.earn.lock();
       case "wallet.create": {

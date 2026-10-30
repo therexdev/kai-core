@@ -490,7 +490,20 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     providerTick = true; providerPending = creditProvider.tick();
     try { await providerPending; } finally { providerTick = false; providerPending = null; }
   }, 15000); providerTimer.unref();
-  return { isProviding: () => !!worker?.running || !!creditProvider.worker?.running, dispose() {
+  return {
+    // Wallet transfers and credit purchases share one signer. Acquire the same
+    // review gate before either can sign or select a nonce; background payment
+    // reconciliation also yields until the explicit transfer has settled.
+    withWalletSpend(run) {
+      if (disposed) return Promise.reject(Error("Credit service is closing"));
+      if (busy || purchaseSync) return Promise.reject(Error("Finish the current payment review or confirmation check before sending from your wallet."));
+      if (typeof run !== "function") return Promise.reject(Error("A wallet transfer is required"));
+      busy = true;
+      const pending = Promise.resolve().then(run);
+      inFlight.add(pending);
+      return pending.finally(() => { busy = false; inFlight.delete(pending); });
+    },
+    isProviding: () => !!worker?.running || !!creditProvider.worker?.running, dispose() {
     if (disposal) return disposal;
     disposed = true; clearInterval(purchaseTimer); clearInterval(providerTimer);
     purchaseSync?.abort.abort(); creditService.dispose(); payments?.stop(); creditService.purchases.stop();

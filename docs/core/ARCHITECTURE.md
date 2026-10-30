@@ -41,8 +41,21 @@ private desktop routing and cancellation. It cannot silently fall back to paid
 network inference. Network chat uses the existing native credit service and its
 verified delivery/recovery protocol. Local and network transcripts are separate
 and last only for the app session; resuming a saved network request is explicit.
-The UI has separate Wallet, Your Credits, and Buy credits screens, with balances
-and history sourced from the verified credit state and native payment journal.
+The UI has separate Wallet, Your Credits, and Buy credits screens. Credits and
+purchase history come from the verified credit state and native payment journal.
+Wallet retains the original address panel, KOIN/VHP/Mana cards, transaction
+history, send controls and password-protected backup view. Its private native
+adapter uses the existing chain/history implementations and reads the saved
+network settings without constructing the optional node stack or repairing
+configuration. Reads work while locked and respect Local-Only. Transfers require
+the password, current wallet/network identity and exact native review; they share
+the credit purchase review gate and reject unresolved earlier payment journals.
+Plugin permissions and wallet access are unchanged.
+
+Earn retains the separate legacy Wallet KAI and estimated KOIN Drop amounts.
+The read-only earning status supplies the KAI balance; the original 1:5 estimate
+uses exact integer arithmetic and excludes pending KAI. These are separate from
+paid KOIN reward history and chat credits. Unavailable values remain unknown.
 
 The data/profile contract is distinct from the installer/update contract. Core
 must be able to reuse encrypted identity and installed files without targeting an

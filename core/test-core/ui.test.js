@@ -42,10 +42,23 @@ test("generated backup key is cleared on blur, page exit, and wallet lock", asyn
   const f = fixture({ state: { wallet: { exists: false, unlocked: false } }, call: async method => method === "wallet.create" ? { wif: "synthetic-backup-key" } : {} });
   await flush();
   for (const clear of [() => f.windowEvents.get("blur")(), () => f.context.showPage("models"), () => f.$("lock-wallet").onclick({ currentTarget: f.$("lock-wallet") })]) {
+    f.context.showPage("wallet");
     f.$("password").value = "synthetic-password";
     await f.$("create-wallet").onclick({ currentTarget: f.$("create-wallet") });
     assert.match(f.$("wallet-backup").textContent, /synthetic-backup-key/); assert.equal(f.$("password").value, "");
     await clear(); assert.equal(f.$("wallet-backup").textContent, ""); assert.equal(f.$("wallet-backup").hidden, true);
+  }
+});
+
+test("late wallet creation cannot reveal a key after blur or page exit", async () => {
+  for (const leave of [f => f.windowEvents.get("blur")(), f => f.context.showPage("models")]) {
+    let complete;
+    const f = fixture({ state: { wallet: { exists: false, unlocked: false } }, call: method => method === "wallet.create" ? new Promise(resolve => { complete = resolve; }) : {} });
+    await flush(); f.context.showPage("wallet"); f.$("password").value = "synthetic-password";
+    const pending = f.$("create-wallet").onclick({ currentTarget: f.$("create-wallet") });
+    await flush(); leave(f); complete({ wif: "synthetic-late-key" }); await pending;
+    assert.equal(f.$("wallet-backup").textContent, ""); assert.equal(f.$("wallet-backup").hidden, true);
+    assert.equal(f.$("password").value, "");
   }
 });
 

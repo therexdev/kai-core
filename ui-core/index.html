@@ -6,6 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
   <title>KAI Core</title>
   <link rel="stylesheet" href="core.css">
+  <link rel="stylesheet" href="wallet.css">
+  <link rel="stylesheet" href="earning.css">
 </head>
 <body>
   <aside id="sidebar">
@@ -54,14 +56,27 @@
           </div>
         </details>
       </section>
-      <section data-panel="wallet" class="page" hidden>
-        <div class="page-head"><div><h1>Your wallet</h1><p id="wallet-state">Checking your saved wallet.</p></div></div>
-        <article class="wallet-card">
-          <h2>Wallet address</h2><code id="wallet-address">No wallet created</code><p id="wallet-detail"></p>
-          <form id="unlock-wallet"><label for="password">Wallet password</label><input id="password" type="password" autocomplete="current-password" minlength="8" required><div class="actions"><button class="primary" id="unlock-button">Unlock wallet</button><button type="button" id="create-wallet">Create wallet</button><button type="button" id="lock-wallet">Lock</button></div></form>
-          <details id="restore-wallet" class="subtle-details"><summary>Restore an existing wallet</summary><label for="restore-wif">Wallet backup key</label><input id="restore-wif" type="password" autocomplete="off"><button id="restore-button">Restore with password above</button></details>
-          <pre id="wallet-backup" hidden></pre><button id="hide-backup" hidden>Hide backup key</button>
-        </article>
+      <section data-panel="wallet" class="page wallet-page" hidden>
+        <div class="wallet-workspace">
+          <div class="page-head"><div><h1>Wallet</h1><p>Your Koinos wallet for AI payments and rewards.</p></div><div class="wallet-actions"><button type="button" id="wallet-open-send" disabled>Send</button><button type="button" id="lock-wallet" hidden>Lock</button></div></div>
+          <section id="wallet-account" hidden>
+            <section class="payment-wallet-card"><div class="payment-wallet-row"><div><h2>Your address</h2><p id="wallet-network" class="muted">Share this address to receive KOIN or VHP.</p></div><span id="wallet-lock-state" class="payment-wallet-badge">Locked</span></div><div class="payment-wallet-receive"><code id="wallet-address">No wallet created</code><button type="button" id="wallet-copy">Copy</button><button type="button" id="wallet-explorer" class="text-button" hidden>Explorer ↗</button></div></section>
+            <div class="payment-wallet-stats" aria-label="Wallet balances">
+              <div class="payment-wallet-stat"><div class="label" id="wallet-koin-label">KOIN (liquid)</div><div class="value" id="wallet-koin">—</div><div class="sub">Spendable KOIN · fuels Mana</div></div>
+              <div class="payment-wallet-stat"><div class="label">VHP</div><div class="value" id="wallet-vhp">—</div><div class="sub">Virtual hash power for block production</div></div>
+              <div class="payment-wallet-stat"><div class="label">Mana</div><div class="value" id="wallet-mana">—</div><div class="sub">Recharges over time · used by transactions</div></div>
+            </div>
+            <p id="wallet-balance-note" class="muted" role="status">Checking balances…</p><div id="wallet-balance-error" class="dismissible-notice inline-notice" hidden><p id="wallet-balance-error-text" role="status"></p><button id="wallet-balance-error-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div><button type="button" id="wallet-refresh">Refresh balances</button>
+            <section class="payment-wallet-card payment-wallet-history"><div class="payment-wallet-row"><h2>Transaction history</h2><button type="button" id="wallet-history-refresh" hidden>Try again</button></div><p id="wallet-history-status" class="muted" role="status">Loading transaction history…</p><div id="wallet-history-error" class="dismissible-notice inline-notice" hidden><p id="wallet-history-error-text" role="status"></p><button id="wallet-history-error-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div><div class="payment-wallet-table"><table><thead><tr><th>Activity</th><th>Amount</th><th>When</th><th>Status</th></tr></thead><tbody id="wallet-history-rows"></tbody></table></div><button type="button" id="wallet-history-more" hidden>Load older transactions</button></section>
+          </section>
+          <section class="payment-wallet-card" id="wallet-access"><h2 id="wallet-access-title">Unlock your wallet</h2><p id="wallet-state" role="status">Checking your saved wallet.</p><p id="wallet-detail" class="muted"></p><form id="unlock-wallet"><label for="password">Wallet password</label><input id="password" type="password" autocomplete="current-password" minlength="8" required><div class="actions"><button class="primary" id="unlock-button">Unlock wallet</button><button type="button" id="create-wallet">Create wallet</button></div></form><details id="restore-wallet" class="subtle-details"><summary>Import an existing wallet</summary><p class="muted">Import your backup key and use the password above to protect it on this computer.</p><label for="restore-wif">Wallet backup key</label><input id="restore-wif" type="password" autocomplete="off" spellcheck="false"><button type="button" id="restore-button">Import wallet</button></details></section>
+          <section id="wallet-unlocked" hidden>
+            <details id="wallet-send-panel" class="payment-wallet-card"><summary>Send KOIN or VHP</summary><p class="muted">Enter the recipient, amount and your wallet password. Review the exact transfer before confirming.</p><form id="wallet-send-form"><div class="wallet-form-row"><label>Token<select id="wallet-send-token"><option value="koin">KOIN</option><option value="vhp">VHP</option></select></label><label class="wallet-recipient">Recipient address<input id="wallet-send-to" type="text" autocomplete="off" spellcheck="false" placeholder="Recipient address (1…)" required></label><label>Amount<input id="wallet-send-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00000000" required></label></div><div class="wallet-form-row"><label>Wallet password<input id="wallet-send-password" type="password" autocomplete="off" required></label><button type="submit" id="wallet-send-submit" class="primary">Review transfer</button></div></form></details>
+            <section class="payment-wallet-card payment-wallet-backup"><h2>Wallet backup</h2><p class="muted">Your private key controls this wallet. Your password is required to display it.</p><details id="wallet-reveal-panel"><summary>Show backup code</summary><form id="wallet-reveal-form" class="wallet-form-row"><label>Wallet password<input id="wallet-reveal-password" type="password" autocomplete="off" required></label><button type="submit" id="wallet-reveal-submit">Reveal backup code</button></form></details></section>
+          </section>
+          <div id="wallet-notice" class="dismissible-notice inline-notice" hidden><p id="wallet-message" role="status" aria-atomic="true"></p><button id="wallet-message-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div>
+          <pre id="wallet-backup" hidden></pre><button type="button" id="hide-backup" hidden>Hide backup key</button>
+        </div>
       </section>
       <section data-panel="credits" class="page" hidden>
         <div class="page-head"><div><h1>Your Credits</h1><p>Your balance and network usage in one place.</p></div><button class="primary" data-go="buy-credits">Buy credits</button></div>
@@ -82,6 +97,6 @@
       </section>
     </div>
   </main>
-  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="core.js"></script>
+  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="core.js"></script>
 </body>
 </html>

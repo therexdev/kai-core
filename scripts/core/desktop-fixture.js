@@ -15,6 +15,46 @@ function install({ appRoot }) {
   global.__smokeLocalMode = "reply";
   global.__smokeNetworkMode = "reply";
   global.__smokeShutdownDelay = 0;
+  global.__smokeWalletCalls = [];
+  global.__smokeWalletReviews = [];
+  global.__smokeWalletMode = "ready";
+  global.__smokeLegacyMode = "ready";
+  global.__smokeLegacyReads = 0;
+  // Native wallet presentation uses the production scoped broker and sender
+  // checks. Only chain data and OS side effects are synthetic. A mistaken Send
+  // can never reach a chain provider: all native reviews cancel and transfer
+  // throws before doing any work.
+  const { ChainService } = require(path.join(appRoot, "core/lib/koinos/chain.js"));
+  const { WalletHistory } = require(path.join(appRoot, "core/lib/koinos/wallet-history.js"));
+  ChainService.prototype.balances = async function(address) {
+    global.__smokeWalletCalls.push({ method: "balances", address, network: this.network().id });
+    if (global.__smokeWalletMode === "unavailable") throw Error("Synthetic wallet balance unavailable");
+    return { koin: "1234567890123", vhp: "87654321000", mana: "1250000000" };
+  };
+  ChainService.prototype.transfer = async function() {
+    global.__smokeWalletCalls.push({ method: "transfer" });
+    throw Error("Synthetic fixture forbids wallet transfers");
+  };
+  WalletHistory.prototype.read = async function(input = {}) {
+    global.__smokeWalletCalls.push({ method: "history", cursor: input.cursor || null });
+    if (global.__smokeWalletMode === "unavailable") throw Error("Synthetic wallet history unavailable");
+    const older = !!input.cursor, net = this.chain.network();
+    return { available: true, address: this.wallet.address, network: net.id, tokenSymbol: net.tokenSymbol, observedAt: Date.now(), nextCursor: older ? null : "synthetic_older_page",
+      rows: [{ kind: "transaction", id: "0x1220" + (older ? "b" : "a").repeat(64), label: older ? "Sent" : "Received", type: older ? "sent" : "received", timestamp: Date.now() - (older ? 86400000 : 60000), height: "100", counterparty: this.wallet.address,
+        changes: [{ asset: net.tokenSymbol, direction: older ? "out" : "in", amount: older ? "100000000" : "250000000" }], status: "confirmed" }] };
+  };
+  const desktop = require("electron");
+  desktop.dialog.showMessageBox = async (_parent, options) => {
+    const value = options || _parent;
+    global.__smokeWalletReviews.push({ title: value.title, message: value.message, detail: value.detail, buttons: value.buttons, defaultId: value.defaultId, cancelId: value.cancelId });
+    return { response: value.cancelId ?? 0, checkboxChecked: false };
+  };
+  let clipboard = "";
+  desktop.clipboard.writeText = value => { clipboard = String(value); };
+  desktop.clipboard.readText = () => clipboard;
+  desktop.clipboard.clear = () => { clipboard = ""; };
+  global.__smokeClipboard = () => clipboard;
+  desktop.shell.openExternal = async url => { global.__smokeWalletCalls.push({ method: "openExplorer", url }); };
   let core, providerEnabled = false, pendingNetwork, recoveryAvailable = false;
   const lifecycle = global.__smokeLifecycle = { coreStarts: 0, coreStops: 0, coreStopped: false, paymentDisposals: 0, paymentsDisposed: false, providerEnabled: false, providerTicks: 0, beforeQuit: 0, willQuit: false, quit: false, trayMode: "pending", trayDestroyed: false };
   const record = () => { if (process.env.KAI_SMOKE_LIFECYCLE_FILE) fs.writeFileSync(process.env.KAI_SMOKE_LIFECYCLE_FILE, JSON.stringify(lifecycle)); };
@@ -71,14 +111,37 @@ function install({ appRoot }) {
     };
     const aliases = core.models.aliases.bind(core.models);
     core.models.aliases = () => [{ alias: "smoke-local", label: "Synthetic local model", status: "ready" }, ...aliases()];
+    core.gateway.earn.status = async () => {
+      global.__smokeLegacyReads++;
+      const wallet = core.account.wallet.status(), localOnly = core.gateway.network.status().privacyMode === "local-only";
+      const earnings = localOnly ? null : global.__smokeLegacyMode === "unavailable" ? { error: "Synthetic testnet balance unavailable" }
+        : { address: global.__smokeLegacyMode === "mismatch" ? "another-synthetic-wallet" : wallet.address, kai: "12345.67890123", pendingKai: "9999" };
+      const result = { wallet, worker: { running: false }, earnings };
+      if (global.__smokeLegacyMode === "delay") await new Promise(resolve => { global.__smokeResolveLegacy = resolve; });
+      return result;
+    };
     global.__smokeSetPrivacy = mode => core.settings.set("network.privacyMode", mode);
     return core;
   };
   const originalFetch = global.fetch;
   global.fetch = (input, options = {}) => {
     const url = new URL(typeof input === "string" ? input : input.url || String(input));
+    // Explicitly changing out of Local-Only asks for the model safety list.
+    // Keep that existing transition real while answering the request in memory.
+    if (url.origin === "https://koinosai.com" && url.pathname === "/scheduler/policy") {
+      return Promise.resolve(new Response(JSON.stringify({ revoked: [] }), { headers: { "content-type": "application/json" } }));
+    }
+    if (options.method === "POST" && typeof options.body === "string") {
+      let request;
+      try { request = JSON.parse(options.body); } catch { /* Non-JSON bodies use the normal fixture below. */ }
+      if (request?.method === "chain.get_chain_id") {
+        global.__smokeWalletCalls.push({ method: "chainId" });
+        const { MAINNET_CHAIN } = require(path.join(appRoot, "core/lib/koin-network/payment-network.js"));
+        return Promise.resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { chain_id: MAINNET_CHAIN } }), { headers: { "content-type": "application/json" } }));
+      }
+    }
     if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
-      global.__smokeExternalCalls.push(url.origin);
+      global.__smokeExternalCalls.push(url.origin + url.pathname);
       return Promise.reject(Error("Smoke test forbids external requests"));
     }
     if (url.pathname === "/core/chat/completions" && options.method === "POST") {

@@ -13,6 +13,11 @@ Alpha/Test release pipelines, starting from `kaiapp` Test commit
   service and delivery recovery. Advanced tools remain optional plugins.
 - Your Credits shows available balance, purchases and usage; Buy credits opens a
   separate purchase screen with the existing native quote approval.
+- Wallet restores the original address, KOIN/VHP/Mana balance cards, transaction
+  history, Send/Lock controls and password-protected backup view. Balances and
+  history work while locked; transfers require a password and native review.
+- Earn includes the original Wallet KAI and estimated KOIN Drop amounts beside
+  Reward activity, separate from the paid KOIN rewards and chat credits.
 - All eleven first-party plugins use the original app’s light workspace styling and feature layouts in separate windows. Plugin 0.1.1 updates are available from the signed catalog.
 - Wallet warnings and other action messages have a dismiss button. Dismissed
   messages stay hidden during background refresh; an explicit retry can show a new result.

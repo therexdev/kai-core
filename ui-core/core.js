@@ -1,6 +1,6 @@
 "use strict";
 const $ = id => document.getElementById(id), bridge = window.kaiCore;
-let snapshot, page = "chat", refreshing = false, priceGeneration = 0, creditState, knownPrivacy, purchaseInfoKey, purchaseInfoGeneration = 0, cancelledPurchases = new Set();
+let snapshot, page = "chat", refreshing = false, priceGeneration = 0, creditState, knownPrivacy, knownWalletAddress, purchaseInfoKey, purchaseInfoGeneration = 0, walletSecretGeneration = 0, cancelledPurchases = new Set();
 const pageTitles = { chat: "Chat", models: "Models", plugins: "Plugins", wallet: "Wallet", credits: "Credits and Usage", "buy-credits": "Buy credits", earning: "Earn KOIN", network: "Network", settings: "Settings" };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const makeNotice = (container, message, close, focusTarget) => window.KaiCoreNotice.create({ container: $(container), message: $(message), close: $(close), focusTarget });
@@ -18,7 +18,7 @@ function notify(message, error = false, { background = false } = {}) {
 }
 async function action(button, fn) { globalNotice.clear(); if (button) button.disabled = true; try { return await fn(); } catch (e) { notify(e.message, true); } finally { if (button) button.disabled = false; await refresh(); } }
 async function api(route, body) { const r = await fetch(route, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const j = await r.json(); if (!r.ok) throw Error(j.error?.message || j.error || "Request failed"); return j; }
-function hideBackup() { text("wallet-backup", ""); $("wallet-backup").hidden = true; $("hide-backup").hidden = true; }
+function hideBackup() { walletSecretGeneration++; text("wallet-backup", ""); $("wallet-backup").hidden = true; $("hide-backup").hidden = true; window.KaiCoreWallet?.clearSecrets(); }
 window.addEventListener("blur", hideBackup);
 document.addEventListener("visibilitychange", () => { if (document.hidden) hideBackup(); });
 function showPage(next) {
@@ -28,6 +28,7 @@ function showPage(next) {
     if (page === "chat") window.KaiCoreChat?.hide();
     if (page === "earning") window.KaiCoreEarning?.leave();
     if (page === "network") window.KaiCoreNetwork?.leave();
+    if (page === "wallet") window.KaiCoreWallet?.leave();
     priceGeneration++;
   }
   page = next;
@@ -40,6 +41,7 @@ function showPage(next) {
   if (next === "chat") window.KaiCoreChat?.show();
   if (next === "earning") window.KaiCoreEarning?.enter();
   if (next === "network") window.KaiCoreNetwork?.enter();
+  if (next === "wallet") window.KaiCoreWallet?.enter();
   if (next === "credits") { renderCredits(); void refreshCreditActivity(); }
   if (next === "buy-credits") void price();
 }
@@ -54,9 +56,15 @@ async function refresh() {
     text("version", `v${s.version}`);
     text("closing-window-detail", s.desktop?.trayAvailable ? "Closing the window keeps KAI and earning running in the system tray. Click the tray icon to reopen it, or choose Quit KAI Core from its menu to stop the app." : "A system tray icon is not available on this desktop. Closing the window will quit KAI Core.");
     const address = s.wallet.address;
+    if (knownWalletAddress !== undefined && knownWalletAddress !== (address || null)) {
+      hideBackup();
+      window.dispatchEvent(new CustomEvent("kai-credit-identity-changed"));
+    }
+    knownWalletAddress = address || null;
     text("wallet-state", address ? s.wallet.unlocked ? "Unlocked on this computer" : "Saved wallet · locked" : "Create or restore your wallet");
     text("wallet-address", address || "No wallet created"); text("wallet-detail", s.wallet.unlocked ? "Wallet unlocked. Plugins never receive its private key." : "Unlock to authorize wallet actions.");
     $("create-wallet").hidden = s.wallet.exists; $("restore-wallet").hidden = s.wallet.exists; $("unlock-button").hidden = !s.wallet.exists || s.wallet.unlocked; $("lock-wallet").hidden = !s.wallet.unlocked;
+    window.KaiCoreWallet?.observe(s.wallet, s.network.privacyMode);
     if (document.activeElement !== $("privacy")) $("privacy").value = s.network.privacyMode;
     const modelBusy = !!s.importing || s.ensure?.state === "working";
     const modelError = !modelBusy && (s.ensure?.state === "error" || !!s.importError);
@@ -106,7 +114,24 @@ $("privacy").onchange = e => action(e.currentTarget, async () => {
   window.KaiCredits.clear(); await window.KaiCredits.refresh();
 });
 $("unlock-wallet").onsubmit = e => { e.preventDefault(); void action(e.submitter, async () => { try { await bridge.call("wallet.unlock", { password: $("password").value }); } finally { $("password").value = ""; } }); };
-async function createWallet(restore) { try { const r = await bridge.call(restore ? "wallet.restore" : "wallet.create", { password: $("password").value, ...(restore ? { wif: $("restore-wif").value } : {}) }); if (r.wif) { text("wallet-backup", `Save this backup key privately:\n${r.wif}`); $("wallet-backup").hidden = false; $("hide-backup").hidden = false; } notify("Wallet ready."); } finally { $("password").value = ""; $("restore-wif").value = ""; } }
+async function createWallet(restore) {
+  const generation = walletSecretGeneration;
+  try {
+    const r = await bridge.call(restore ? "wallet.restore" : "wallet.create", { password: $("password").value, ...(restore ? { wif: $("restore-wif").value } : {}) });
+    // Observe the newly created identity before displaying its one-time backup.
+    // The next status poll must not mistake it for an unrelated wallet switch.
+    if (r.address) {
+      knownWalletAddress = r.address;
+      window.KaiCoreWallet?.observe({ exists: true, unlocked: true, address: r.address }, knownPrivacy);
+      window.dispatchEvent(new CustomEvent("kai-credit-identity-changed"));
+    }
+    if (r.wif && page === "wallet" && !document.hidden && generation === walletSecretGeneration) {
+      text("wallet-backup", `Save this backup key privately:\n${r.wif}`); $("wallet-backup").hidden = false; $("hide-backup").hidden = false;
+    }
+    notify("Wallet ready.");
+  } finally { $("password").value = ""; $("restore-wif").value = ""; }
+}
+
 $("create-wallet").onclick = e => action(e.currentTarget, () => createWallet(false));
 $("restore-button").onclick = e => action(e.currentTarget, () => createWallet(true));
 $("hide-backup").onclick = hideBackup;

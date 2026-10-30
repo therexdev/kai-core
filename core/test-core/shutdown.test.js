@@ -17,3 +17,22 @@ test("payment disposal waits for in-flight handlers and provider stop before pro
   finishStop(); await Promise.resolve(); assert.equal(closed, false);
   finishRead({ state: "ready" }); await read; await disposal; assert.equal(closed, true);
 });
+
+
+test("wallet transfer and credit approval share the spend gate and disposal waits", async t => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-wallet-gate-")); t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const win = new EventEmitter(); win.isDestroyed = () => false; win.isVisible = () => true; win.isMinimized = () => false;
+  win.webContents = new EventEmitter(); win.webContents.mainFrame = { url: "http://127.0.0.1:9000/" };
+  t.mock.method(global, "setInterval", () => ({ unref() {} }));
+  t.mock.method(CreditProvider.prototype, "dispose", async () => {});
+  let handler, complete;
+  const registration = registerTestPaymentIPC({ dataDir, core: { gateway: { network: {} } }, isTest: false, dialog: {}, origin: "http://127.0.0.1:9000", getMainWindow: () => win, ipcMain: { handle: (_name, fn) => { handler = fn; } } });
+  const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
+  const transfer = registration.withWalletSpend(() => new Promise(resolve => { complete = resolve; }));
+  await assert.rejects(registration.withWalletSpend(() => assert.fail("second transfer must not start")), /current payment/);
+  await assert.rejects(handler(event, "purchase-approve", "synthetic-quote"), /open payment approval/);
+  let closed = false; const disposal = registration.dispose().then(() => { closed = true; });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(closed, false);
+  await assert.rejects(registration.withWalletSpend(() => {}), /closing/);
+  complete({ cancelled: true }); await transfer; await disposal; assert.equal(closed, true);
+});

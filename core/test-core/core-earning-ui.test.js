@@ -1,6 +1,6 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
-const { createController, providerPresentation, validateRewards, rewardMarkup } = require("../../ui-core/earning");
+const { createController, providerPresentation, validateRewards, rewardMarkup, legacyAtoms, legacySummary } = require("../../ui-core/earning");
 const summaryApi = require("../../ui/reward-summary");
 const start = 1800000000000;
 const models = ["small", "large"].map(id => ({ id, label: id + " model", installed: true, compatible: true }));
@@ -10,12 +10,16 @@ const rewards = (extra = {}) => ({ walletAddress: "fixture-wallet", scope: "a".r
 const online = (extra = {}) => ({ state: "online", label: "ONLINE", model: "small", detail: "Confirmed by network", validUntil: start + 15000,
   models: [{ state: "online", label: "ONLINE", model: "small", detail: "Confirmed by network", validUntil: start + 15000 }], ...extra });
 const flush = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
-function fixture(initial = info()) {
-  let now = start, next = 0, currentInfo = initial, currentStatus = online(), currentRewards = rewards(), actionHandler;
+function fixture(initial = info(), { legacy = false } = {}) {
+  let now = start, next = 0, currentInfo = initial, currentStatus = online(), currentRewards = rewards(), currentLegacy = { wallet: { address: "fixture-wallet", unlocked: false }, earnings: { address: "fixture-wallet", kai: "12345.67890123", pendingKai: "9999" } }, actionHandler;
   const calls = [], paints = [], timers = new Map(), navigations = [];
   const controller = createController({ summaryApi, now: () => now, render: (state, presentation) => paints.push({ state: structuredClone(state), presentation }),
     setTimer(fn, delay) { const id = ++next; timers.set(id, { fn, at: now + delay }); return id; }, clearTimer(id) { timers.delete(id); },
     navigate: page => navigations.push(page),
+    ...(legacy ? { async readLegacy() {
+      calls.push({ action: "legacy-balance" }); const value = typeof currentLegacy === "function" ? await currentLegacy() : currentLegacy;
+      if (value instanceof Error) throw value; return structuredClone(value);
+    } } : {}),
     async credit(action, input) {
       calls.push({ action, input }); let value;
       if (action === "provider-public-info") value = currentInfo;
@@ -26,7 +30,7 @@ function fixture(initial = info()) {
     }
   });
   return { controller, calls, paints, timers, navigations, latest: () => paints.at(-1),
-    setInfo(value) { currentInfo = value; }, setStatus(value) { currentStatus = value; }, setRewards(value) { currentRewards = value; }, setAction(fn) { actionHandler = fn; },
+    setInfo(value) { currentInfo = value; }, setStatus(value) { currentStatus = value; }, setRewards(value) { currentRewards = value; }, setLegacy(value) { currentLegacy = value; }, setAction(fn) { actionHandler = fn; },
     async enter() { controller.enter(); await flush(); },
     async advance(ms) { now += ms; for (const [id, timer] of [...timers].sort((a, b) => a[1].at - b[1].at)) if (timer.at <= now && timers.delete(id)) timer.fn(); await flush(); }
   };
@@ -128,4 +132,47 @@ test("reward validation rejects malformed, duplicate, stale and overflowing amou
   }
   const valid = validateRewards(rewards({ payouts: [row], summary: { unverified: true } }), start, summaryApi);
   assert.equal(valid.summary, null); assert.equal(valid.payouts.length, 1);
+});
+
+
+test("testnet drop keeps the original exact 1 KOIN per 5 wallet KAI estimate, excluding pending KAI", () => {
+  const value = kai => ({ wallet: { address: "wallet-a", unlocked: false }, earnings: { address: "wallet-a", kai, pendingKai: "9999" } });
+  assert.deepEqual(legacySummary(value("12345.67890123")), { wallet: "wallet-a", kai: "12,345.67890123", koin: "2,469.13578024" });
+  assert.equal(legacySummary(value("0")).koin, "0");
+  assert.equal(legacySummary(value("5e-8")).koin, "0.00000001");
+  assert.equal(legacySummary(value("0.00000004")).koin, "0");
+  assert.equal(legacyAtoms("184467440737.09551615"), 18446744073709551615n);
+  for (const kai of [undefined, null, 1, "-1", "NaN", "Infinity", "0.000000001", "184467440738", "1e99", "<img src=x>"]) assert.equal(legacySummary(value(kai)), null);
+  const mismatch = value("123"); mismatch.earnings.address = "wallet-b"; assert.equal(legacySummary(mismatch), null);
+  const failed = value("123"); failed.earnings.error = "Unavailable"; assert.equal(legacySummary(failed), null);
+  assert.equal(legacySummary({ wallet: { address: "wallet-a" }, earnings: null }), null);
+});
+
+test("Earn reads locked-wallet KAI without starting, signing or changing wallet state; failed reads clear both amounts", async () => {
+  const f = fixture(info(), { legacy: true }); assert.equal(f.calls.length, 0); await f.enter();
+  assert.deepEqual(f.controller.getState().legacy, { wallet: "fixture-wallet", kai: "12,345.67890123", koin: "2,469.13578024" });
+  assert.deepEqual(f.calls.map(call => call.action).sort(), ["legacy-balance", "provider-public-earnings", "provider-public-info"]);
+  f.setLegacy(Error("Balance unavailable")); await f.controller.refresh();
+  assert.equal(f.controller.getState().legacy, null); assert.equal(f.controller.getState().legacyError, "Balance unavailable");
+  f.setLegacy({ wallet: { address: "fixture-wallet" }, earnings: { address: "fixture-wallet", kai: "0" } }); await f.controller.refresh();
+  assert.equal(f.controller.getState().legacy.kai, "0"); assert.equal(f.controller.getState().legacyError, ""); f.controller.leave();
+  assert.equal(f.controller.getState().legacy, null); assert.equal(f.timers.size, 0);
+});
+
+test("a delayed KAI refresh never extends a stale amount and leaving discards its response", async () => {
+  const f = fixture(info(), { legacy: true }); await f.enter();
+  let release; f.setLegacy(() => new Promise(resolve => { release = resolve; }));
+  await f.advance(20000); assert.ok(f.controller.getState().legacy);
+  await f.advance(10000); assert.equal(f.controller.getState().legacy, null);
+  f.controller.leave(); release({ wallet: { address: "fixture-wallet" }, earnings: { address: "fixture-wallet", kai: "999" } }); await flush();
+  assert.equal(f.controller.getState().legacy, null); assert.equal(f.timers.size, 0);
+});
+
+test("privacy or identity reset clears KAI and rejects an earlier account's delayed read", async () => {
+  const f = fixture(info(), { legacy: true }); await f.enter();
+  let release; f.setLegacy(() => new Promise(resolve => { release = resolve; })); const oldRead = f.controller.refresh(); await flush();
+  f.setLegacy({ wallet: { address: "fixture-wallet" }, earnings: null }); f.controller.reset(); await flush();
+  assert.equal(f.controller.getState().legacy, null);
+  release({ wallet: { address: "old-wallet" }, earnings: { address: "old-wallet", kai: "999" } }); await oldRead;
+  assert.equal(f.controller.getState().legacy, null); f.controller.leave();
 });
