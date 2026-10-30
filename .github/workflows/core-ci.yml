@@ -26,6 +26,11 @@ jobs:
       - name: Verify native shared profile and credential reuse
         if: runner.os == 'Windows'
         run: npm run test:native-profile
+      - name: Configure Electron sandbox helper on Linux runner
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - name: Verify plugin isolation
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:plugin-sandbox

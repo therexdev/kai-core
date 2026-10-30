@@ -34,7 +34,7 @@ Electron app. `npm run test:plugin-sandbox` tests the real plugin renderer/broke
 On Windows, `npm run test:native-profile` checks all Alpha/Test/Core lock combinations
 and reuses a synthetic OS-encrypted credential between separate executables.
 
-`npm run dist -- --linux --x64` builds a local AppImage. The manual **Core preview
+`npm run dist -- --linux --x64` builds a local AppImage. The **Core preview
 installers** GitHub workflow builds Windows, Linux x64/arm64 and macOS artifacts.
 These are preview artifacts, not signed public releases. Platform signing and
 native upgrade verification are required before replacing the old app publicly.
