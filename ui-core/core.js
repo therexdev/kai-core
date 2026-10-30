@@ -86,6 +86,7 @@ bridge?.onOpenView?.(target => {
   if (target?.section === "credit-account") window.KaiCoreAccount?.openCredit();
 });
 function html(id, value) { if ($(id).innerHTML !== value) $(id).innerHTML = value; }
+document.addEventListener("kai-alpha-migration-complete", () => { void refresh(); });
 async function refresh() {
   if (!bridge || refreshing || document.hidden) return; refreshing = true;
   try {

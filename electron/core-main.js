@@ -7,13 +7,13 @@ const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 const { channelConfig, configureDesktop } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
+let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, alphaMigration, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
 const { trustedMainDocument, protectNavigation } = require("./window-security");
 function stop() {
   if (!stopping) stopping = (async () => {
     pluginDownload?.abort(); const errors = [];
     // Finish every cleanup even if an earlier service cannot stop normally.
-    for (const dispose of [() => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
+    for (const dispose of [() => alphaMigration?.dispose(), () => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
       try { await dispose(); } catch (error) { errors.push(error); }
     }
     desktopTray?.dispose();
@@ -102,11 +102,21 @@ async function start() {
   payments = require("./koin-test-ipc").registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, isTest: false });
   coreChat = new (require("./core-chat").CoreChat)({ core });
   coreWallet = require("./core-wallet").createCoreWallet({ dataDir, core, electron, getWindow: () => win, isClosing: () => shuttingDown, withSpend: run => payments.withWalletSpend(run) });
+  alphaMigration = require("./alpha-migration").createAlphaMigration({ dataDir, appData: app.getPath("appData"), models: core.models, wallet: core.account.wallet,
+    withWalletSpend: run => payments.withWalletSpend(run), chooseDirectory: async () => {
+      const chosen = await dialog.showOpenDialog(win, { title: "Choose the Koinos AI Alpha profile folder", properties: ["openDirectory"] });
+      return chosen.canceled ? null : chosen.filePaths[0];
+    } });
   win.webContents.on("render-process-gone", () => { void coreChat.stop(); });
   win.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) void coreChat.stop(); });
   ipcMain.handle("kai-core:call", async (event, method, input) => {
     if (!trustedMainDocument(event, win, origin) || shuttingDown) throw Error("Core desktop access denied");
     switch (method) {
+      case "migration.scan": return alphaMigration.scan();
+      case "migration.chooseSource": return alphaMigration.chooseSource();
+      case "migration.start": return alphaMigration.start(input);
+      case "migration.status": return alphaMigration.status();
+      case "migration.cancel": return alphaMigration.cancel();
       case "chat.local": return coreChat.send(input);
       case "chat.stop": return coreChat.stop();
       case "status": {
@@ -171,10 +181,12 @@ async function start() {
       case "wallet.unlock": return core.gateway.earn.unlock({ password: input.password });
       case "wallet.lock": return core.gateway.earn.lock();
       case "wallet.create": {
+        if (alphaMigration.running) throw Error("Finish migration before creating a wallet.");
         if (core.account.wallet.exists()) throw Error("Your existing wallet is preserved. Unlock it instead.");
         return core.gateway.earn.createWallet({ password: input.password });
       }
       case "wallet.restore": {
+        if (alphaMigration.running) throw Error("Finish migration before restoring a wallet.");
         if (core.account.wallet.exists()) throw Error("Your existing wallet is preserved. Unlock it or use its backup controls.");
         return core.gateway.earn.restoreWallet({ wif: input.wif, password: input.password });
       }

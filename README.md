@@ -2,7 +2,7 @@
 
 KAI Core 0.7 is the desktop foundation for independently installed plugins. Each plugin owns its interface, feature engines, dependencies, assets and saved work. Core exposes documented services that are available to every publisher; there are no private first-party feature APIs.
 
-This is a new architecture and a new profile. It does not import old documents, connected accounts, wallets, models or settings. Existing Koinos AI/Core 0.6 data is left untouched. On Windows the new profile is `%APPDATA%\KAI Core\foundation-v1`. The Koinos Node plugin owns a **separate Node wallet**, clearly labelled in its interface.
+This is a new architecture and a new profile. It does not automatically adopt older data. Settings offers an explicit **Migrate from Koinos AI Alpha** tool for copying **Models**, **Wallet**, or both. Documents, plugin data, connected accounts and settings are excluded. Existing Koinos AI/Core 0.6 data is left untouched. On Windows the new profile is `%APPDATA%\KAI Core\foundation-v1`. The Koinos Node plugin owns a **separate Node wallet**, clearly labelled in its interface.
 
 ## Ownership
 
@@ -47,6 +47,7 @@ node node_modules/electron/install.js
 npm test
 npm run test:services
 npm run test:foundation-native
+npm run test:alpha-migration
 npm run test:apps
 npm run dist -- --win --x64
 ```

@@ -1,13 +1,13 @@
-# KAI Foundation 0.7.0
+# KAI Foundation 0.7.1
 
-KAI Core is now the shared foundation for independently installed feature plugins. The Assistant, Brain, Connections, Workflows, Agent Network, Documents, Model Compare, Code, Tools, Koinos Node and Remote Access own their engines, interfaces, dependencies and saved data.
+Settings now ends with **Migrate from Koinos AI Alpha**. Click **Migrate**, select **Models**, **Wallet**, or both, and copy the selected items into KAI Core. Core detects the standard Alpha profile; **Choose folder** supports custom locations.
 
-This release starts a fresh profile. It does not migrate earlier documents, accounts, wallets, settings or model files. Existing installations and their data are left untouched. Foundation plugins require Core 0.7 and use the separate Foundation catalog.
+Close Alpha, including its tray process, before migrating. Models are copied into Core with progress and cancellation. Recognized catalog weights and vision projectors retain Core's required filenames; imported models receive their own Core paths. Existing Core files are preserved. Generated runtime caches are rebuilt when needed instead of duplicating them.
 
-Core provides a documented public SDK, plugin lifecycle and service routing, shared model/runtime services, network controls, identity, wallet/credit approvals and desktop navigation. The same APIs are available to third-party publishers. Enabled plugins remain active while navigating and while Core is in the tray. Apps can be reordered from the sidebar.
+The wallet stays encrypted and locked with the same address and password. Unlock it in Core using the Alpha wallet password after migration. An existing Core wallet is never replaced. Wallet copying checks the encrypted file structure; normal unlock verifies the password and wallet identity.
 
-All full-feature KAI plugins are native extensions with full computer and application access. The install review explains that trust level. Remote Agent Network job graphs use a separate restricted runner and do not receive the native SDK, connected accounts or Brain access.
+Alpha's original files are unchanged. Plugin data, documents, connected accounts, settings, session keys and credentials are excluded. The Koinos Node plugin's separate wallet is not imported.
 
-Install the Windows Setup build for a normal installation or Portable to launch without installing. Core updates remain manual. These installers are not published to the automatic update feed.
+Install the Windows Setup build for a normal installation or Portable to launch without installing. Core updates remain manual; no automatic update feed is published.
 
-Validation includes platform CI, signed package verification, shared-service tests and real Electron lifecycle/SDK checks. Linux integration also launched all eleven plugin interfaces and the Assistant desktop companion. Live Docker, microphone hardware, OAuth sign-in and blockchain transactions are not exercised by these automated checks.
+Validation covers selective copies, wallet encryption compatibility, existing-data protection, cancellation, model hashes and metadata, and the actual Settings popup in Electron using disposable profiles and a test wallet. It does not exercise live blockchain transactions.

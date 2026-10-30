@@ -3,6 +3,7 @@
   "entry": "electron/core-main.js",
   "files": [
     "core/lib/account.js",
+    "core/lib/alpha-model-migration.js",
     "core/lib/device-free-account.js",
     "core/lib/download.js",
     "core/lib/gateway.js",
@@ -83,6 +84,7 @@
     "core/models/catalog.json",
     "core/package.json",
     "core/server.js",
+    "electron/alpha-migration.js",
     "electron/core-app-order.js",
     "electron/core-chat.js",
     "electron/core-main.js",

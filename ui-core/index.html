@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="core.css"><link rel="stylesheet" href="account.css">
   <link rel="stylesheet" href="wallet.css">
   <link rel="stylesheet" href="earning.css">
+  <link rel="stylesheet" href="alpha-migration.css">
 </head>
 <body>
   <aside id="sidebar">
@@ -164,9 +165,28 @@
         </article>
         <article><h2>Closing the window</h2><p id="closing-window-detail">Checking system tray availability…</p></article>
         <article><h2>Application updates</h2><p>Core updates are installed manually. Download the latest release and run its installer.</p><button id="check-updates">Open downloads</button><div id="update-notice" class="dismissible-notice inline-notice" hidden><p id="update-state" role="status" aria-atomic="true"></p><button id="update-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div></article>
+        <article id="alpha-migration-settings"><h2>Migrate from Koinos AI Alpha</h2><p>Bring your downloaded models and encrypted wallet into KAI Core. Choose what to copy; your Alpha files stay in place. Plugin data and connected accounts are not included.</p><button id="alpha-migration-open" type="button">Migrate</button><p id="alpha-migration-last-result" class="muted" role="status" hidden></p></article>
       </section>
     </div>
   </main>
-  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="apps.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="account.js"></script><script src="core.js"></script>
+  <dialog id="alpha-migration-dialog" class="alpha-migration-dialog" aria-labelledby="alpha-migration-title" aria-describedby="alpha-migration-description">
+    <form id="alpha-migration-form">
+      <header class="alpha-migration-header"><div><span class="alpha-migration-eyebrow">BRING YOUR DATA WITH YOU</span><h2 id="alpha-migration-title">Migrate from Koinos AI Alpha</h2></div><button id="alpha-migration-close" class="alpha-migration-close" type="button" aria-label="Close migration" title="Close"><span aria-hidden="true">×</span></button></header>
+      <div class="alpha-migration-body">
+        <p id="alpha-migration-description">Choose what to copy into KAI Core. Close Koinos AI Alpha, including its tray icon, before migrating.</p>
+        <div class="alpha-migration-source"><div class="alpha-migration-source-heading"><span>Alpha profile</span><button id="alpha-migration-browse" class="text-button" type="button">Choose folder</button></div><code id="alpha-migration-source-path">Looking for your Alpha profile…</code></div>
+        <fieldset class="alpha-migration-options"><legend>What would you like to migrate?</legend>
+          <label class="alpha-migration-option" for="alpha-migration-models"><input id="alpha-migration-models" type="checkbox" aria-describedby="alpha-migration-models-detail alpha-migration-models-size"><span><strong>Models</strong><span id="alpha-migration-models-detail" class="alpha-migration-option-detail">Checking downloaded models…</span><span id="alpha-migration-models-size" class="alpha-migration-option-detail" hidden></span></span></label>
+          <label class="alpha-migration-option" for="alpha-migration-wallet"><input id="alpha-migration-wallet" type="checkbox" aria-describedby="alpha-migration-wallet-detail alpha-migration-wallet-note"><span><strong>Wallet</strong><span id="alpha-migration-wallet-detail" class="alpha-migration-option-detail">Checking your saved wallet…</span><span id="alpha-migration-wallet-address" class="alpha-migration-wallet-address" hidden></span><span id="alpha-migration-wallet-note" class="alpha-migration-option-detail">Keeps your Alpha address and password. Unlock it in Core after migrating.</span></span></label>
+        </fieldset>
+        <p class="alpha-migration-copy-note">Copies only the selected items. Existing Core files are kept; plugin data, account connections and Ollama’s model cache stay in Alpha.</p>
+        <div id="alpha-migration-progress-section" class="alpha-migration-progress-section" hidden><div class="alpha-migration-progress-heading"><span id="alpha-migration-progress-detail" role="status" aria-live="polite"></span><span id="alpha-migration-progress-value"></span></div><progress id="alpha-migration-progress" aria-label="Migration progress"></progress></div>
+        <div id="alpha-migration-outcome" class="alpha-migration-outcome" role="status" aria-live="polite" aria-atomic="true" hidden><strong id="alpha-migration-outcome-title"></strong><p id="alpha-migration-outcome-detail"></p><p id="alpha-migration-outcome-models" class="alpha-migration-result-item" hidden></p><p id="alpha-migration-outcome-wallet" class="alpha-migration-result-item" hidden></p></div>
+        <p id="alpha-migration-error" class="alpha-migration-error" role="alert" hidden></p>
+      </div>
+      <footer class="alpha-migration-footer"><span id="alpha-migration-selection-note" class="muted">Select Models, Wallet, or both.</span><div><button id="alpha-migration-cancel" type="button">Cancel</button><button id="alpha-migration-submit" class="primary" type="submit">Migrate</button></div></footer>
+    </form>
+  </dialog>
+  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="apps.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="account.js"></script><script src="core.js"></script><script src="alpha-migration.js"></script>
 </body>
 </html>

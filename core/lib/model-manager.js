@@ -23,6 +23,8 @@ class ModelManager {
     this._active = null; // in-flight download {alias, controller}
     this._progress = null; // last emitted progress for the UI
     this._importing = null; // in-flight custom import {path, pct}
+    this._alphaMigration = null; // exclusive model-copy lease held by Settings migration
+    this._removing = new Set(); // removals started before a migration may begin
   }
 
   // ----- custom models (§27 extended: bring your own GGUF) -----
@@ -44,6 +46,7 @@ class ModelManager {
   }
 
   async importCustom({ path: filePath, label }) {
+    if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     filePath = String(filePath || "");
     if (!filePath.toLowerCase().endsWith(".gguf")) throw new Error("Pick a .gguf model file");
     if (!fs.existsSync(filePath)) throw new Error(`No file at ${filePath}`);
@@ -103,6 +106,7 @@ class ModelManager {
   }
 
   removeCustom(alias) {
+    if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     const customs = this._customs();
     if (!customs.some((c) => c.alias === alias)) throw new Error("No such imported model");
     this._saveCustoms(customs.filter((c) => c.alias !== alias));
@@ -231,6 +235,7 @@ class ModelManager {
    * absent. Returns the on-disk path. Single-flight per Core instance.
    */
   async ensurePackage(packageId) {
+    if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     if (String(packageId).startsWith("custom:")) {
       const sha = packageId.slice(7);
       const c = this._customs().find((x) => x.sha256 === sha);
@@ -297,6 +302,7 @@ class ModelManager {
    *  sha256 or no download, quarantine honored via the parent package.
    *  Returns the local path, or null when the package has no projector. */
   async ensureMmproj(packageId) {
+    if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     const pkg = this.catalog.packages[packageId];
     const mm = pkg && pkg.mmproj;
     if (!mm || !mm.filename) return null;
@@ -420,6 +426,7 @@ class ModelManager {
    * wrong; it was just done on the thread that runs the user interface.
    */
   async removePackage(packageId, { isInUse = false } = {}) {
+    if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     const plan = this.removalPlan(packageId);
     if (isInUse) {
       throw new Error("That model is loaded right now — switch to another model first, then remove it.");
@@ -434,15 +441,21 @@ class ModelManager {
       return { removed: true, kind: "imported", freedBytes: 0, keptFile: plan.keepsFile };
     }
 
-    for (const f of plan.deletesFiles) {
-      try {
-        await fsp.rm(f, { force: true });
-      } catch (e) {
-        throw new Error(`Could not remove ${path.basename(f)}: ${e.code || e.message}`);
+    const removal = {};
+    this._removing.add(removal);
+    try {
+      for (const f of plan.deletesFiles) {
+        try {
+          await fsp.rm(f, { force: true });
+        } catch (e) {
+          throw new Error(`Could not remove ${path.basename(f)}: ${e.code || e.message}`);
+        }
       }
+      this.onEvent({ type: "model:removed", packageId, kind: "downloaded", freedBytes: plan.freesBytes });
+      return { removed: true, kind: "downloaded", freedBytes: plan.freesBytes, files: plan.deletesFiles.length };
+    } finally {
+      this._removing.delete(removal);
     }
-    this.onEvent({ type: "model:removed", packageId, kind: "downloaded", freedBytes: plan.freesBytes });
-    return { removed: true, kind: "downloaded", freedBytes: plan.freesBytes, files: plan.deletesFiles.length };
   }
 
   /** Bytes used by the local model store (§5: storage limits surface later). */

@@ -12,7 +12,7 @@ Package schema 2 declares API 3, runtime, HTML entry, optional native service en
 
 `plugins-v3` contains installation metadata, immutable verified code versions and separate per-plugin writable data. New packages cannot silently substitute another publisher, even after a plugin is removed and its data retained. Updates stop/revoke the previous instance before activating the next. A failed cleanup blocks a new instance until cleanup can be retried.
 
-The Foundation profile is independent of old releases. There is no migration adapter or shared mutable legacy feature store. Plugin data ownership is Brain → memories/sources/awareness; Connections → providers/accounts; Workflows → definitions/runs/schedules; Assistant → conversations/providers/voice/desktop; Code → projects/sessions; Tools → tool servers and developer engines; Documents → documents; Compare → comparisons; Node → node and independent wallet; Agent Network → service/job state; Remote → keys/usage/relay.
+The Foundation profile is independent of old releases. There is no shared mutable legacy feature store. The optional Settings migration copies only user-selected Alpha model files and/or its encrypted wallet into Core-owned storage. It never imports plugin data or adopts the old profile. See [Alpha migration](ALPHA_MIGRATION.md). Plugin data ownership is Brain → memories/sources/awareness; Connections → providers/accounts; Workflows → definitions/runs/schedules; Assistant → conversations/providers/voice/desktop; Code → projects/sessions; Tools → tool servers and developer engines; Documents → documents; Compare → comparisons; Node → node and independent wallet; Agent Network → service/job state; Remote → keys/usage/relay.
 
 ## Public APIs and approvals
 

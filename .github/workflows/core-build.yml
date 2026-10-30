@@ -39,6 +39,12 @@ jobs:
       - name: Native public SDK check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:foundation-native
+      - name: Alpha migration desktop check (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:alpha-migration -- --synthetic-keychain
+      - name: Alpha migration desktop check (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:alpha-migration -- --synthetic-keychain
       - name: Build Foundation only (no feature engines or updater publication)
         run: npm run dist -- ${{ matrix.args }}
         env:
