@@ -175,7 +175,7 @@ function readPackageFile(file, { directory = os.tmpdir(), extract = true, allowU
     fd = fs.openSync(sourceFile, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
     const opened = fs.fstatSync(fd);
     if (!opened.isFile() || opened.dev !== sourceStat.dev || opened.ino !== sourceStat.ino || opened.size !== sourceStat.size) throw Error("Plugin package source changed before reading");
-    root = fs.mkdtempSync(path.join(parent, "kai-plugin-candidate-")); fs.chmodSync(root, 0o700); rootStat = fs.lstatSync(root);
+    root = fs.mkdtempSync(path.join(parent, "kai-plugin-candidate-")); rootStat = fs.lstatSync(root); fs.chmodSync(root, 0o700);
     const reader = new Reader(fd, MAX_BYTES), entries = [], fields = new Set(), paths = new Set();
     let manifest, publicKey, signature;
     function acceptPath(name) {

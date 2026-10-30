@@ -4,10 +4,10 @@ process.env.KAI_CHANNEL = "core";
 const path = require("node:path"), fs = require("node:fs");
 const electron = require("electron");
 const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
-const { channelConfig, configureDesktop, configureUpdater } = require("../core/lib/release-channel");
+const { channelConfig, configureDesktop } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, updater, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
+let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
 const { trustedMainDocument, protectNavigation } = require("./window-security");
 function stop() {
   if (!stopping) stopping = (async () => {
@@ -78,7 +78,6 @@ async function start() {
   const wakeCatalog = () => { if (!shuttingDown) void catalogMonitor.wake(); };
   win.on("focus", wakeCatalog); win.on("show", wakeCatalog);
   electron.powerMonitor.on("resume", wakeCatalog);
-  let updateBusy = false;
   async function setPrivacyMode(mode) {
     const state = core.gateway.network.configure({ privacyMode: mode });
     if (state.privacyMode === "local-only") pluginDownload?.abort();
@@ -184,27 +183,8 @@ async function start() {
         return choice.canceled ? null : { file: choice.filePaths[0] };
       }
       case "updates.check": {
-        if (!app.isPackaged) return { message: "Source checkout: updates come from the repository." };
-        if (!updater) { updater = process.platform === "linux" ? new (require("./appimage-updater").KaiAppImageUpdater)() : require("electron-updater").autoUpdater;
-          configureUpdater(updater, release); updater.autoDownload = false; updater.autoInstallOnAppQuit = false;
-          updater.on("error", error => console.warn("[update]", error.message)); }
-        if (updateBusy) throw Error("An update check is already in progress");
-        updateBusy = true;
-        try {
-          const r = await updater.checkForUpdates();
-          const available = r?.updateInfo?.version && require("semver").gt(r.updateInfo.version, app.getVersion());
-          if (!available) return { message: "You have the latest published version." };
-          const answer = await dialog.showMessageBox(win, { type: "question", title: "KAI Core update", message: `Download KAI Core ${r.updateInfo.version}?`, detail: "Only this Core application will be updated. Your Foundation profile stays in place.", buttons: ["Later", "Download"], defaultId: 0, cancelId: 0 });
-          if (answer.response !== 1) return { message: `Version ${r.updateInfo.version} is available.` };
-          await updater.downloadUpdate();
-          const restart = await dialog.showMessageBox(win, { type: "question", title: "Update ready", message: "Restart KAI Core to install the update?", detail: "Active work will be stopped before installation.", buttons: ["Later", "Restart"], defaultId: 0, cancelId: 0 });
-          if (restart.response === 1) {
-            shuttingDown = true;
-            try { await stop(); } catch (error) { shutdownComplete = true; app.quit(); throw error; }
-            shutdownComplete = true; require("./core-update-install").installAndQuit({ updater, app, dialog });
-          }
-          return { message: "Update downloaded. Check for updates again when you are ready to install." };
-        } finally { updateBusy = false; }
+        await electron.shell.openExternal("https://github.com/therexdev/kai-core/releases/latest");
+        return { message: "Downloads opened in your browser. Choose the installer for your computer; Core updates are installed manually." };
       }
       case "desktop.openExternal": {
         if (typeof input?.url !== "string" || input.url.length > 4000) throw Error("Invalid website address");

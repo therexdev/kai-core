@@ -249,13 +249,7 @@ $("purchase-retry").onclick = e => action(e.currentTarget, async () => {
   catch (error) { text("purchase-state", error.message); throw error; }
 });
 $("check-updates").onclick = e => action(e.currentTarget, async () => {
-  notices["update-state"].show("Checking for a published update…", { dismissible: false });
-  try { text("update-state", (await bridge.call("updates.check")).message); }
-  catch (error) {
-    const unavailable = /ERR_UPDATER_(?:NO_PUBLISHED_VERSIONS|LATEST_VERSION_NOT_FOUND|CHANNEL_FILE_NOT_FOUND)|No published versions on GitHub|please ensure a production release exists/.test(error.message);
-    text("update-state", unavailable ? "No automatic update has been published for KAI Core yet. Preview builds currently require the manual download link." : "The update check could not finish. Try again when your connection is available.");
-    if (!unavailable) throw error;
-  }
+  text("update-state", (await bridge.call("updates.check")).message);
 });
 async function refreshCreditActivity() {
   await window.KaiCredits.refresh();

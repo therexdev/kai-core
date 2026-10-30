@@ -87,6 +87,14 @@ test("cleanup refuses a replaced staging root and never deletes outside data", t
   fs.rmSync(result.root, { recursive: true }); fs.renameSync(renamed, result.root); result.dispose();
 });
 
+test("a staging permission failure still removes the newly owned directory", t => {
+  const dir = setup(t), file = put(dir, fixture()), original = fs.chmodSync;
+  fs.chmodSync = () => { throw Error("Simulated staging chmod failure"); };
+  try { assert.throws(() => readPackageFile(file, { directory: dir }), /chmod failure/); }
+  finally { fs.chmodSync = original; }
+  assert.deepEqual(fs.readdirSync(dir), ["test.kaiplugin"]);
+});
+
 test("maximum deep file paths remain bounded without retaining every directory prefix", t => {
   const dir = setup(t), files = {};
   for (let i = 0; i < MAX_FILES; i++) files[`n${String(i).padStart(5, "0")}/${"ab/".repeat(74)}file.txt`] = "";
