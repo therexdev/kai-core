@@ -25,7 +25,7 @@ const { runOperation } = require("../../core/lib/koinos/operation-lifetime");
 function create(ctx, { createEngine = require("../../core/lib/koinos-node").createKoinosNode, GuardedStore = require("./koinos-node").GuardedStore } = {}) {
   let closed=false, engine=null, serial=0, mutation=false, services=null, signingLease=null, disposing=null, cleaning=false, stoppingNetwork=null;
   const events=[], pending=new Set(), stores=[];
-  const root=path.join(fs.realpathSync(ctx.dataDir),"koinos-node"); safePath(root);
+  const dataDir=fs.realpathSync(ctx.dataDir),root=path.join(dataDir,"koinos-node"); safePath(root);
   const assertActive=signal=>{ signal?.throwIfAborted(); if(closed)throw Error("Koinos Node is closing"); for(const store of stores)store.assert(); };
   // Original Node opt-in is independent of AI privacy. Installed/enabled
   // publisher scopes and explicit native reviews authorize these chain actions;
@@ -63,7 +63,7 @@ function create(ctx, { createEngine = require("../../core/lib/koinos-node").crea
       const file=path.join(root,name);safePath(file,true);
       if(fs.existsSync(file)){let value;try{value=JSON.parse(fs.readFileSync(file,"utf8"));}catch{throw Error("Saved Node data is unreadable: "+name+". The original file was preserved.");}if(!plain(value))throw Error("Saved Node data needs recovery: "+name);}
     }
-    engine=createEngine({dataDir:ctx.dataDir,wallet:guardedWallet(),appVersion:require("../../package.json").version,onEvent:event,storeFactory,networkAllowed,
+    engine=createEngine({dataDir,wallet:guardedWallet(),appVersion:require("../../package.json").version,onEvent:event,storeFactory,networkAllowed,
       runBackground:(_name,run)=>track(spend(run)),
       configureServices(value){
         services=value;

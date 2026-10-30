@@ -15,15 +15,22 @@ function object(value, fields = []) {
   return structuredClone(value);
 }
 function create(ctx) {
+  // Core approves this profile root. Resolve OS ancestor aliases (for example
+  // macOS /var -> /private/var) once; files below it still get every guard.
+  const profilePath = path.resolve(ctx.dataDir), profile = fs.lstatSync(profilePath);
+  if (!profile.isDirectory() || profile.isSymbolicLink()) throw Error("Settings need recovery; existing Remote Access data was preserved");
+  const dataDir = fs.realpathSync(profilePath);
   let closed = false, busy = false, tunnel = null, stopping = null, privacyTimer = null, clipboardTimer = null, copiedKey = null, sessionRevision = 0;
   let legacy = null;
   const original = () => legacy ||= require("./remote-original").create(ctx, { checkSettings, active });
-  let settingsExisted = fs.existsSync(path.join(ctx.dataDir, "settings.json"));
+  let settingsExisted = fs.existsSync(path.join(dataDir, "settings.json"));
   const mode = () => ctx.core.gateway.network.status().privacyMode;
   function active(signal) { signal?.throwIfAborted(); if (closed) throw Error("Remote Access is closed"); }
   function checkSettings() {
-    const file = path.join(ctx.dataDir, "settings.json");
-    const ancestors = []; for (let candidate = path.resolve(ctx.dataDir); ; candidate = path.dirname(candidate)) { ancestors.push(candidate); if (path.dirname(candidate) === candidate) break; }
+    const current = fs.lstatSync(dataDir);
+    if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== profile.dev || current.ino !== profile.ino || fs.realpathSync(profilePath) !== dataDir) throw Error("The profile directory changed; existing Remote Access data was preserved");
+    const file = path.join(dataDir, "settings.json");
+    const ancestors = []; for (let candidate = dataDir; ; candidate = path.dirname(candidate)) { ancestors.push(candidate); if (path.dirname(candidate) === candidate) break; }
     for (const candidate of [...ancestors, file]) {
       let st; try { st = fs.lstatSync(candidate); } catch (error) { if (error.code === "ENOENT") continue; throw error; }
       if (st.isSymbolicLink() || (candidate === file && (!st.isFile() || st.nlink !== 1 || st.size > 8 * 1024 * 1024))) throw Error("Settings need recovery; existing Remote Access data was preserved");

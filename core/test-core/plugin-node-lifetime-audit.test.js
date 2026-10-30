@@ -172,7 +172,7 @@ test("the actual Node broker gives configured rewards and supervision fresh leas
   const wallet = { status: () => ({ address: "synthetic-local-wallet", exists: true, unlocked: true }), signer: { signHash: async () => { signed++; return "synthetic-signature"; } } };
   const service = full.create({ dataDir: dir, core: { account: { wallet }, gateway: { network: { status: () => ({ privacyMode: "local-only" }) } } }, electron: {}, confirm: async () => true,
     withWalletSpend: async run => { spending++; return run(); } }, { createEngine(options) {
-    const nodeMgr = { intentPath: path.join(dir, "koinos-node", "node-supervisor.json"), _intent: {}, ensureFiles() {}, dirs: () => ({ root: path.join(dir, "node") }),
+    const nodeMgr = { intentPath: path.join(options.dataDir, "koinos-node", "node-supervisor.json"), _intent: {}, ensureFiles() {}, dirs: () => ({ root: path.join(options.dataDir, "node") }),
       async _watchTick() { captureOperation()(); supervised++; } };
     const rewards = { stop() {}, start() {}, async tick() { return options.wallet.signer.signHash("synthetic-hash"); } };
     configured = { settings, state: {}, chain: { network: () => ({ id: "mainnet" }), provider: () => ({}) }, nodeMgr, setup: {}, rewards, bridge: { status: () => null }, routeC: { status: () => null } };

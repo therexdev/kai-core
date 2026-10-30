@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "KAI Core desktop: shared models and identity with isolated optional plugins",
   "license": "MIT",

@@ -101,3 +101,22 @@ test("stored Vault and return summaries are shown in native review and pinned ag
 test("a failed Docker down remains required and disabling can be retried safely",async()=>{
  const f=actualEngineFixture();let attempts=0;try{await f.service.call("node.read",{channel:"app:info"});const m=f.services.nodeMgr;m._desiredRunning=true;m.stop=async()=>{attempts++;m._desiredRunning=false;m._commandPending=Promise.resolve();return{stopping:true};};m.currentOp=()=>({name:"stop",code:attempts===1?1:0,error:attempts===1?"synthetic Docker unavailable":null});await assert.rejects(f.service.dispose({reason:"disable"}),/synthetic Docker unavailable/);assert.equal(f.stopped,0);await f.service.dispose({reason:"disable"});assert.equal(attempts,2);assert.equal(f.stopped,1);}finally{await f.cleanup();}
 });
+
+function aliasedProfile(t) {
+ const base=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"kai-node-profile-alias-"))),actual=path.join(base,"actual"),alias=path.join(base,"system-alias"),profile=path.join(actual,"profile");fs.mkdirSync(profile,{recursive:true});
+ t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
+ try{fs.symlinkSync(actual,alias,process.platform==="win32"?"junction":"dir");}catch(e){if(e.code==="EPERM"){t.skip("Creating a profile alias requires unavailable OS privileges");return null;}throw e;}
+ return{base,profile,aliased:path.join(alias,"profile")};
+}
+test("the original Node engine receives the canonical trusted profile when an OS ancestor is an alias",async t=>{
+ const f=aliasedProfile(t);if(!f)return;const root=path.join(f.profile,"koinos-node");fs.mkdirSync(root);const settings=path.join(root,"settings.json"),bytes=Buffer.from(JSON.stringify({network:"mainnet",originalMarker:"preserve exactly"}));fs.writeFileSync(settings,bytes);let received;
+ const service=full.create({dataDir:f.aliased,core:{account:{wallet:{status:()=>({exists:true,address:"synthetic"})}}},electron:{}},{createEngine:options=>{received=options.dataDir;return require("../lib/koinos-node").createKoinosNode({...options,configureServices:value=>{options.configureServices(value);value.nodeMgr.supervise=()=>{};}});}});
+ try{const info=await service.call("node.read",{channel:"app:info"});assert.equal(received,f.profile);assert.equal(info.userData,root);assert.equal(info.settings.originalMarker,"preserve exactly");assert.deepEqual(fs.readFileSync(settings),bytes);}finally{await service.dispose();}
+});
+for(const kind of ["descendant directory","leaf symlink","leaf hardlink"])test(`trusted profile aliases still reject a ${kind} inside Node storage`,async t=>{
+ const f=aliasedProfile(t);if(!f)return;const outside=path.join(f.base,"outside"),root=path.join(f.profile,"koinos-node");fs.mkdirSync(outside);const original=path.join(outside,"settings.json"),bytes=Buffer.from('{"network":"mainnet","original":"untouched"}');fs.writeFileSync(original,bytes);
+ if(kind==="descendant directory")fs.symlinkSync(outside,root,process.platform==="win32"?"junction":"dir");else{fs.mkdirSync(root);if(kind==="leaf hardlink")fs.linkSync(original,path.join(root,"settings.json"));else{try{fs.symlinkSync(original,path.join(root,"settings.json"),"file");}catch(e){if(e.code==="EPERM"){t.skip("File symlinks require unavailable OS privileges");return;}throw e;}}}
+ const ctx={dataDir:f.aliased,core:{account:{wallet:{status:()=>({exists:true,address:"synthetic"})}}},electron:{}};
+ if(kind==="descendant directory")assert.throws(()=>full.create(ctx),/unsafe/);else{const service=full.create(ctx,{createEngine:()=>assert.fail("Unsafe storage reached the engine")});try{await assert.rejects(service.call("node.read",{channel:"app:info"}),/unsafe/);}finally{await service.dispose();}}
+ assert.deepEqual(fs.readFileSync(original),bytes);
+});

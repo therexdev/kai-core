@@ -1,6 +1,6 @@
 # KAI Core
 
-KAI Core is the plugin-based successor to Koinos AI. The **Core 0.5.0 / first-party plugins 0.2.x** source restores the original feature workspaces and engines in separately installed windows. It replaces the reduced 0.1.1 plugin interfaces.
+KAI Core is the plugin-based successor to Koinos AI. The **Core 0.5.1 / first-party plugins 0.2.x** source restores the original feature workspaces and engines in separately installed windows. It replaces the reduced 0.1.1 plugin interfaces.
 
 The reference is `therexdev/kaiapp` Test commit [`34d17faa0526213b8fc0ac7a65aa7f2c186c6547`](https://github.com/therexdev/kaiapp/commit/34d17faa0526213b8fc0ac7a65aa7f2c186c6547). This repository starts from that source snapshot; earlier Git history remains in `kaiapp`. Source version numbers and passing development tests do not establish that a corresponding installer has been published or verified on every platform.
 
