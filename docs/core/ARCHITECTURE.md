@@ -2,6 +2,11 @@
 
 `electron/core-main.js` owns native UI, the shared-profile singleton, migration
 preflight, verified plugin installation, native payment review and shutdown.
+`electron/core-tray.js` keeps the main window hidden on Close when a tray icon is
+available. This preserves the provider and shared-profile lock. Explicit Quit,
+OS session end, and updater restart use the awaited native teardown; repeated
+quit events cannot bypass pending cleanup. If the tray cannot be created, Close
+quits normally. Tray assets are also unpacked for Linux desktop hosts.
 `core/server.js` with `extensions:false` supplies models, local inference/API,
 wallet/account services, network policy and the existing compute provider backend.
 Legacy automatic task/node/Brain behavior is disabled. Official feature adapters

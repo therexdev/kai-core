@@ -7,21 +7,35 @@ const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 const { channelConfig, configureDesktop, configureUpdater } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, features, payments, coreChat, updater, report, pluginDownload, shuttingDown = false, installBusy = false;
+let core, win, pluginHost, features, payments, coreChat, updater, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
 const { trustedMainDocument, protectNavigation } = require("./window-security");
-async function stop() { pluginDownload?.abort(); await coreChat?.dispose(); await pluginHost?.closeAll(); await features?.dispose(); await payments?.dispose(); await core?.stop(); }
+function stop() {
+  if (!stopping) stopping = (async () => {
+    pluginDownload?.abort(); const errors = [];
+    // Finish every cleanup even if an earlier service cannot stop normally.
+    for (const dispose of [() => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
+      try { await dispose(); } catch (error) { errors.push(error); }
+    }
+    desktopTray?.dispose();
+    if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join("; "));
+  })();
+  return stopping;
+}
 app.on("before-quit", event => {
-  if (!core || shuttingDown) return;
-  event.preventDefault(); shuttingDown = true;
-  stop().catch(error => console.error("[shutdown]", error.message)).finally(() => app.quit());
+  if (!core || shutdownComplete) return;
+  event.preventDefault();
+  if (shuttingDown) return;
+  shuttingDown = true;
+  stop().catch(error => console.error("[shutdown]", error.message)).finally(() => { shutdownComplete = true; app.quit(); });
 });
 app.on("window-all-closed", () => app.quit());
+app.on("will-quit", () => desktopTray?.dispose());
 if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => dialog.showMessageBox({ type: "info", title: "Close the other KAI app first", message: "Another KAI application is already running.",
     detail: "KAI Core, Alpha and Test use the same wallet, models and saved data. Fully quit the running app from its tray menu, then open KAI Core again.", buttons: ["OK"] })).finally(() => app.quit());
 } else {
-  app.on("second-instance", () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
-  app.whenReady().then(start).catch(async error => { dialog.showErrorBox("KAI Core could not start", error.message); shuttingDown = true; await stop().catch(() => {}); app.quit(); });
+  app.on("second-instance", () => desktopTray?.show());
+  app.whenReady().then(start).catch(async error => { if (!shuttingDown) dialog.showErrorBox("KAI Core could not start", error.message); shuttingDown = true; await stop().catch(() => {}); shutdownComplete = true; app.quit(); });
 }
 async function start() {
   const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "core");
@@ -34,8 +48,11 @@ async function start() {
   core.gateway.staticAssets.set("/credit-account.js", path.join(__dirname, "../ui/credit-account.js"));
   core.gateway.staticAssets.set("/reward-summary.js", path.join(__dirname, "../ui/reward-summary.js"));
   const port = await core.start(), origin = `http://127.0.0.1:${port}`;
+  if (shuttingDown) return;
   win = new BrowserWindow({ width: 1200, height: 820, minWidth: 800, minHeight: 600, title: "KAI Core", backgroundColor: "#f4f7fd", autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, "core-preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  desktopTray = require("./core-tray").createCoreTray({ app, win, Tray: electron.Tray, Menu: electron.Menu, nativeImage: electron.nativeImage,
+    iconDirectory: path.join(__dirname, "../build"), isQuitting: () => shuttingDown });
   protectNavigation(win.webContents, origin, () => {});
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   const manager = new (require("../core/lib/plugins/manager").PluginManager)(dataDir);
@@ -73,7 +90,7 @@ async function start() {
     switch (method) {
       case "chat.local": return coreChat.send(input);
       case "chat.stop": return coreChat.stop();
-      case "status": return { version: app.getVersion(), profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
+      case "status": return { version: app.getVersion(), desktop: { trayAvailable: desktopTray.available }, profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
         models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null, plugins: manager.list(), catalog: catalog(), registry: registry.status() };
       case "plugins.registry.refresh": {
         if (registryBusy || installBusy) throw Error("Finish the current plugin operation first");
@@ -147,7 +164,11 @@ async function start() {
           if (answer.response !== 1) return { message: `Version ${r.updateInfo.version} is available.` };
           await updater.downloadUpdate();
           const restart = await dialog.showMessageBox(win, { type: "question", title: "Update ready", message: "Restart KAI Core to install the update?", detail: "Active work will be stopped before installation.", buttons: ["Later", "Restart"], defaultId: 0, cancelId: 0 });
-          if (restart.response === 1) { await stop(); shuttingDown = true; updater.quitAndInstall(); }
+          if (restart.response === 1) {
+            shuttingDown = true;
+            try { await stop(); } catch (error) { shutdownComplete = true; app.quit(); throw error; }
+            shutdownComplete = true; require("./core-update-install").installAndQuit({ updater, app, dialog });
+          }
           return { message: "Update downloaded. Check for updates again when you are ready to install." };
         } finally { updateBusy = false; }
       }

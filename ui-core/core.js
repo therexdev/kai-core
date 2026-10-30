@@ -41,6 +41,7 @@ async function refresh() {
     snapshot = await bridge.call("status"); const s = snapshot;
     applyPrivacy(s.network.privacyMode);
     text("version", `v${s.version}`);
+    text("closing-window-detail", s.desktop?.trayAvailable ? "Closing the window keeps KAI and earning running in the system tray. Click the tray icon to reopen it, or choose Quit KAI Core from its menu to stop the app." : "A system tray icon is not available on this desktop. Closing the window will quit KAI Core.");
     const address = s.wallet.address;
     text("wallet-state", address ? s.wallet.unlocked ? "Unlocked on this computer" : "Saved wallet · locked" : "Create or restore your wallet");
     text("wallet-address", address || "No wallet created"); text("wallet-detail", s.wallet.unlocked ? "Wallet unlocked. Plugins never receive its private key." : "Unlock to authorize wallet actions.");
@@ -123,7 +124,15 @@ $("purchase-retry").onclick = e => action(e.currentTarget, async () => {
   try { const r = await bridge.credit("credit-purchase-retry"); text("purchase-state", r.detail || r.state); await window.KaiCredits.refresh(); }
   catch (error) { text("purchase-state", error.message); throw error; }
 });
-$("check-updates").onclick = e => action(e.currentTarget, async () => text("update-state", (await bridge.call("updates.check")).message));
+$("check-updates").onclick = e => action(e.currentTarget, async () => {
+  text("update-state", "Checking for a published update…");
+  try { text("update-state", (await bridge.call("updates.check")).message); }
+  catch (error) {
+    const unavailable = /ERR_UPDATER_(?:NO_PUBLISHED_VERSIONS|LATEST_VERSION_NOT_FOUND|CHANNEL_FILE_NOT_FOUND)|No published versions on GitHub|please ensure a production release exists/.test(error.message);
+    text("update-state", unavailable ? "No automatic update has been published for KAI Core yet. Preview builds currently require the manual download link." : "The update check could not finish. Try again when your connection is available.");
+    if (!unavailable) throw error;
+  }
+});
 async function refreshCreditActivity() {
   await window.KaiCredits.refresh();
   if (!bridge || !window.KaiCreditPresentation(creditState || {}).usd || knownPrivacy === "local-only") return;

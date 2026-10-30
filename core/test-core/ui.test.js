@@ -140,3 +140,17 @@ test("cancelled saved payments are shown without erasing confirmed server purcha
   assert.match(f.$("credit-activity").innerHTML, /Added to balance/);
   assert.match(f.$("credit-activity").innerHTML, /\+1,000/);
 });
+
+test("missing release metadata explains manual previews instead of claiming the app is current", async () => {
+  const f = fixture({ call: async method => { if (method === "updates.check") throw Error("ERR_UPDATER_LATEST_VERSION_NOT_FOUND: please ensure a production release exists"); } });
+  await flush(); await f.$("check-updates").onclick({ currentTarget: f.$("check-updates") });
+  assert.match(f.$("update-state").textContent, /No automatic update has been published/);
+  assert.match(f.$("update-state").textContent, /manual download/);
+  assert.equal(f.$("check-updates").disabled, false);
+});
+test("failed update checks leave a retryable explanation", async () => {
+  const f = fixture({ call: async method => { if (method === "updates.check") throw Error("Connection unavailable"); } });
+  await flush(); await f.$("check-updates").onclick({ currentTarget: f.$("check-updates") });
+  assert.match(f.$("update-state").textContent, /could not finish/);
+  assert.equal(f.$("check-updates").disabled, false);
+});

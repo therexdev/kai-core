@@ -8,6 +8,40 @@ const path = require("node:path");
 const { _electron: electron } = require("playwright-core");
 const { WalletService } = require("../../core/lib/wallet");
 
+async function windowState(application) {
+  return application.evaluate(() => {
+    const window = global.__smokeMainWindow, destroyed = !window || window.isDestroyed();
+    return { destroyed, visible: !destroyed && window.isVisible(), id: destroyed ? null : window.id, lifecycle: { ...global.__smokeLifecycle } };
+  });
+}
+async function waitForWindow(application, predicate, description) {
+  const deadline = Date.now() + 10000; let state;
+  do {
+    state = await windowState(application); if (predicate(state)) return state;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  } while (Date.now() < deadline);
+  throw Error(`${description}: ${JSON.stringify(state)}`);
+}
+async function exitThrough(application, action) {
+  const child = application.process(); let timer, listener;
+  const exited = new Promise((resolve, reject) => {
+    listener = (code, signal) => resolve({ code, signal }); child.once("exit", listener);
+    timer = setTimeout(() => reject(Error(`Desktop did not exit after ${action}`)), 20000);
+  });
+  try {
+    await application.evaluate(({ app }, action) => {
+      if (action === "tray-quit") global.__smokeShutdownDelay = 250;
+      setTimeout(() => {
+        if (action === "tray-quit") {
+          global.__smokeTrayMenu.find(item => item.label === "Quit KAI Core").click();
+          setTimeout(() => app.quit(), 75); // A second Quit must not bypass asynchronous teardown.
+        } else global.__smokeMainWindow.close();
+      }, 0);
+    }, action);
+    return await exited;
+  } finally { clearTimeout(timer); child.removeListener("exit", listener); }
+}
+
 async function main() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kai-desktop-smoke-")));
   const appData = path.join(root, "app-data"), dataDir = path.join(appData, "Koinos AI", "core");
@@ -43,7 +77,8 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
   if (process.platform === "linux" && process.getuid?.() === 0) args.push("--no-sandbox");
   if (process.platform === "linux" && !process.env.DISPLAY) args.push("--ozone-platform=headless");
   args.push(root);
-  const env = { ...process.env, KAI_CORE_DATA: dataDir, KAI_CORE_PORT: "0", KAI_CHANNEL: "core" };
+  const lifecycleFile = path.join(root, "lifecycle.json");
+  const env = { ...process.env, KAI_CORE_DATA: dataDir, KAI_CORE_PORT: "0", KAI_CHANNEL: "core", KAI_SMOKE_LIFECYCLE_FILE: lifecycleFile, KAI_SMOKE_TRAY_MODE: "auto" };
   delete env.ELECTRON_RUN_AS_NODE; delete env.KAI_CORE_TOKEN; delete env.KAI_SESSION_SECRET;
   let application, output = "";
   const pageErrors = [];
@@ -68,6 +103,7 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
     assert.equal(await page.locator("#notice.error").count(), 0);
     assert.equal(await application.evaluate(({ app }) => app.getName()), "Koinos AI");
     assert.equal(await application.evaluate(({ app }) => app.getPath("userData")), path.join(appData, "Koinos AI"));
+    assert.equal(status.desktop?.trayAvailable, true, `tray initialization failed: ${JSON.stringify(await windowState(application))}`);
     assert.equal(await page.locator('[data-panel="chat"]').isVisible(), true, "simple Chat is the default page");
     assert.equal(await page.locator('[data-page="credits"]').textContent(), "Credits and Usage");
     assert.equal(await page.locator('[data-page="wallet"]').textContent(), "Wallet");
@@ -207,14 +243,64 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `${tab} overflowed the compact viewport`);
     }
     await page.setViewportSize({ width: 1200, height: 820 });
+    await open("earning"); await page.locator("#earning-toggle").click();
+    await page.waitForFunction(() => document.getElementById("provider-label")?.textContent === "ONLINE");
+    const beforeHide = await windowState(application), trayMode = beforeHide.lifecycle.trayMode;
+    assert.ok(["native", "synthetic"].includes(trayMode));
+    assert.equal(beforeHide.lifecycle.providerEnabled, true);
+    await application.evaluate(() => global.__smokeMainWindow.close());
+    const hidden = await waitForWindow(application, state => !state.destroyed && !state.visible && state.lifecycle.providerTicks > beforeHide.lifecycle.providerTicks, "main window did not hide while the provider fixture continued running");
+    assert.equal(hidden.id, beforeHide.id); assert.equal(hidden.lifecycle.providerEnabled, true);
+    assert.equal(hidden.lifecycle.coreStops, 0); assert.equal(hidden.lifecycle.paymentDisposals, 0); assert.equal(hidden.lifecycle.beforeQuit, 0);
+    assert.equal(application.process().exitCode, null);
+    const gatewayWhileHidden = await fetch(hidden.lifecycle.gatewayOrigin + "/", { signal: AbortSignal.timeout(5000) });
+    assert.equal(gatewayWhileHidden.status, 200); assert.match(await gatewayWhileHidden.text(), /KAI Core/);
+    await application.evaluate(() => global.__smokeTrayMenu.find(item => item.label === "Open KAI Core").click());
+    const reopened = await waitForWindow(application, state => state.visible, "tray Open did not restore the main window");
+    assert.equal(reopened.id, beforeHide.id); assert.equal(reopened.lifecycle.providerEnabled, true);
+    await application.evaluate(() => global.__smokeMainWindow.close());
+    await waitForWindow(application, state => !state.destroyed && !state.visible, "second close did not hide the main window");
+    await application.evaluate(({ app }) => app.emit("second-instance", {}, [], process.cwd()));
+    assert.equal((await waitForWindow(application, state => state.visible, "second-instance did not restore the main window")).id, beforeHide.id);
+    await application.evaluate(() => global.__smokeMainWindow.close());
+    await waitForWindow(application, state => !state.destroyed && !state.visible, "third close did not hide the main window");
     assert.deepEqual(pageErrors, [], "renderer raised an uncaught error");
     assert.deepEqual(await application.evaluate(() => global.__smokeExternalCalls), [], "synthetic desktop attempted an external fetch");
+    assert.deepEqual(await exitThrough(application, "tray-quit"), { code: 0, signal: null }, "tray Quit should exit successfully");
+    const explicitQuit = JSON.parse(fs.readFileSync(lifecycleFile, "utf8"));
+    assert.equal(explicitQuit.coreStops, 1); assert.equal(explicitQuit.coreStopped, true);
+    assert.equal(explicitQuit.paymentDisposals, 1); assert.equal(explicitQuit.paymentsDisposed, true); assert.equal(explicitQuit.providerEnabled, false);
+    assert.equal(explicitQuit.repeatedQuitDuringCoreStop, true, "the repeated Quit must occur while teardown is pending");
+    assert.equal(explicitQuit.trayDestroyed, true); assert.equal(explicitQuit.willQuit, true); assert.equal(explicitQuit.quit, true);
+    await assert.rejects(fetch(explicitQuit.gatewayOrigin + "/", { signal: AbortSignal.timeout(3000) }), "gateway must stop after explicit Quit");
+    // Launch the same synthetic profile with a deliberate native Tray failure.
+    // Normal close must still exit instead of stranding a hidden application.
+    const fallbackSettings = JSON.parse(fs.readFileSync(path.join(dataDir, "settings.json"), "utf8"));
+    fallbackSettings.network.privacyMode = "local-only";
+    fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify(fallbackSettings));
+    application = await electron.launch({ executablePath: require("electron"), args, env: { ...env, KAI_SMOKE_TRAY_MODE: "unavailable" }, timeout: 30000 });
+    output = "";
+    application.process().stdout?.on("data", chunk => { output = (output + chunk).slice(-10000); });
+    application.process().stderr?.on("data", chunk => { output = (output + chunk).slice(-10000); });
+    const fallbackPage = await application.firstWindow({ timeout: 30000 });
+    fallbackPage.on("pageerror", error => pageErrors.push(error.message));
+    await fallbackPage.waitForFunction(() => window.kaiCore && document.getElementById("wallet-address")?.textContent !== "No wallet created", null, { timeout: 15000 });
+    const fallbackStatus = await fallbackPage.evaluate(() => window.kaiCore.call("status"));
+    assert.equal(fallbackStatus.desktop?.trayAvailable, false);
+    assert.equal((await windowState(application)).lifecycle.trayMode, "unavailable");
+    assert.deepEqual(await application.evaluate(() => global.__smokeExternalCalls), []);
+    assert.deepEqual(pageErrors, []);
+    assert.deepEqual(await exitThrough(application, "window-close"), { code: 0, signal: null }, "closing without a tray should exit successfully");
+    const fallbackQuit = JSON.parse(fs.readFileSync(lifecycleFile, "utf8"));
+    assert.equal(fallbackQuit.coreStops, 1); assert.equal(fallbackQuit.coreStopped, true);
+    assert.equal(fallbackQuit.paymentDisposals, 1); assert.equal(fallbackQuit.paymentsDisposed, true); assert.equal(fallbackQuit.quit, true);
+    await assert.rejects(fetch(fallbackQuit.gatewayOrigin + "/", { signal: AbortSignal.timeout(3000) }), "gateway must stop after close without a tray");
     assert.equal(fs.readFileSync(path.join(dataDir, "wallet", "wallet.json"), "utf8"), walletBefore, "existing wallet was modified");
     assert.equal(fs.readFileSync(path.join(dataDir, "models", "preserved-model-canary.gguf"), "utf8"), "SYNTHETIC-NOT-A-REAL-MODEL");
     assert.equal(fs.readFileSync(path.join(dataDir, "companion-hub.json"), "utf8"), '{"synthetic":"preserved-workflows-and-brain"}');
     assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, "settings.json"), "utf8")).fixture, "preserve-me");
     assert.ok(fs.existsSync(path.join(status.profile.backup, "manifest.json")), "configuration backup was not created");
-    console.log(`PASS: real Core desktop starts on a synthetic existing profile; all nine sections, marketplace presentation, separate credits/purchase flow, local chat/cancellation, explicit network recovery/cancellation/delivery acknowledgements and provider/network fixtures work; legacy styling and compact layouts checked; wallet and feature data preserved; ${process.env.KAI_SMOKE_SYNTHETIC_LOCK === "1" ? "synthetic fixture lock (native locking not exercised); " : ""}no renderer errors or external fetches. Screenshot: ${screenshot}`);
+    console.log(`PASS: real Core desktop starts on a synthetic existing profile; all nine sections, marketplace presentation, separate credits/purchase flow, local chat/cancellation, explicit network recovery/cancellation/delivery acknowledgements and provider/network fixtures work; legacy styling and compact layouts checked; close-to-tray preserves the gateway/provider fixture, tray and second-instance reopen, repeated Quit awaits teardown, and unavailable-tray close exits; ${trayMode} Tray (OS icon visibility not asserted); wallet and feature data preserved; ${process.env.KAI_SMOKE_SYNTHETIC_LOCK === "1" ? "synthetic fixture lock (native locking not exercised); " : ""}no renderer errors or external fetches. Screenshot: ${screenshot}`);
   } catch (error) {
     if (output) console.error(output);
     throw error;
