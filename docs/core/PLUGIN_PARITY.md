@@ -22,6 +22,8 @@ The original full workflow node library includes agents and selected read tools,
 
 Core itself retains simple chat, model/runtime management, the original wallet presentation, credits/purchases/usage, Earn KAI/KOIN Drop information, network/privacy controls and account linking. Installing a feature does not duplicate the wallet, model files or encrypted account identity. Other feature screens open their separately installed app pages under **Apps**; an absent plugin must be installed before that editor can open.
 
+Remote Access 0.2.1 deliberately removes the original Optional sections panel and its Node, Developer tools and Code controls. Those capabilities remain in their own apps, accessible through Core’s Apps sidebar and Plugins manager. This requested change supersedes that part of the original-screen parity baseline.
+
 ## Background and privacy
 
 | Feature/lifetime | Switch page / close Core to tray | Core startup with verified enabled package | Disable/remove or Core quit |

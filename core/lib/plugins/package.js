@@ -5,7 +5,14 @@ const BINARY = /\.(png|jpg|jpeg|webp|gif|wav|ogg|mp3|woff2?)$/i;
 const contracts = require("./contracts.json");
 const firstParty = require("./first-party.json").plugins;
 const PUBLIC_PERMISSIONS = ["models.read", "inference.local", "storage.read", "storage.write"];
-const PERMISSIONS = Object.freeze([...new Set([...PUBLIC_PERMISSIONS, ...Object.values(contracts).flatMap(s => Object.values(s.permissions))])]);
+// Historical signed packages remain readable/rollable back, but these grants
+// have no callable method in the host. New releases cannot request them.
+const RETIRED_PERMISSIONS = Object.freeze({ "kai.remote-access": { through: "0.2.0", permissions: ["remote-access.features"] } });
+const PERMISSIONS = Object.freeze([...new Set([...PUBLIC_PERMISSIONS, ...Object.values(contracts).flatMap(s => Object.values(s.permissions)), ...Object.values(RETIRED_PERMISSIONS).flatMap(s => s.permissions)])]);
+function compatiblePermissions(manifest, spec) {
+  const retired = RETIRED_PERMISSIONS[manifest.id];
+  return [...Object.values(spec.permissions), ...(retired && require("./registry-format").compareVersions(manifest.version, retired.through) <= 0 ? retired.permissions : [])];
+}
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
@@ -44,7 +51,7 @@ function verifyPackage(input) {
   const privatePermissions = m.permissions.filter(p => !PUBLIC_PERMISSIONS.includes(p));
   if (privatePermissions.length) {
     const spec = contracts[m.id];
-    if (m.apiVersion !== 2 || !owner || owner.fingerprint !== fingerprint || !spec || privatePermissions.some(p => !Object.values(spec.permissions).includes(p))) throw Error("Private feature permissions require the matching verified KAI publisher");
+    if (m.apiVersion !== 2 || !owner || owner.fingerprint !== fingerprint || !spec || privatePermissions.some(p => !compatiblePermissions(m, spec).includes(p))) throw Error("Private feature permissions require the matching verified KAI publisher");
   }
   return { package: pkg, fingerprint, manifest: m };
 }

@@ -1,6 +1,6 @@
 # Core architecture and release gates
 
-This describes Core 0.6.0 and the restored 0.2.x first-party plugin source. The reference application is `therexdev/kaiapp` Test commit `34d17faa0526213b8fc0ac7a65aa7f2c186c6547`.
+This describes Core 0.6.1 and the restored 0.2.x first-party plugin source. The reference application is `therexdev/kaiapp` Test commit `34d17faa0526213b8fc0ac7a65aa7f2c186c6547`.
 
 ## Runtime ownership
 

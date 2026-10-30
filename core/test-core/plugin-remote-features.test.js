@@ -1,15 +1,69 @@
 "use strict";
-const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),os=require("node:os"),path=require("node:path");
-const publishers=require("../lib/plugins/first-party.json").plugins;
-function fixture(t){const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),"kai-remote-features-")),reviews=[],calls=[],opened=[],installed=new Set(["kai.code","kai.tools","kai.koinos-node"]);let approved=true,codeEnabled=false,devEnabled=false;
- const ctx={dataDir,core:{settings:{all:()=>({}),get:(_key,fallback)=>fallback},models:{aliases:()=>[]},gateway:{code:{switch:{status:()=>({enabled:codeEnabled})}},dev:{status:()=>({enabled:devEnabled})}}},legacyEnsure:async()=>{},legacyRelease:async()=>{},confirm:async(title,detail)=>{reviews.push({title,detail});return approved;},openCoreView:async view=>{opened.push(view);},loadInstalledPlugin:id=>installed.has(id)?{manifest:{id},fingerprint:publishers.find(p=>p.id===id).fingerprint}:null,
- legacyRequest:async(feature,input)=>{calls.push({feature,input});if(input.path==="/core/code-switch"){if(input.method==="POST")codeEnabled=input.body.enabled;return{ok:true,status:200,body:{ok:true,enabled:codeEnabled}};}if(input.path==="/core/dev"){if(input.method==="POST")devEnabled=input.body.enabled;return{ok:true,status:200,body:{ok:true,enabled:devEnabled}};}throw Error("Unexpected target route");}};
- const code=require("../../electron/plugin-services/code-workspace").create(ctx),tools=require("../../electron/plugin-services/tools").create(ctx);
- ctx.featureCall=(id,method,input,signal)=>{assert.ok(installed.has(id));return id==="kai.code"?code.call(method,input,signal):id==="kai.tools"?tools.call(method,input,signal):Promise.reject(Error("Unexpected native feature"));};
- const service=require("../../electron/plugin-services/remote-original").create(ctx,{checkSettings(){},active:signal=>signal?.throwIfAborted()});t.after(async()=>{await service.dispose();await code.dispose();await tools.dispose();fs.rmSync(dataDir,{recursive:true,force:true});});
- return{ctx,service,reviews,calls,opened,installed,approve:value=>{approved=value;},call:(action,feature,enabled)=>service.features({action,...(feature===undefined?{}:{feature}),...(enabled===undefined?{}:{enabled})})};}
-test("Remote feature switches read preserved disabled status and enable through real target native brokers",async t=>{const f=fixture(t),before=await f.call("status");assert.equal(before.features.find(row=>row.name==="code").enabled,false);assert.equal(before.features.find(row=>row.name==="developer").enabled,false);assert.equal(f.reviews.length,0);await f.call("toggle","code",true);assert.equal(f.reviews[0].title,"Enable coding workspace?");assert.equal((await f.call("status")).features.find(row=>row.name==="code").enabled,true);await f.call("open","code");assert.deepEqual(f.opened,["code"]);await f.call("toggle","developer",true);assert.equal(f.reviews[1].title,"Enable Developer tools?");await f.call("open","developer");assert.equal(f.opened.at(-1),"devtools");});
-test("declined Code review leaves disabled state intact and target arbitrary operations are unavailable",async t=>{const f=fixture(t);f.approve(false);await assert.rejects(f.call("toggle","code",true),/Cancelled/);assert.equal((await f.call("status")).features.find(row=>row.name==="code").enabled,false);for(const input of [{action:"toggle",feature:"code",enabled:"true"},{action:"status",path:"/core/wallet"},{action:"toggle",feature:"__proto__",enabled:true},{action:"open",feature:"wallet"}])await assert.rejects(f.service.features(input),/Invalid|Unknown|exact|status/);});
-test("missing or disabled target opens Plugins without installing or configuring it",async t=>{const f=fixture(t);f.installed.delete("kai.code");await f.call("toggle","code",true);assert.deepEqual(f.opened,["plugins"]);assert.equal(f.calls.some(row=>row.feature==="code"),false);assert.equal(f.reviews.length,0);});
-test("Node visibility action never starts or stops the Node",async t=>{const f=fixture(t);await f.call("toggle","node",false);assert.equal(f.opened[0],"plugins");assert.equal(f.calls.some(row=>/node|koinos/.test(row.feature+row.input.path)),false);await f.call("open","node");assert.equal(f.opened.at(-1),"koinos");});
-test("unverified package cannot use optional workspace broker",async t=>{const f=fixture(t);f.ctx.loadInstalledPlugin=id=>({manifest:{id},fingerprint:"not-the-official-publisher"});const status=await f.call("status");assert.ok(status.features.every(row=>!row.available));await assert.rejects(f.call("toggle","code",true),/verified KAI plugin/);assert.equal(f.calls.length,0);});
+// Synthetic publisher only: exercise the production verifier/manager with a
+// fixture publisher pin. No maintainer private key or user profile is loaded.
+const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), os = require("node:os"), path = require("node:path"), crypto = require("node:crypto"), vm = require("node:vm");
+const { createRequire } = require("node:module");
+const { FeatureServices } = require("../../electron/plugin-services"), { JsonStore } = require("../lib/store"), { ApiKeys } = require("../lib/keys");
+const root = path.resolve(__dirname, "../.."), ID = "kai.remote-access", retired = "remote-access.features";
+const grants = ["remote-access.read", "remote-access.control", "remote-access.keys", "desktop.preferences"];
+function fixture(t) {
+  const dataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kai-retired-remote-")));
+  const key = crypto.generateKeyPairSync("ed25519"), der = key.publicKey.export({ format: "der", type: "spki" }), fingerprint = crypto.createHash("sha256").update(der).digest("hex");
+  const publisher = { id: ID, fingerprint };
+  function load(file, replacements) {
+    const filename = path.join(root, file), nativeRequire = createRequire(filename), module = { exports: {} };
+    vm.runInNewContext(fs.readFileSync(filename, "utf8"), { module, exports: module.exports, Buffer, structuredClone, require: name => replacements[name] || nativeRequire(name) }, { filename });
+    return module.exports;
+  }
+  const verifier = load("core/lib/plugins/package.js", { "./first-party.json": { plugins: [publisher] } });
+  const { PluginManager } = load("core/lib/plugins/manager.js", { "./package": verifier });
+  const manager = new PluginManager(dataDir);
+  function pkg(version, permissions = grants, id = ID, privateKey = key.privateKey) {
+    const manifest = { schema: 1, apiVersion: 2, id, name: "Synthetic Remote Access", version, entry: "index.html", permissions };
+    const files = { "index.html": "<p>Synthetic fixture</p>" };
+    return { manifest, files, publicKey: crypto.createPublicKey(privateKey).export({ format: "der", type: "spki" }).toString("base64"), signature: crypto.sign(null, Buffer.from(verifier.canonical({ manifest, files })), privateKey).toString("base64") };
+  }
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  return { dataDir, publisher, manager, verifier, pkg };
+}
+
+test("retired Remote grant keeps old signed installs and rollback readable without restoring its operation", async t => {
+  const f = fixture(t), old = f.pkg("0.2.0", [...grants, retired]);
+  f.manager.install(old); f.manager.storage(ID, "set", "preserved", "saved settings");
+  assert.equal(f.manager.load(ID).manifest.version, "0.2.0");
+  f.manager.install(f.pkg("0.2.1")); f.manager.change(ID, "rollback");
+  assert.equal(f.manager.load(ID).manifest.version, "0.2.0");
+  assert.equal(f.manager.storage(ID, "get", "preserved"), "saved settings");
+  const broker = new FeatureServices({}, { publishers: [f.publisher] });
+  assert.equal(broker.permission("remote.features"), null);
+  await assert.rejects(broker.call({ ...f.manager.load(ID), controller: new AbortController() }, "remote.features", { action: "toggle", feature: "code", enabled: true }), /permission denied/);
+  assert.equal(broker.services.size, 0); await broker.dispose();
+});
+
+test("retired grant cannot be requested by newer releases, another plugin, or an untrusted publisher", t => {
+  const f = fixture(t);
+  assert.equal(f.verifier.verifyPackage(f.pkg("0.2.1")).manifest.version, "0.2.1");
+  assert.throws(() => f.verifier.verifyPackage(f.pkg("0.2.1", [...grants, retired])), /Private feature permissions/);
+  assert.throws(() => f.verifier.verifyPackage(f.pkg("0.2.0", [retired], "community.remote")), /Private feature permissions/);
+  assert.throws(() => f.verifier.verifyPackage(f.pkg("0.2.0", [retired], ID, crypto.generateKeyPairSync("ed25519").privateKey)), /matching verified KAI publisher/);
+});
+
+test("narrow Remote grant resumes the saved relay at startup and never enters another app broker", async t => {
+  const f = fixture(t), settings = new JsonStore(path.join(f.dataDir, "settings.json"), { remote: { enabled: true }, code: { enabled: true }, developer: { enabled: true }, koinosNode: { keep: "original data" } });
+  const keys = new ApiKeys(settings); keys.create({ name: "Existing client" });
+  let starts = 0, stops = 0, crossAppCalls = 0, enabled = false;
+  const broker = new FeatureServices({ dataDir: f.dataDir, core: { settings, keys, models: { aliases: () => [] }, gateway: { port: 41100, network: { status: () => ({ privacyMode: "local-first" }) } } }, getWindow: () => ({}),
+    featureCall: () => { crossAppCalls++; throw Error("Unexpected cross-app call"); }, openCoreView: () => { crossAppCalls++; },
+    originalRemoteFactory: () => ({ start: async () => { starts++; enabled = true; }, stop: () => { stops++; enabled = false; settings.set("remote.enabled", false); }, status: () => ({ enabled, state: enabled ? "connected" : "off" }), drain: async () => {} }),
+  }, { publishers: [f.publisher] });
+  f.manager.install(f.pkg("0.2.1"));
+  await broker.startInstalledBackground(f.manager);
+  assert.equal(starts, 1); assert.equal(broker.backgroundErrors.has(ID), false);
+  const record = { ...f.manager.load(ID), controller: new AbortController() };
+  const state = await broker.call(record, "remote.api", { action: "status" });
+  assert.equal(state.remote.enabled, true); assert.equal(state.keys.length, 1);
+  for (const feature of ["node", "developer", "code"]) await assert.rejects(broker.call(record, "remote.features", { action: "open", feature }), /permission denied/);
+  assert.equal(crossAppCalls, 0); await broker.dispose(); assert.equal(stops, 1);
+  assert.equal(settings.get("remote.enabled"), true, "shutdown preserves saved relay intent");
+  assert.equal(settings.get("code.enabled"), true); assert.equal(settings.get("developer.enabled"), true); assert.equal(settings.get("koinosNode.keep"), "original data");
+});

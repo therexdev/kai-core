@@ -262,7 +262,6 @@
     "module": "remote-access.js",
     "permissions": {
       "remote.api": "remote-access.keys",
-      "remote.features": "remote-access.features",
       "remote.status": "remote-access.read",
       "remote.keys": "remote-access.read",
       "remote.copyEndpoint": "remote-access.read",

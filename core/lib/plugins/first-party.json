@@ -114,13 +114,13 @@
     {
       "id": "kai.remote-access",
       "name": "KAI Remote Access",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "repository": "therexdev/kai-plugin-remote-access",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-remote-access/releases/download/v0.2.0/kai-plugin-remote-access-0.2.0.kaiplugin",
+      "url": "https://github.com/therexdev/kai-plugin-remote-access/releases/download/v0.2.1/kai-plugin-remote-access-0.2.1.kaiplugin",
       "description": "The original Local API workspace with API keys, budgets, usage, privacy controls and optional remote relay access.",
-      "minCoreVersion": "0.5.0"
+      "minCoreVersion": "0.6.1"
     }
   ]
 }
