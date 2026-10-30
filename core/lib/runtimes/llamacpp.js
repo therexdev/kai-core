@@ -228,9 +228,10 @@ class LlamaCppRuntime {
   // No fixed default port: each start() probes a free one, so a second Core
   // instance (tests) or a stale llama-server from a crashed run can never be
   // mistaken for — or collide with — this instance's engine.
-  constructor({ binPath, host = "127.0.0.1", port, onEvent }) {
+  constructor({ binPath, host = "127.0.0.1", port, onEvent, spawnProcess = spawn }) {
     this._fixedPort = port ?? null;
     this.binPath = binPath;
+    this.spawnProcess = spawnProcess;
     this.host = host;
     this.port = port;
     this.onEvent = onEvent || (() => {});
@@ -256,6 +257,7 @@ class LlamaCppRuntime {
   async _waitHealthy(timeoutMs = HEALTH_TIMEOUT_MS) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      if (this._startError) throw this._startError;
       if (!this.child) {
         const code = this._lastExit?.code;
         // Decode the two classic Windows loader deaths — they print nothing.
@@ -283,6 +285,7 @@ class LlamaCppRuntime {
   async start({ modelPath, contextSize = 4096, gpuLayers = 0, extraArgs = [], sizeBytes = 0 }) {
     if (this.child) throw new Error("Runtime already running — stop it first");
     this._stopping = false;
+    this._startError = null;
     this.port = this._fixedPort ?? (await freePort(this.host));
     const args = [
       "--model", modelPath,
@@ -299,7 +302,7 @@ class LlamaCppRuntime {
     // Electron's dir is deliberately NOT on the child's PATH — its bundled
     // CRT aging behind the engine toolchain crashed the loader (v0.22.1).
     // KMP guards: see selfTest — libomp topology crash on new hybrid CPUs.
-    const child = spawn(this.binPath, args, {
+    const child = this.spawnProcess(this.binPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       env: engineEnv(this.binPath),
@@ -322,11 +325,22 @@ class LlamaCppRuntime {
       os.setPriority(child.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
     } catch { /* unsupported platform or the child already exited */ }
 
+    // ENOENT/EACCES arrive as an asynchronous `error`, not an `exit`.
+    // Handle them immediately so a failed launch neither crashes the app nor
+    // consumes the model's full multi-minute loading budget.
+    child.once("error", error => {
+      if (this.child !== child) return;
+      this._startError = error;
+      this.child = null;
+      this.model = null;
+      this.onEvent({ type: "runtime:crashed", kind: "llamacpp", code: error.code, message: error.message });
+    });
     let stderrTail = "";
     child.stderr.on("data", (d) => {
       stderrTail = (stderrTail + d.toString()).slice(-4000);
     });
     child.on("exit", (code, signal) => {
+      if (this.child !== child) return;
       const wasStopping = this._stopping;
       this._lastExit = { code, signal };
       this.child = null;

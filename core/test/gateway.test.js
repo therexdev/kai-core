@@ -19,7 +19,11 @@ const { Gateway } = require("../lib/gateway");
  * network is involved.
  */
 
-const FAKE_BIN = path.join(__dirname, "fixtures", "fake-llama-server");
+const FAKE_SERVER = path.join(__dirname, "fixtures", "fake-llama-server.js");
+const { spawn } = require("node:child_process");
+// A real child process on every OS. Windows cannot exec the Bash/shebang
+// wrapper used by historical POSIX tests; invoke Node with the fixture path.
+const spawnFixture = (_binary, args, options) => spawn(process.execPath, [FAKE_SERVER, ...args], options);
 
 function freePort() {
   const net = require("net");
@@ -59,7 +63,7 @@ async function makeStack() {
     models,
     hardware: { capabilities: { cudaEligible: false } },
     onEvent: () => {},
-    makeRuntime: () => new LlamaCppRuntime({ binPath: FAKE_BIN, port: rtPort, onEvent: () => {} }),
+    makeRuntime: () => new LlamaCppRuntime({ binPath: process.execPath, port: rtPort, onEvent: () => {}, spawnProcess: spawnFixture }),
   });
   const gateway = new Gateway({ port: 0, runtime, models, keys, coreInfo: () => ({ version: "test" }) });
   const port = await gateway.listen();
