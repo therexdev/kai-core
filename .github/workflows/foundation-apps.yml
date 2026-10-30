@@ -1,0 +1,61 @@
+name: Foundation released apps
+on:
+  push:
+    branches: [main, foundation-v1]
+    paths:
+      - 'scripts/foundation/**'
+      - 'electron/**'
+      - 'core/**'
+      - 'ui-core/**'
+      - 'package*.json'
+      - '.github/workflows/foundation-apps.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: foundation-released-apps-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  apps:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      KAI_SMOKE_PACKAGES_DIR: ${{ runner.temp }}/kai-smoke-packages
+      KAI_FOUNDATION_APPS_OUTPUT: ${{ runner.temp }}/kai-smoke-report
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node node_modules/electron/install.js
+      - name: Download and verify all eleven immutable published packages
+        run: node scripts/foundation/download-smoke-packages.js
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Configure Electron sandbox helper on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Real Core and released apps on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:apps -- --synthetic-keychain
+      - name: Real Core and released apps on Windows
+        if: runner.os == 'Windows'
+        run: npm run test:apps -- --synthetic-keychain
+      - name: Preserve reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-released-apps-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/kai-smoke-report/
+            ${{ runner.temp }}/kai-smoke-packages/download-report.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -39,7 +39,7 @@ function verifyPackageFile(file,options={}){
 }
 function bindCodeRoot(pkg,destination){const info=verifiedPackages.get(pkg);if(!info||info.disposed||!info.extracted)throw Error("A live extracted package is required");let exists=true;try{fs.lstatSync(destination);}catch(error){if(error.code!=="ENOENT")throw error;exists=false;}
  if(exists){verifyCodeRoot(destination,info.record.entries);if(info.temporary)info.candidate.dispose();}
- else{fs.renameSync(info.root,destination);for(const entry of info.record.entries)fs.chmodSync(path.join(destination,...entry.path.split("/")),/\.(?:bin|exe)$/i.test(entry.path)?0o500:0o400);}
+ else{fs.renameSync(info.root,destination);for(const entry of info.record.entries)fs.chmodSync(path.join(destination,...entry.path.split("/")),/\.(?:bin|exe)$/i.test(entry.path)?0o500:0o400);verifyCodeRoot(destination,info.record.entries);}
  info.root=destination;info.temporary=false;return info.record;
 }
 function copyApprovedPackage(pkg,destination){const verified=getVerifiedPackage(pkg);if(!verified)throw Error("A verified package snapshot is required");let created=false;try{fs.copyFileSync(verified.sourceFile,destination,fs.constants.COPYFILE_EXCL);created=true;const copied=hashFile(destination);if(copied.bytes!==verified.sourceBytes||copied.sha256!==verified.sourceDigest)throw Error("Plugin package changed after review; review it again");fs.chmodSync(destination,0o600);}catch(error){if(created)fs.rmSync(destination,{force:true});throw error;}}
