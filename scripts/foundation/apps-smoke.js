@@ -61,8 +61,27 @@ async function main(){
   page=await application.firstWindow({timeout:60000});page.setDefaultTimeout(30000);page.on("pageerror",e=>pageErrors.push(e.message));
   await application.evaluate(()=>{global.__foundationWindow?.setContentSize(1280,900);});
   await page.waitForFunction(()=>document.getElementById("version")?.textContent.startsWith("v"),{timeout:60000});
-  await check("Renderer error capture is active",async()=>{await page.evaluate(()=>console.error("KAI_SMOKE_CAPTURE_PROBE"));const captured=await application.evaluate(()=>{const errors=global.__foundationSmoke.errors;const index=errors.findIndex(e=>e.message==="KAI_SMOKE_CAPTURE_PROBE");if(index<0)return false;errors.splice(index,1);return true;});assert.equal(captured,true);});
   await check("Real Core starts with fresh Foundation profile, Local-Only and all apps",async()=>{const status=await page.evaluate(()=>window.kaiCore.call("status"));assert.equal(status.profile.mode,"foundation");assert.equal(status.network.privacyMode,"local-only");assert.equal(status.wallet.exists,false);assert.equal(status.plugins.length,report.plugins.length);assert.equal(await page.locator("#apps-list .app-nav-row").count(),report.plugins.length);});
+  await check("Renderer error capture is active",async()=>{
+   await page.evaluate(()=>console.error("KAI_SMOKE_CAPTURE_PROBE"));
+   let captured;
+   for(let attempt=0;attempt<4;attempt++){
+    try{
+     captured=await application.evaluate(()=>{
+      const state=global.__foundationSmoke,index=state.errors.findIndex(e=>e.message==="KAI_SMOKE_CAPTURE_PROBE");
+      // The inspector can lose an evaluation result during startup GC after
+      // this callback already ran. Keep the assertion idempotent on retry.
+      if(index>=0){state.errors.splice(index,1);state.captureProbeObserved=true;}
+      return state.captureProbeObserved===true;
+     });
+     break;
+    }catch(error){
+     if(!String(error.message).includes("Resulting promise was garbage collected")||attempt===3)throw error;
+     await new Promise(resolve=>setTimeout(resolve,250));
+    }
+   }
+   assert.equal(captured,true);
+  });
   for(const plugin of report.plugins)await check(plugin.id+" opens its actual UI and native service",async()=>{
    await page.locator(`[data-app="${plugin.id}"]`).click();
    await until(()=>application.evaluate((_electron,id)=>{const r=global.__foundationHost.windows.get(id);return!!r?.ready&&global.__foundationHost.selected===id;},plugin.id),"App did not become ready: "+plugin.id,60000);
