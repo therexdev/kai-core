@@ -1,0 +1,127 @@
+{
+  "kai.assistant": {
+    "module": "assistant.js",
+    "permissions": {
+      "assistant.list": "assistant.read",
+      "assistant.get": "assistant.read",
+      "assistant.save": "assistant.write",
+      "assistant.rename": "assistant.write",
+      "assistant.pin": "assistant.write",
+      "assistant.delete": "assistant.write"
+    }
+  },
+  "kai.brain": {
+    "module": "brain.js",
+    "permissions": {
+      "brain.list": "brain.read",
+      "brain.get": "brain.read",
+      "brain.search": "brain.read",
+      "brain.save": "brain.write",
+      "brain.remove": "brain.write",
+      "brain.goals": "brain.read",
+      "brain.goalSave": "brain.write",
+      "brain.goalRemove": "brain.write",
+      "brain.sources": "brain.read",
+      "brain.sourceImport": "brain.import",
+      "brain.sourceRemove": "brain.write",
+      "brain.export": "brain.export"
+    }
+  },
+  "kai.documents": {
+    "module": "documents.js",
+    "permissions": {
+      "documents.list": "documents.read",
+      "documents.get": "documents.read",
+      "documents.save": "documents.write",
+      "documents.remove": "documents.write",
+      "documents.import": "documents.import",
+      "documents.export": "documents.export",
+      "documents.draft": "documents.draft"
+    }
+  },
+  "kai.workflows": {
+    "module": "workflows.js",
+    "permissions": {
+      "workflows.list": "workflows.read",
+      "workflows.get": "workflows.read",
+      "workflows.runs": "workflows.read",
+      "workflows.runGet": "workflows.read",
+      "workflows.export": "workflows.read",
+      "workflows.agents": "workflows.read",
+      "workflows.save": "workflows.write",
+      "workflows.remove": "workflows.write",
+      "workflows.agentSave": "workflows.write",
+      "workflows.agentRemove": "workflows.write",
+      "workflows.run": "workflows.run",
+      "workflows.cancel": "workflows.run",
+      "workflows.decide": "workflows.run"
+    }
+  },
+  "kai.agent-network": {
+    "module": "agent-network.js",
+    "permissions": {
+      "agentNetwork.status": "agent-network.read",
+      "agentNetwork.export": "agent-network.read",
+      "agentNetwork.jobDetail": "agent-network.read",
+      "agentNetwork.workflowChoices": "agent-network.write",
+      "agentNetwork.save": "agent-network.write",
+      "agentNetwork.fromWorkflow": "agent-network.write",
+      "agentNetwork.import": "agent-network.write",
+      "agentNetwork.settings": "agent-network.manage",
+      "agentNetwork.accepting": "agent-network.manage",
+      "agentNetwork.job": "agent-network.manage",
+      "agentNetwork.discover": "agent-network.network",
+      "agentNetwork.publish": "agent-network.network",
+      "agentNetwork.retire": "agent-network.network",
+      "agentNetwork.quote": "agent-network.network",
+      "agentNetwork.submit": "agent-network.network",
+      "agentNetwork.refresh": "agent-network.network"
+    }
+  },
+  "kai.connections": {
+    "module": "connections.js",
+    "permissions": {
+      "connections.status": "connections.read",
+      "connections.templates": "connections.read",
+      "connections.save": "connections.manage",
+      "connections.remove": "connections.manage",
+      "connections.execute": "connections.execute",
+      "connections.composio.settings": "connections.manage",
+      "connections.composio.catalog": "connections.read",
+      "connections.composio.tools": "connections.read",
+      "connections.composio.refresh": "connections.read",
+      "connections.composio.connect": "connections.manage",
+      "connections.composio.disconnect": "connections.manage",
+      "connections.composio.permissions": "connections.manage"
+    }
+  },
+  "kai.tools": {
+    "module": "tools.js",
+    "permissions": {
+      "tools.status": "tools.read",
+      "tools.catalog": "tools.read",
+      "tools.add": "tools.manage",
+      "tools.remove": "tools.manage",
+      "tools.connect": "tools.manage",
+      "tools.disconnect": "tools.manage",
+      "tools.runtime": "tools.manage",
+      "tools.call": "tools.execute"
+    }
+  },
+  "kai.code": {
+    "module": "code.js",
+    "permissions": {
+      "code.projects": "code.read",
+      "code.choose": "code.read",
+      "code.open": "code.read",
+      "code.browse": "code.read",
+      "code.read": "code.read",
+      "code.sessions": "code.read",
+      "code.session": "code.read",
+      "code.revoke": "code.read",
+      "code.propose": "code.assist",
+      "code.stage": "code.write",
+      "code.apply": "code.write"
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "plugins": [
+    {
+      "id": "kai.assistant",
+      "name": "Assistant",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-assistant",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-assistant/releases/download/v0.1.0/kai-plugin-assistant-0.1.0.kaiplugin"
+    },
+    {
+      "id": "kai.brain",
+      "name": "Brain",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-brain",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-brain/releases/download/v0.1.0/kai-plugin-brain-0.1.0.kaiplugin"
+    },
+    {
+      "id": "kai.connections",
+      "name": "Connections",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-connections",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-connections/releases/download/v0.1.0/kai-plugin-connections-0.1.0.kaiplugin"
+    },
+    {
+      "id": "kai.workflows",
+      "name": "Workflows",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-workflows",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-workflows/releases/download/v0.1.0/kai-plugin-workflows-0.1.0.kaiplugin"
+    },
+    {
+      "id": "kai.agent-network",
+      "name": "Agent Network",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-agent-network",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-agent-network/releases/download/v0.1.0/kai-plugin-agent-network-0.1.0.kaiplugin"
+    },
+    {
+      "id": "kai.documents",
+      "name": "Documents",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-documents",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-documents/releases/download/v0.1.0/kai-plugin-documents-0.1.0.kaiplugin"
+    },
+    {
+      "id": "kai.model-compare",
+      "name": "Model Compare",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-model-compare",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-model-compare/releases/download/v0.1.0/kai-plugin-model-compare-0.1.0.kaiplugin"
+    },
+    {
+      "id": "kai.code",
+      "name": "Code",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-code",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-code/releases/download/v0.1.0/kai-plugin-code-0.1.0.kaiplugin"
+    },
+    {
+      "id": "kai.tools",
+      "name": "Tools",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-tools",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-tools/releases/download/v0.1.0/kai-plugin-tools-0.1.0.kaiplugin"
+    }
+  ]
+}

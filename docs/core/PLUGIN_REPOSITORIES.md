@@ -1,7 +1,8 @@
 # Plugin repositories
 
-Create these under `therexdev`. Empty repositories are sufficient; avoid generating
-README/license commits so extraction can preserve source provenance cleanly.
+The nine repositories below other than Node, Remote Access and Registry now contain
+installable v0.1.0 plugin releases requiring Core 0.2.0. Those three repositories
+remain pending. Official installs work directly from GitHub releases without the registry.
 
 | Repository | Responsibility | Legacy starting point |
 | --- | --- | --- |
@@ -23,11 +24,10 @@ compute-provider earning, permission enforcement, profile management and the plu
 host. Plugins never own raw wallet keys. No separate repository is needed for a
 wallet plugin, model downloader, updater or SDK at this stage.
 
-Extract Assistant/model comparison first to exercise local inference and saved
-history; then private data services; then Workflows and Agent Network. Core's
-capability API must grow with each extraction, with native tests and reviewed
-legacy-data adapters. Existing source files cannot simply be loaded in the
-sandbox as privileged code.
+Core API 2 supplies reviewed legacy-data adapters for the nine releases. Feature
+renderers remain sandboxed; signed packages cannot load native source as privileged
+code. Each plugin README documents the supported subset and remaining legacy
+functionality. Continue extending the API with native tests for each new capability.
 
 Workflows and Agent Network are separate plugins. Workflows alone supports
 personal creation; Agent Network alone supports hiring external services; both

@@ -14,8 +14,9 @@ Alpha/Test release pipelines, starting from `kaiapp` Test commit
 - Verified configuration backup before the new runtime opens an existing profile.
 - Signed plugin packages installed from a file or public HTTPS URL, with native
   permission review, enable/disable, removal, one-version rollback and isolated storage.
-- Sandboxed plugin windows with an explicit capability broker. V1 capabilities:
-  installed-model metadata, bounded local inference, and the plugin's own JSON data.
+- Sandboxed plugin windows with an explicit capability broker. Public capabilities:
+  installed-model metadata, bounded local inference, and private plugin JSON data;
+  API 2 adds publisher-bound feature adapters.
 - A separate Core installer ID and updater feed. Preview builds do not publish to
   either the old app's feed or the Core updater automatically.
 
@@ -39,20 +40,49 @@ installers** GitHub workflow builds Windows, Linux x64/arm64 and macOS artifacts
 These are preview artifacts, not signed public releases. Platform signing and
 native upgrade verification are required before replacing the old app publicly.
 
-## What is deliberately not claimed complete
+## Install the feature plugins
 
-Core is a working development preview, not yet full replacement parity. Workflows,
-Agent Network, Brain, Connections, Documents, Assistant, Code, model comparison,
-node management and remote access are retained as legacy source pending extraction.
-Their data stays in place; Core does not run their saved schedules or automation.
-The catalog is not yet hosted. Install signed packages directly in the meantime.
-Third-party Node/native plugins, public-web plugin tools, paid agent rentals and
-workflow plugins are not implemented by this foundation.
+Core 0.2.0 includes direct install cards for nine signed first-party plugins in
+**Plugins**. Each card downloads the versioned GitHub release asset, verifies the
+pinned publisher, and asks you to review its permissions. A registry is not needed.
+Local-Only privacy blocks downloads; a downloaded `.kaiplugin` file can be installed
+with **Install package**. Third-party signed packages still use the public API.
 
-Legacy sources, docs and tests are kept to make extraction traceable. Optional
-speech/mail/workflow dependencies are development-only; they do not ship in Core.
-The small Local Chat SDK example demonstrates the plugin API, not the complete
-legacy Assistant or a migration of its chat history.
+Available repositories: [Assistant](https://github.com/therexdev/kai-plugin-assistant),
+[Brain](https://github.com/therexdev/kai-plugin-brain),
+[Connections](https://github.com/therexdev/kai-plugin-connections),
+[Workflows](https://github.com/therexdev/kai-plugin-workflows),
+[Agent Network](https://github.com/therexdev/kai-plugin-agent-network),
+[Documents](https://github.com/therexdev/kai-plugin-documents),
+[Model Compare](https://github.com/therexdev/kai-plugin-model-compare),
+[Code](https://github.com/therexdev/kai-plugin-code), and
+[Tools](https://github.com/therexdev/kai-plugin-tools).
+
+Their renderers are independently versioned packages. Reviewed native adapters and
+the shared workflow runtime stay in Core. Each private API is bound to its matching
+plugin ID, publisher key and explicit grant. Account tokens and wallet keys remain
+in the native process. Processes/files/account actions receive additional review.
+
+## Preview scope
+
+These are initial installable feature releases, not full legacy feature parity.
+Assistant supports saved text conversations; legacy desktop mascot/live microphone
+features are not extracted. Workflows runs the supported local/manual graph subset;
+unsafe legacy flows and saved schedules remain preserved and inactive. Agent Network
+supports private free services; external discovery needs a configured compatible
+relay. Paid rental contracts are not deployed or enabled by these plugins. Code edits
+selected project files with native approval and does not run arbitrary shell commands.
+Each repository documents its implemented operations and limits.
+
+Node, Remote Access and the public registry await their repositories. Platform signing,
+real-install upgrade checks, macOS Keychain and Linux Secret Service continuity still
+need verification before recommending replacement of the old app. Existing profile
+backup and mutual exclusion remain mandatory. No plugin auto-imports wallet funds,
+launches saved MCP servers, resumes legacy schedules or publishes agent services.
+
+Legacy source is retained for continued extraction. Speech/mail dependencies remain
+development-only. The shared workflow engine's QuickJS and cron dependencies ship
+with Core, but the workflow broker does not expose native or unrestricted code nodes.
 
 - [Profile compatibility](docs/core/PROFILE_COMPATIBILITY.md)
 - [Plugin API and packaging](docs/core/PLUGIN_API.md)

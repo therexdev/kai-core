@@ -80,7 +80,14 @@ class CompanionWorkflows {
     this.drive(key, controller.signal, approved).catch(error => {
       if (this.get(key)?.status === "cancelled") return;
       this.patch(key, r => { r.status = "failed"; r.error = error instanceof CompanionError ? error.message : error.name === "AbortError" ? "Run stopped." : "Step failed. Check the local model or connection, then start a new run."; r.finishedAt = Date.now(); });
-    }).finally(() => this.active.delete(key));
+    }).finally(() => this.active.delete(key)).catch(() => {
+      // The original failure was handled above. A second failure here means its
+      // status could not be persisted (for example, a guarded profile conflict).
+      // Preserve that file and avoid an unhandled rejection from this background
+      // task. Never log the thrown error: it may contain private model content.
+      controller.abort();
+      console.warn("[workflows] Run stopped, but its failure status could not be saved. Reopen the original profile before retrying.");
+    });
   }
   async drive(key, signal, approved) {
     for (;;) {

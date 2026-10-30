@@ -46,3 +46,9 @@ jobs:
       - name: Desktop smoke (macOS)
         if: runner.os == 'macOS'
         run: npm run test:desktop
+      - name: Verify all published plugins (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:plugins -- --download
+      - name: Verify all published plugins (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:plugins -- --download

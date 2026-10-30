@@ -4,12 +4,14 @@
 preflight, verified plugin installation, native payment review and shutdown.
 `core/server.js` with `extensions:false` supplies models, local inference/API,
 wallet/account services, network policy and the existing compute provider backend.
-Legacy optional services and automatic task/node/Brain behavior are disabled.
+Legacy automatic task/node/Brain behavior is disabled. Official feature adapters
+start lazily through `electron/plugin-services`; contracts and publisher pins gate
+every call, independently of the renderer.
 `ui-core` is the trusted first-party control surface. Plugin windows use a different
 preload, separate sessions and a capability broker; they never inherit its IPC.
 
 The legacy source is retained for extraction and compatibility tests. Optional
-speech/mail/workflow dependencies are devDependencies rather than installed
+speech/mail dependencies are devDependencies rather than installed
 production dependencies. The old UI is not served by the new desktop. Only the
 shared credit presentation script is mapped as an explicit static asset.
 
@@ -27,7 +29,7 @@ and userData are shared; install app ID and updater repository are different.
    platform verification as well; mocks do not prove keychain migration.
 4. Preview installers launch using their packaged dependencies. No automatic
    publication or updater feed until platform signing and upgrade checks pass.
-5. Complete first-party plugin extraction and reviewed migration before claiming
+5. Complete remaining legacy feature extraction and reviewed migration before claiming
    feature parity or recommending that users stop supporting Alpha/Test.
 
 The Linux container may require `--no-sandbox --ozone-platform=headless` to run a

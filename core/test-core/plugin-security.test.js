@@ -14,7 +14,9 @@ function pkg({ key = keys.privateKey, id = "example.test", version = "1.0.0", pe
 function fixture(t) { const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-plugin-security-")); t.after(() => fs.rmSync(root, { recursive: true, force: true })); return { root, manager: new PluginManager(root) }; }
 test("only well-formed signed compatible packages are accepted", () => {
   assert.equal(verifyPackage(pkg()).manifest.id, "example.test");
-  for (const changes of [{ apiVersion: 2 }, { schema: 2 }, { version: ["1.0.0"] }, { version: "01.0.0" }, { version: "1.0.0-rc.1" }, { permissions: ["wallet.sign"] }, { permissions: ["models.read", "models.read"] }, { entry: "missing.html" }, { unexpected: true }]) assert.throws(() => verifyPackage(pkg(changes)));
+  for (const changes of [{ apiVersion: 3 }, { schema: 2 }, { version: ["1.0.0"] }, { version: "01.0.0" }, { version: "1.0.0-rc.1" }, { permissions: ["wallet.sign"] }, { permissions: ["models.read", "models.read"] }, { entry: "missing.html" }, { unexpected: true }]) assert.throws(() => verifyPackage(pkg(changes)));
+  assert.equal(verifyPackage(pkg({ apiVersion: 2 })).manifest.apiVersion, 2);
+  for (const id of ["example.test", "kai.brain", "kai.assistant"]) assert.throws(() => verifyPackage(pkg({ apiVersion: 2, id, permissions: ["brain.read"] })), /verified KAI publisher/);
   const altered = pkg(); altered.files["index.html"] += "tampered"; assert.throws(() => verifyPackage(altered), /signature/);
   const changedManifest = pkg(); changedManifest.manifest.permissions.push("inference.local"); assert.throws(() => verifyPackage(changedManifest), /signature/);
   const unsigned = pkg(); unsigned.signature = ""; assert.throws(() => verifyPackage(unsigned), /signature/);
@@ -24,6 +26,12 @@ test("plugin paths reject traversal, platform device names and case collisions",
   for (const id of ["../escape", "one", "a..b", "CON.plugin", "nul.package", "foo/bar", "example:", "example.test "]) assert.equal(safeId(id), false, id);
   for (const file of ["../index.html", "/index.html", "a/../index.html", "a\\index.html", "a:N.html", "a/con.html", "a./index.html", "a//index.html", "nul.txt", "data.exe"]) assert.equal(safeFile(file), false, file);
   assert.throws(() => verifyPackage(pkg({ files: { "index.html": "x", "INDEX.html": "y" } })), /duplicate/);
+});
+test("official plugin namespaces cannot be claimed with public-only scopes", () => {
+  for (const { id } of require("../lib/plugins/first-party.json").plugins) {
+    for (const apiVersion of [1, 2]) assert.throws(() => verifyPackage(pkg({ id, apiVersion, permissions: ["storage.read", "storage.write"] })), /verified KAI publisher/);
+  }
+  assert.equal(verifyPackage(pkg({ id: "community.example", apiVersion: 2 })).manifest.id, "community.example");
 });
 test("package signer persists across uninstall and reinstall, protecting retained data", t => {
   const { manager, root } = fixture(t); manager.install(pkg()); manager.storage("example.test", "set", "secret", "saved private data"); manager.change("example.test", "remove");

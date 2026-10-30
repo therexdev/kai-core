@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "KAI Core desktop: shared models and identity with isolated optional plugins",
   "license": "MIT",
@@ -22,7 +22,8 @@
     "test:plugin-sandbox": "electron scripts/core/plugin-sandbox-probe.js",
     "dist": "electron-builder --publish never",
     "plugin:pack": "node scripts/core/pack-plugin.js",
-    "test:desktop": "node scripts/core/desktop-smoke.js"
+    "test:desktop": "node scripts/core/desktop-smoke.js",
+    "test:plugins": "electron scripts/core/plugins-smoke.js"
   },
   "bin": {
     "koinos-code": "cli/koinos-code.js"
@@ -34,13 +35,11 @@
     "js-yaml": "^4.3.2",
     "playwright-core": "^1.62.1",
     "@huggingface/transformers": "3.5.1",
-    "cron-parser": "5.10.0",
     "imapflow": "^1.7.1",
     "kokoro-js": "1.2.1",
     "mailparser": "3.9.43",
     "nodemailer": "10.1.4",
     "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
-    "quickjs-emscripten": "0.32.0",
     "sherpa-onnx-node": "1.13.7"
   },
   "main": "electron/core-main.js",
@@ -62,7 +61,8 @@
       "!core/test-core/**",
       "build/icon.*",
       "package.json",
-      "!core/scheduler/**"
+      "!core/scheduler/**",
+      "ui/workflow-model.js"
     ],
     "extraResources": [],
     "asarUnpack": [
@@ -126,7 +126,9 @@
     "@noble/secp256k1": "^1.7.2",
     "electron-updater": "^6.8.9",
     "ethers": "^6.17.0",
-    "koilib": "^9.4.0"
+    "koilib": "^9.4.0",
+    "cron-parser": "5.10.0",
+    "quickjs-emscripten": "0.32.0"
   },
   "overrides": {
     "protobufjs": "7.6.6",

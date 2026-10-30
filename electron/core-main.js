@@ -7,9 +7,9 @@ const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 const { channelConfig, configureDesktop, configureUpdater } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, payments, updater, report, shuttingDown = false, installBusy = false;
+let core, win, pluginHost, features, payments, updater, report, shuttingDown = false, installBusy = false;
 const { trustedMainDocument, protectNavigation } = require("./window-security");
-async function stop() { pluginHost?.closeAll(); await payments?.dispose(); await core?.stop(); }
+async function stop() { pluginHost?.closeAll(); await features?.dispose(); await payments?.dispose(); await core?.stop(); }
 app.on("before-quit", event => {
   if (!core || shuttingDown) return;
   event.preventDefault(); shuttingDown = true;
@@ -39,20 +39,31 @@ async function start() {
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   const manager = new (require("../core/lib/plugins/manager").PluginManager)(dataDir);
   let updateBusy = false;
-  pluginHost = new (require("./core-plugin-host").PluginHost)({ electron, manager, core });
+  features = new (require("./plugin-services").FeatureServices)({ dataDir, core, electron,
+    getWindow: () => win, localInference: (input, signal) => pluginHost.runLocal(input, signal),
+    confirm: async (title, detail) => {
+      if (shuttingDown) return false;
+      const result = await dialog.showMessageBox(win, { type: "question", title, message: title, detail: (typeof detail === "string" ? detail : JSON.stringify(detail, null, 2)).slice(0, 12000), buttons: ["Cancel", "Allow once"], defaultId: 0, cancelId: 0, noLink: true });
+      return result.response === 1 && !shuttingDown;
+    }
+  });
+  pluginHost = new (require("./core-plugin-host").PluginHost)({ electron, manager, core, features });
   payments = require("./koin-test-ipc").registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, isTest: false });
   ipcMain.handle("kai-core:call", async (event, method, input) => {
     if (!trustedMainDocument(event, win, origin) || shuttingDown) throw Error("Core desktop access denied");
     switch (method) {
       case "status": return { version: app.getVersion(), profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
-        models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null, plugins: manager.list() };
+        models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null, plugins: manager.list(), catalog: require("../core/lib/plugins/first-party.json").plugins.map(({id,name,version}) => ({id,name,version})) };
       case "plugins.install": {
         if (installBusy) throw Error("Finish the current plugin installation first"); installBusy = true;
         try {
           let verified;
-          if (input?.url) {
+          const official = input?.id ? require("../core/lib/plugins/first-party.json").plugins.find(p => p.id === input.id) : null;
+          if (input?.id && !official) throw Error("Unknown first-party plugin");
+          if (input?.url || official) {
             if (core.gateway.network.status().privacyMode === "local-only") throw Error("Local-Only blocks plugin downloads. Install a local package or change Privacy.");
-            verified = await require("../core/lib/plugins/download").downloadPackage(input.url);
+            verified = await require("../core/lib/plugins/download").downloadPackage(official?.url || input.url);
+            if (official && (verified.manifest.id !== official.id || verified.manifest.version !== official.version || verified.fingerprint !== official.fingerprint)) throw Error("Downloaded plugin does not match the reviewed publisher and release");
           } else {
             const chosen = await dialog.showOpenDialog(win, { title: "Install a signed KAI plugin", properties: ["openFile"], filters: [{ name: "KAI plugin package", extensions: ["kaiplugin"] }] });
             if (chosen.canceled) return null;
@@ -62,7 +73,7 @@ async function start() {
           }
           const m = verified.manifest;
           const review = await dialog.showMessageBox(win, { type: "question", title: "Install plugin", message: `Install ${m.name} ${m.version}?`,
-            detail: `${m.description || ""}\n\nID: ${m.id}\nPublisher key: ${verified.fingerprint}\n\nPermissions: ${m.permissions.join(", ") || "None"}\n\nThis signature identifies a key; it does not mean KAI has reviewed this publisher. Plugins cannot access your wallet, Brain, private accounts or other plugin data.`,
+            detail: `${m.description || ""}\n\nID: ${m.id}\nPublisher key: ${verified.fingerprint}\n\nPermissions: ${m.permissions.join(", ") || "None"}\n\nThis signature identifies a key; it does not mean KAI has reviewed this publisher. Plugins never receive wallet keys. Verified feature plugins can access only their declared feature data. Other plugins cannot read your Brain, account credentials or another plugin’s storage.`,
             buttons: ["Cancel", "Install"], defaultId: 0, cancelId: 0, noLink: true });
           if (review.response !== 1 || shuttingDown || win.isDestroyed()) return null;
           pluginHost.close(m.id); return manager.install(verified.package);
