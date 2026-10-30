@@ -45,6 +45,12 @@ jobs:
       - name: Alpha migration desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:alpha-migration -- --synthetic-keychain
+      - name: Wallet credit reconnection desktop check (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:credit-reconnect
+      - name: Wallet credit reconnection desktop check (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:credit-reconnect
       - name: Build Foundation only (no feature engines or updater publication)
         run: npm run dist -- ${{ matrix.args }}
         env:

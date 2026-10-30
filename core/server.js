@@ -118,53 +118,18 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
   if (sessionSecret && wallet.exists() && wallet.tryResumeSession(sessionSecret)) {
     events({ type: "wallet:session-resumed", message: wallet.address });
   }
-  // On-chain KAI balance + open-epoch receipts, via the scheduler's /balance.
-  // Cached 30s; only fetched while something asks (the Earn tab polls status).
-  let earningsCache = { at: 0, data: null };
-  const fetchEarnings = async () => {
-    if (!worker?.running && settings.get("network.privacyMode", "local-only") === "local-only") return null;
-    const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
-    const address = wallet.address;
-    if (!url || !address) return null;
-    const key = `${url}|${address}`;
-    if (earningsCache.key === key && Date.now() - earningsCache.at < 30000) return earningsCache.data;
-    let data = null;
-    try {
-      const r = await fetch(`${url.replace(/\/$/, "")}/balance?address=${encodeURIComponent(address)}`, {
-        signal: AbortSignal.timeout(4000),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok && j.address === address) {
-        data = {
-          address,
-          kai: j.kai,
-          koinShadow: j.koinShadow === true,
-          pendingReceipts: j.pendingReceipts ?? 0,
-          tokensProcessed: j.tokensProcessed ?? null,
-          pendingKai: j.pendingKai ?? null,
-          usage: j.usage ?? null, // { inputTokens, outputTokens, costUsd }
-          freeTokensRemaining: j.freeTokensRemaining ?? null,
-          balanceUsd: j.balanceUsd ?? null,
-          spentThisEpochKai: j.spentThisEpochKai ?? null,
-        };
-      }
-    } catch {
-      // Scheduler unreachable or chain read down: say so instead of
-      // degrading to unexplained dashes — silence reads as "earnings gone".
-      data = { error: "Balance temporarily unavailable — retrying" };
-    }
-    if (data === null) data = { error: "Balance temporarily unavailable — retrying" };
-    // Successes cache for the full 30s; a failed read retries in ~3s so one
-    // slow moment doesn't blank the balance row for half a minute.
-    if (wallet.address !== address || settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL) !== url) return null;
-    earningsCache = { key, at: !data.error ? Date.now() : Date.now() - 27000, data };
-    return data;
-  };
+  // Like Core's KOIN balance, public Testnet KAI is readable while the wallet
+  // is locked and AI privacy is Local-Only. No account, signer or worker needed.
+  const legacyBalance = require("./lib/legacy-kai-balance").createLegacyKaiBalance({
+    getAddress: () => wallet.address,
+    getSchedulerUrl: () => settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
+  });
+  const fetchEarnings = () => legacyBalance.read();
   const { inactiveStatus, shadowStatus } = require("./lib/koin-network/status");
   let koinCache = { key: "", at: 0, data: null };
   const fetchKoinStatus = async () => {
     if (!worker?.running && settings.get("network.privacyMode", "local-only") === "local-only") return inactiveStatus("local-only");
-    if (!worker?._koinAvailable && !earningsCache.data?.koinShadow) return inactiveStatus("unavailable");
+    if (!worker?._koinAvailable && !legacyBalance.last?.koinShadow) return inactiveStatus("unavailable");
     const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL).replace(/\/$/, "");
     const address = wallet.address, key = `${url}|${address}`;
     if (!address) return inactiveStatus();
@@ -178,6 +143,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     return data;
   };
   const earn = {
+    legacyBalance: async () => ({ wallet: { address: wallet.address }, earnings: await fetchEarnings() }),
     status: async () => ({
       wallet: wallet.status(),
       worker: worker ? worker.status() : { running: false, jobsDone: 0, receiptsAccepted: 0 },
@@ -185,14 +151,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
       schedulerUrl: settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
       earnings: await fetchEarnings(),
       koin: await fetchKoinStatus(),
-      /*
-       * Why this machine's Koinos node is — or is not — on the dashboard,
-       * independently of whether it is earning (#84). "My node disappeared"
-       * is the question this answers, and every quiet state it reports
-       * (locked wallet, local-only privacy, no node running) is a legitimate
-       * one that an absent card cannot be told apart from a broken report.
-       */
-      producerReport: producerReporter?.status() || { enabled: false, state: "plugin-not-installed" },
+      // Node reporting belongs to the separately installed Node plugin.
+      producerReport: { enabled: false, state: "plugin-managed" },
     }),
     configure: ({ schedulerUrl }) => {
       let u = String(schedulerUrl || "").trim();
@@ -211,7 +171,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
         u = DEFAULT_SCHEDULER_URL;
       }
       settings.set("earn.schedulerUrl", u);
-      earningsCache = { at: 0, data: null };
+      legacyBalance.clear();
       syncKillSwitch().catch(() => {}); // §32: check the new scheduler's list promptly
       return earn.status();
     },

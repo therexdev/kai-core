@@ -11,6 +11,9 @@ const same = (a,b) => a.dev===b.dev && a.ino===b.ino && a.size===b.size && a.mti
 const absent = error => error?.code === "ENOENT";
 const pretty = file => path.basename(file);
 const pathKey = file => process.platform === "win32" ? file.toLowerCase() : file;
+const inodeKey = st => `${st.dev}:${st.ino}`;
+const sameContentIdentity = (a,b) => a.dev===b.dev && a.ino===b.ino && a.size===b.size && a.mtimeMs===b.mtimeMs;
+function inside(directory,file) { const relative=path.relative(pathKey(directory),pathKey(file));return !!relative && relative!==".." && !relative.startsWith(".."+path.sep) && !path.isAbsolute(relative); }
 function throwAborted(signal) { if(signal?.aborted)throw Object.assign(new Error("Model migration cancelled"),{name:"AbortError",cause:signal.reason}); }
 function noLinkedParents(file) {
   const absolute=path.resolve(file), parsed=path.parse(absolute);let cursor=parsed.root;
@@ -26,12 +29,18 @@ function rootDirectory(directory) {
   const st=fs.lstatSync(directory);if(!st.isDirectory()||st.isSymbolicLink())throw Error("Expected a real model profile directory");
   return noLinkedParents(directory);
 }
-function sourceFile(file) {
+function pairedFile(file,st,pair) {
+  if(!pair||!st.isFile()||st.isSymbolicLink()||st.nlink!==2||pathKey(file)===pathKey(pair.target))return false;
+  const target=noLinkedParents(pair.target),other=fs.lstatSync(target);
+  return other.isFile()&&!other.isSymbolicLink()&&other.nlink===2&&same(identity(st),identity(other));
+}
+function sourceFile(file,pair=null) {
   const resolved=noLinkedParents(file), st=fs.lstatSync(resolved);
-  if(!regular(st)||!Number.isSafeInteger(st.size)||st.size<4)throw Error(`Unsafe or empty model file: ${pretty(file)}`);
+  const linked=pairedFile(resolved,st,pair);
+  if((!regular(st)&&!linked)||!Number.isSafeInteger(st.size)||st.size<4)throw Error(`Unsafe or empty model file: ${pretty(file)}`);
   const fd=fs.openSync(resolved,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
-  try {const opened=fs.fstatSync(fd);if(!regular(opened)||!same(identity(st),identity(opened)))throw Error("Model changed while opening");const magic=Buffer.alloc(4);if(fs.readSync(fd,magic,0,4,0)!==4||magic.toString("ascii")!=="GGUF")throw Error(`Not a GGUF model: ${pretty(file)}`);} finally {fs.closeSync(fd);}
-  return {source:resolved,snapshot:identity(st),sizeBytes:st.size};
+  try {const opened=fs.fstatSync(fd);if((!regular(opened)&&!pairedFile(resolved,opened,pair))||!same(identity(st),identity(opened)))throw Error("Model changed while opening");const magic=Buffer.alloc(4);if(fs.readSync(fd,magic,0,4,0)!==4||magic.toString("ascii")!=="GGUF")throw Error(`Not a GGUF model: ${pretty(file)}`);} finally {fs.closeSync(fd);}
+  return {source:resolved,snapshot:identity(st),sizeBytes:st.size,...(linked?{pairedTarget:pair.target,pairSha256:pair.sha256}:{})};
 }
 function checkedState(file) {
   let st;try{st=fs.lstatSync(file);}catch(error){if(absent(error))return {};throw error;}
@@ -51,18 +60,32 @@ function catalogFiles(catalog) {
   }
   return {names,hashes};
 }
-function inspectAlphaModels({sourceDir,catalog}={}) {
-  const root=rootDirectory(sourceDir),{names}=catalogFiles(catalog),items=[],warnings=[],seen=new Map();
+function pendingMovePairs(destinationDir,catalog) {
+  const pairs=new Map();if(!destinationDir)return pairs;
+  let directory;try{directory=rootDirectory(destinationDir);}catch(error){if(absent(error))return pairs;throw Error(`Unsafe model destination: ${error.message}`);}
+  const {names}=catalogFiles(catalog),reader=fs.opendirSync(directory);let count=0;
+  try{let entry;while((entry=reader.readSync())){
+    if(++count>MAX_MODELS)throw Error("Core model folder contains too many entries");
+    const known=names.get(entry.name.toLowerCase()),match=/^alpha-([a-f0-9]{64})\.gguf$/.exec(entry.name);
+    const hash=known?.sha256||match?.[1];if(!hash)continue;
+    const target=path.join(directory,entry.name),st=fs.lstatSync(target);
+    if(st.isFile()&&!st.isSymbolicLink()&&st.nlink===2)pairs.set(inodeKey(st),{target,sha256:hash});
+  }}finally{reader.closeSync();}
+  return pairs;
+}
+function inspectAlphaModels({sourceDir,catalog,destinationDir}={}) {
+  const root=rootDirectory(sourceDir),{names}=catalogFiles(catalog),pairs=pendingMovePairs(destinationDir,catalog),items=[],warnings=[],seen=new Map();
   function add(file,metadata={}){
     try{
       if(typeof file!=="string"||!path.isAbsolute(file)||!file.toLowerCase().endsWith(".gguf"))throw Error("Imported model has an invalid GGUF path");
       if(items.length>=MAX_MODELS)throw Error("Alpha contains too many model files");
-      const candidate=sourceFile(file),key=process.platform==="win32"?candidate.source.toLowerCase():candidate.source;
+      const pair=inside(path.join(root,"models"),file)?pairs.get(inodeKey(fs.lstatSync(file))):null;
+      const candidate=sourceFile(file,pair),key=process.platform==="win32"?candidate.source.toLowerCase():candidate.source;
       const known=names.get(path.basename(file).toLowerCase());
       if(!known && /(?:mmproj|projector)/i.test(path.basename(file))){warnings.push(`Unsupported vision projector ${pretty(file)} was not included. Image support may need the current catalog projector.`);return;}
       if(metadata.sha256!==undefined&&!SHA.test(metadata.sha256))throw Error(`Invalid saved hash for ${pretty(file)}`);
       if(seen.has(key)){const prior=seen.get(key);if(metadata.sha256){if(prior.expectedSha&&prior.expectedSha!==metadata.sha256.toLowerCase())throw Error(`Conflicting model hashes for ${pretty(file)}`);prior.expectedSha=metadata.sha256.toLowerCase();}if(typeof metadata.label==="string")prior.label=metadata.label;if(typeof metadata.alias==="string")prior.alias=metadata.alias;if(metadata.contextSize!==undefined)prior.contextSize=metadata.contextSize;return;}
-      const item={...candidate,label:typeof metadata.label==="string"?metadata.label:path.basename(file,".gguf"),alias:metadata.alias,contextSize:metadata.contextSize,expectedSha:known?.sha256||metadata.sha256?.toLowerCase()||null,known:known||null};
+      const item={...candidate,label:typeof metadata.label==="string"?metadata.label:path.basename(file,".gguf"),alias:metadata.alias,contextSize:metadata.contextSize,expectedSha:known?.sha256||metadata.sha256?.toLowerCase()||candidate.pairSha256||null,known:known||null,cleanupEligible:inside(path.join(root,"models"),candidate.source)};
       if(known&&!known.sha256)throw Error(`Core has no trusted hash for ${pretty(file)}; download or import it explicitly.`);
       seen.set(key,item);items.push(item);
     }catch(error){warnings.push(error.message);}
@@ -87,17 +110,17 @@ function inspectAlphaModels({sourceDir,catalog}={}) {
       warnings.push(`${pretty(item.source)} needs its current vision projector for image support; the projector was not found in Alpha.`);
     }
   }
-  return {count:items.filter(item=>item.known?.kind!=="projector").length,bytes:items.reduce((sum,item)=>sum+item.sizeBytes,0),items,warnings};
+  return {count:items.filter(item=>item.known?.kind!=="projector").length,bytes:items.reduce((sum,item)=>sum+item.sizeBytes,0),cleanupEligibleCount:items.filter(item=>item.cleanupEligible).length,cleanupExternalCount:items.filter(item=>!item.cleanupEligible).length,items,warnings};
 }
 function ensureChild(root,relative) {
   const parts=relative.split(path.sep).filter(Boolean);let cursor=root;
   for(const part of parts){if(part===".."||part===".")throw Error("Invalid model destination");cursor=path.join(cursor,part);try{fs.mkdirSync(cursor,{mode:0o700});}catch(error){if(error.code!=="EEXIST")throw error;}const st=fs.lstatSync(cursor);if(!st.isDirectory()||st.isSymbolicLink()||pathKey(fs.realpathSync(cursor))!==pathKey(cursor))throw Error("Unsafe model destination directory");}
   return cursor;
 }
-async function digestFile(file,signal) {
-  const safe=noLinkedParents(file),before=fs.lstatSync(safe);if(!regular(before))throw Error("Existing Core model is not a regular private file");
+async function digestFile(file,signal,pair=null) {
+  const safe=noLinkedParents(file),before=fs.lstatSync(safe);if(!regular(before)&&!pairedFile(safe,before,pair))throw Error("Existing Core model is not a regular private file");
   const handle=await fsp.open(safe,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0)),hash=crypto.createHash("sha256"),buffer=Buffer.allocUnsafe(CHUNK);
-  try{const opened=await handle.stat();if(!same(identity(before),identity(opened)))throw Error("Model changed while opening");let position=0;while(position<before.size){throwAborted(signal);const {bytesRead}=await handle.read(buffer,0,Math.min(buffer.length,before.size-position),position);if(!bytesRead)throw Error("Model became shorter during verification");hash.update(buffer.subarray(0,bytesRead));position+=bytesRead;}const after=await handle.stat();if(!same(identity(opened),identity(after))||!same(identity(after),identity(fs.lstatSync(safe))))throw Error("Model changed during verification");return {sha256:hash.digest("hex"),bytes:position};}finally{await handle.close();}
+  try{const opened=await handle.stat();if(!same(identity(before),identity(opened)))throw Error("Model changed while opening");let position=0;while(position<before.size){throwAborted(signal);const {bytesRead}=await handle.read(buffer,0,Math.min(buffer.length,before.size-position),position);if(!bytesRead)throw Error("Model became shorter during verification");hash.update(buffer.subarray(0,bytesRead));position+=bytesRead;}const after=await handle.stat();if(!same(identity(opened),identity(after))||!same(identity(after),identity(fs.lstatSync(safe)))||(!regular(after)&&!pairedFile(safe,after,pair)))throw Error("Model changed during verification");return {sha256:hash.digest("hex"),bytes:position,snapshot:identity(after)};}finally{await handle.close();}
 }
 async function copyToStage(item,directory,signal,onChunk) {
   const source=sourceFile(item.source);if(!same(item.snapshot,source.snapshot))throw Error(`Alpha model changed; reopen migration: ${pretty(item.source)}`);
@@ -150,17 +173,75 @@ function mergeCustom(models,staged,target,item) {
   const entry={alias,label:cleanLabel,path:target,sha256:staged.sha256,sizeBytes:staged.bytes,contextSize:Number.isSafeInteger(item.contextSize)&&item.contextSize>=512&&item.contextSize<=262144?item.contextSize:4096,minRamGb:Math.max(4,Math.ceil(staged.bytes/1e9*1.4+1)),importedAt:new Date().toISOString()};
   models.state.set("customModels",[...before,entry]);return alias;
 }
-async function migrateAlphaModels({sourceDir,models,signal,onProgress=()=>{}}={}) {
+function syncDirectory(directory) {
+  let fd;
+  try{fd=fs.openSync(directory,fs.constants.O_RDONLY);fs.fsyncSync(fd);}
+  catch(error){
+    // Windows does not expose directory FlushFileBuffers through Node. File
+    // handles are still flushed before unlinking an original on that platform.
+    if(process.platform!=="win32"||!["EPERM","EACCES","EISDIR","EINVAL","EBADF","ENOTSUP"].includes(error.code))throw error;
+  }finally{if(fd!==undefined)fs.closeSync(fd);}
+}
+function syncFile(file,expected,pair=null) {
+  const safe=noLinkedParents(file),before=fs.lstatSync(safe);
+  if(!same(expected,identity(before))||(!regular(before)&&!pairedFile(safe,before,pair)))throw Error("Core model changed before its original could be removed");
+  // FlushFileBuffers on Windows needs a writable handle. This does not alter
+  // the bytes; inability to open/flush preserves the Alpha original.
+  const fd=fs.openSync(safe,fs.constants.O_RDWR|(fs.constants.O_NOFOLLOW||0));
+  try{if(!same(expected,identity(fs.fstatSync(fd))))throw Error("Core model changed while opening");fs.fsyncSync(fd);if(!same(expected,identity(fs.fstatSync(fd)))||!same(expected,identity(fs.lstatSync(safe))))throw Error("Core model changed during flushing");}finally{fs.closeSync(fd);}
+}
+function syncRegistration(models,known) {
+  if(!known){
+    if(typeof models.state.filePath!=="string")throw Error("Core model registration cannot be flushed; the Alpha original was kept");
+    const disk=checkedState(models.state.filePath),live=typeof models.state.all==="function"?models.state.all():models.state.data;
+    if(!isDeepStrictEqual(disk,live))throw Error("Core model registration changed before cleanup; the Alpha original was kept");
+    const before=fs.lstatSync(models.state.filePath);syncFile(models.state.filePath,identity(before));syncDirectory(path.dirname(models.state.filePath));
+  }
+}
+function cleanupOriginal(item,target,targetSnapshot,models,known,signal) {
+  throwAborted(signal);
+  const targetPair=item.pairedTarget?{target:item.source}:null;
+  syncFile(target,targetSnapshot,targetPair);syncRegistration(models,known);syncDirectory(path.dirname(target));
+  throwAborted(signal);
+  // No await between these final identity proofs and unlink. A changed source
+  // or destination always leaves the original in place.
+  const source=sourceFile(item.source,item.pairedTarget?{target:item.pairedTarget}:null);
+  if(!same(item.snapshot,source.snapshot)||!same(targetSnapshot,identity(fs.lstatSync(target))))throw Error("A model changed before cleanup; its Alpha original was kept");
+  const sourceLinks=fs.lstatSync(item.source).nlink;
+  fs.unlinkSync(item.source);
+  let warning;try{syncDirectory(path.dirname(item.source));}catch{warning=`The old ${pretty(item.source)} was removed, but its folder could not be flushed. The verified Core model is safe.`;}
+  return {bytes:item.sizeBytes,reclaimedBytes:sourceLinks===1?item.sizeBytes:0,warning};
+}
+async function recoverPublishedStage(target,sha256,sizeBytes,signal) {
+  const targetStat=fs.lstatSync(target);if(!targetStat.isFile()||targetStat.isSymbolicLink()||targetStat.nlink!==2)return;
+  const directory=path.dirname(target),reader=fs.opendirSync(directory);let count=0,temporary;
+  try{let entry;while((entry=reader.readSync())){
+    if(++count>MAX_MODELS)throw Error("Core model folder contains too many entries");
+    if(!/^\.alpha-model-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.tmp$/.test(entry.name))continue;
+    const file=path.join(directory,entry.name),st=fs.lstatSync(file);
+    if(st.isFile()&&!st.isSymbolicLink()&&st.nlink===2&&same(identity(st),identity(targetStat))){temporary=file;break;}
+  }}finally{reader.closeSync();}
+  if(!temporary)return;
+  // A process can stop between publishing a verified staging inode and
+  // removing its temporary name. Recover only this exact owned two-link pair.
+  const proof=await digestFile(target,signal,{target:temporary});
+  if(proof.sha256!==sha256||proof.bytes!==sizeBytes)throw Error("An interrupted Core model copy failed verification; its files were kept");
+  syncFile(target,proof.snapshot,{target:temporary});syncDirectory(directory);throwAborted(signal);
+  if(!same(proof.snapshot,identity(fs.lstatSync(target)))||!pairedFile(target,fs.lstatSync(target),{target:temporary}))throw Error("An interrupted Core model copy changed; its files were kept");
+  fs.unlinkSync(temporary);syncDirectory(directory);
+}
+async function migrateAlphaModels({sourceDir,models,signal,onProgress=()=>{},deleteOldModels=false}={}) {
+  if(typeof deleteOldModels!=="boolean")throw Error("Choose whether to delete old model files");
   if(!models?.catalog||!models?.state||typeof models.modelsDir!=="string")throw Error("Core model service is unavailable");
   if(models._active||models._importing||models._alphaMigration||models._removing?.size)throw Error("Wait for the current model download, import or removal before migrating");
   const source=rootDirectory(sourceDir),profile=rootDirectory(path.dirname(models.modelsDir));
   const sourceKey=pathKey(source),profileKey=pathKey(profile);
   if(sourceKey===profileKey||sourceKey.startsWith(profileKey+path.sep)||profileKey.startsWith(sourceKey+path.sep))throw Error("Alpha and Core model profiles must be separate");
-  const inventory=inspectAlphaModels({sourceDir:source,catalog:models.catalog}),{hashes}=catalogFiles(models.catalog),result={copied:0,skipped:0,models:0,bytes:0,failed:0,warnings:[...inventory.warnings]};
+  const inventory=inspectAlphaModels({sourceDir:source,catalog:models.catalog,destinationDir:models.modelsDir}),{hashes}=catalogFiles(models.catalog),result={copied:0,skipped:0,models:0,bytes:0,failed:0,moved:0,deleted:0,cleanupFailed:0,cleanupSkipped:0,sourceBytesRemoved:0,reclaimedBytes:0,warnings:[...inventory.warnings]};
   const controller=new AbortController(),joined=signal?AbortSignal.any([signal,controller.signal]):controller.signal,active={alias:"Alpha model migration",controller},importing={path:"Koinos AI Alpha models",pct:0};
   models._alphaMigration=active;models._active=active;models._importing=importing;let completedBytes=0;const completedModels=new Set();
   const progress=detail=>{importing.pct=inventory.bytes?Math.min(100,Math.floor(completedBytes/inventory.bytes*100)):100;try{onProgress({completedBytes,totalBytes:inventory.bytes,detail,copied:result.copied,skipped:result.skipped});}catch{/* A closed progress view must not interrupt a safe copy. */}};
-  const assertSource=item=>{if(!same(item.snapshot,sourceFile(item.source).snapshot))throw Error(`Alpha model changed; reopen migration: ${pretty(item.source)}`);};
+  const assertSource=item=>{if(!same(item.snapshot,sourceFile(item.source,item.pairedTarget?{target:item.pairedTarget}:null).snapshot))throw Error(`Alpha model changed; reopen migration: ${pretty(item.source)}`);};
   const assertAllowed=(item,sha256,known)=>{
     const quarantine=models.state.get("quarantined",{});
     if(quarantine[known?.packageId]||quarantine[`custom:${sha256}`])throw Error(`Core has quarantined ${pretty(item.source)}; it was not migrated.`);
@@ -168,41 +249,75 @@ async function migrateAlphaModels({sourceDir,models,signal,onProgress=()=>{}}={}
   try{
     if(!inventory.count)throw Error("No supported Alpha model files remain; reopen migration to check the source.");
     throwAborted(joined);const destination=ensureChild(profile,path.basename(path.resolve(models.modelsDir)));
-    for(const item of inventory.items){
-      throwAborted(joined);let staged,target,created=false,createdIdentity;const start=completedBytes;
+    for(const original of inventory.items){
+      let item={...original};throwAborted(joined);let staged,target,created=false,createdIdentity,fastMove=false,committed=false;const start=completedBytes;
       try{
         assertSource(item);progress(`Checking ${pretty(item.source)}`);
         let verified=null,sha256=item.expectedSha;
-        if(!sha256){verified=await digestFile(item.source,joined);sha256=verified.sha256;assertSource(item);}
+        const sourcePair=item.pairedTarget?{target:item.pairedTarget}:null;
+        if(!sha256){verified=await digestFile(item.source,joined,sourcePair);sha256=verified.sha256;assertSource(item);}
         const known=hashes.get(sha256);
         if(item.known&&known?.filename!==item.known.filename)throw Error(`Model catalog verification failed: ${pretty(item.source)}`);
         if(known&&Number.isSafeInteger(known.sizeBytes)&&known.sizeBytes!==item.sizeBytes)throw Error(`Model size does not match the Core catalog: ${pretty(item.source)}`);
         assertAllowed(item,sha256,known);
         // Keep copied imports inside the existing, accounted-for model store.
         target=path.join(destination,known?known.filename:`alpha-${sha256}.gguf`);
+        if(item.pairedTarget&&pathKey(item.pairedTarget)!==pathKey(target))throw Error("An interrupted model move does not match its verified Core destination");
         let exists;try{fs.lstatSync(target);exists=true;}catch(error){if(!absent(error))throw error;exists=false;}
         if(exists){
-          const existing=await digestFile(target,joined);
+          if(!item.pairedTarget)await recoverPublishedStage(target,sha256,item.sizeBytes,joined);
+          const existing=await digestFile(target,joined,item.pairedTarget?{target:item.source}:null);
           if(existing.sha256!==sha256||existing.bytes!==item.sizeBytes)throw Error(`Existing Core model differs and was preserved: ${pretty(target)}`);
-          verified=verified||await digestFile(item.source,joined);assertSource(item);
+          verified=verified||await digestFile(item.source,joined,sourcePair);assertSource(item);
           if(verified.sha256!==sha256||verified.bytes!==item.sizeBytes)throw Error(`Model integrity check failed: ${pretty(item.source)}`);
           staged={sha256,bytes:item.sizeBytes};
         }else{
-          const stat=fs.statfsSync(destination);
-          if(Number(stat.bavail)*Number(stat.bsize)<item.sizeBytes)throw Error(`Not enough free space to copy ${pretty(item.source)}`);
-          progress(`Copying ${pretty(item.source)}`);
-          staged=await copyToStage({...item,expectedSha:sha256},destination,joined,bytes=>{completedBytes+=bytes;progress(`Copying ${pretty(item.source)}`);});
-          assertSource(item);assertAllowed(item,sha256,known);
-          created=await publishCopy(staged,target,joined);
-          if(created)createdIdentity=identity(fs.lstatSync(target));
+          if(deleteOldModels&&item.cleanupEligible&&item.snapshot.dev===fs.statSync(destination).dev){
+            verified=verified||await digestFile(item.source,joined);assertSource(item);throwAborted(joined);
+            if(verified.sha256!==sha256||verified.bytes!==item.sizeBytes)throw Error(`Model integrity check failed: ${pretty(item.source)}`);
+            try{
+              // Same-volume publication uses no model-sized spare space. The
+              // original remains present until metadata and file are durable.
+              fs.linkSync(item.source,target);created=true;fastMove=true;createdIdentity=identity(fs.lstatSync(target));
+              const linked=sourceFile(item.source,{target,sha256});
+              if(!sameContentIdentity(item.snapshot,linked.snapshot))throw Error("Alpha model changed while preparing its move");
+              item={...item,...linked};staged={sha256,bytes:item.sizeBytes};
+            }catch(error){if(created||!["EXDEV","EOPNOTSUPP","ENOTSUP","EPERM"].includes(error.code))throw error;}
+          }
+          if(!created){
+            const stat=fs.statfsSync(destination);
+            if(Number(stat.bavail)*Number(stat.bsize)<item.sizeBytes)throw Error(`Not enough free space to copy ${pretty(item.source)}. One model at a time must fit before its old copy can be removed.`);
+            progress(`Copying ${pretty(item.source)}`);
+            staged=await copyToStage({...item,expectedSha:sha256},destination,joined,bytes=>{completedBytes+=bytes;progress(`Copying ${pretty(item.source)}`);});
+            assertSource(item);assertAllowed(item,sha256,known);
+            created=await publishCopy(staged,target,joined);
+            if(created)createdIdentity=identity(fs.lstatSync(target));
+          }
         }
+        // Also verifies recovered two-link moves before registration or cleanup.
+        const targetProof=deleteOldModels||item.pairedTarget?await digestFile(target,joined,item.pairedTarget?{target:item.source}:null):null;
+        if(targetProof&&(targetProof.sha256!==sha256||targetProof.bytes!==item.sizeBytes))throw Error(`Core model verification failed: ${pretty(target)}`);
+        if(deleteOldModels&&item.cleanupEligible)progress(`Finishing move of ${pretty(item.source)}`);
+        assertSource(item);
+        if(targetProof&&!same(targetProof.snapshot,identity(fs.lstatSync(target))))throw Error("Core model changed before registration");
         throwAborted(joined);assertAllowed(item,sha256,known);
         if(!known)mergeCustom(models,staged,target,item);
+        committed=true;
         if(created){result.copied++;result.bytes+=staged.bytes;}else result.skipped++;
         if(known?.kind!=="projector")completedModels.add(sha256);
         result.models=completedModels.size;
+        if(deleteOldModels){
+          if(!item.cleanupEligible){result.cleanupSkipped++;result.warnings.push(`Kept imported original outside Alpha's models folder: ${item.source}`);}
+          else{
+            try{
+              const removed=cleanupOriginal(item,target,targetProof.snapshot,models,known,joined);
+              result.deleted++;result.sourceBytesRemoved+=removed.bytes;result.reclaimedBytes+=removed.reclaimedBytes;if(fastMove)result.moved++;
+              if(removed.warning)result.warnings.push(removed.warning);
+            }catch(error){if(joined.aborted)throw error;result.cleanupFailed++;result.warnings.push(`Core has ${pretty(target)}, but its old model was kept: ${error.message}`);}
+          }
+        }
       }catch(error){
-        if(created&&target){try{if(!createdIdentity||!same(createdIdentity,identity(fs.lstatSync(target))))throw Error("Model was replaced");fs.unlinkSync(target);}catch{result.warnings.push(`The verified copy ${pretty(target)} remains on disk but was not registered.`);}}
+        if(created&&target&&!committed){try{const targetStat=fs.lstatSync(target);if(!createdIdentity||!(fastMove?pairedFile(target,targetStat,{target:item.source})&&inodeKey(targetStat)===`${createdIdentity.dev}:${createdIdentity.ino}`:same(createdIdentity,identity(targetStat))))throw Error("Model was replaced");fs.unlinkSync(target);}catch{result.warnings.push(`The verified copy ${pretty(target)} remains on disk but was not registered.`);}}
         if(joined.aborted){error.partialResult=result;throw error;}
         result.failed++;result.warnings.push(error.message);
       }finally{

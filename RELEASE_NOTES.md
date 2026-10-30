@@ -1,13 +1,11 @@
-# KAI Foundation 0.7.1
+# KAI Foundation 0.7.2
 
-Settings now ends with **Migrate from Koinos AI Alpha**. Click **Migrate**, select **Models**, **Wallet**, or both, and copy the selected items into KAI Core. Core detects the standard Alpha profile; **Choose folder** supports custom locations.
+**Restore purchased credits and activity.** Your Credits now offers **Restore wallet credits** for an imported wallet. Unlock it if needed, then approve connecting this installation. Core proves ownership of the same wallet and reloads its existing purchased balance and recent server-side purchase/usage history. No new purchase or old credential-file migration is needed. Records that existed only in the old application's local recovery journal are not reconstructed from the wallet.
 
-Close Alpha, including its tray process, before migrating. Models are copied into Core with progress and cancellation. Recognized catalog weights and vision projectors retain Core's required filenames; imported models receive their own Core paths. Existing Core files are preserved. Generated runtime caches are rebuilt when needed instead of duplicating them.
+**Testnet KAI and expected KOIN drop.** Fixed the broken Earn balance endpoint left after Node functionality moved into its plugin. The public wallet balance now loads independently of AI privacy and wallet unlock, with bounded, validated reads. The estimate remains 1 KOIN per 5 Testnet KAI and excludes pending rewards. Service failures remain explicit rather than displaying a made-up zero.
 
-The wallet stays encrypted and locked with the same address and password. Unlock it in Core using the Alpha wallet password after migration. An existing Core wallet is never replaced. Wallet copying checks the encrypted file structure; normal unlock verifies the password and wallet identity.
+**Optional model cleanup.** The Alpha migration popup now includes **Delete old models after migration**, off by default. Same-drive transfers avoid a second full model copy. Across drives, Core verifies and flushes each copied file before deleting its Alpha original, freeing source space as it proceeds. Interrupted transfers can be retried. Cleanup is limited to Alpha's models folder; external imported files and generated runtime caches are retained and identified in the result. Alpha's wallet is never deleted.
 
-Alpha's original files are unchanged. Plugin data, documents, connected accounts, settings, session keys and credentials are excluded. The Koinos Node plugin's separate wallet is not imported.
+The Koinos Node plugin has a separate update for reviewing and migrating a stopped legacy node's chain data. Update that plugin through Plugins when its catalog update appears. Wallets, production keys, KOIN and VHP are not migrated with the chain.
 
-Install the Windows Setup build for a normal installation or Portable to launch without installing. Core updates remain manual; no automatic update feed is published.
-
-Validation covers selective copies, wallet encryption compatibility, existing-data protection, cancellation, model hashes and metadata, and the actual Settings popup in Electron using disposable profiles and a test wallet. It does not exercise live blockchain transactions.
+Core updates remain manual. Validation includes model transfer and cancellation tests, actual desktop migration and credit reconnection checks, and same-wallet restoration against a local backend with synthetic balances and transactions. Live user funds and a live Docker blockchain were not moved during testing.

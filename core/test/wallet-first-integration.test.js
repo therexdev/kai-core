@@ -62,7 +62,12 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
   const chain = new (backend("./lib/koin-network/chain").KoinChain)(f.d, f.provider);
   let runtime;
   const networkOverview = () => {
-    if (!multiModel) return { observedAt: clock(), validUntil: clock() + 15000, models: [{ id: tariff.model, available: true, providers: 1, freeEligible: true }] };
+    if (!multiModel) {
+      const observedAt = clock(), validUntil = observedAt + 15000;
+      return { observedAt, validUntil, state: "available", models: [{ id: tariff.model, available: true, providers: 1, freeEligible: true }],
+        providers: [{ id: require("../../electron/credit-network-eligibility").providerId(Signer.fromSeed("wallet-first-provider").getAddress()), ready: true,
+          models: [{ model: tariff.model, ready: true, state: "online", validUntil }] }] };
+    }
     // The controlled chain remains serving during real preparation timers;
     // sample before the overview so its timestamp can never be in the future.
     runtime.lastServing = clock();
@@ -264,6 +269,26 @@ test("real HTTP wallet-only enrollment, free balance, purchase finality and lock
   const restartedDevice = new ProviderDevice({ service: f.providerService, core: f.core, dialog: { showMessageBox: () => { throw Error("No new approval expected"); } }, clock: f.clock });
   f.cleanup(() => restartedDevice.dispose());
   assert.equal((await restartedDevice.context(signal)).signer.address, f.providerWallet.address);
+  // A new Foundation installation has only the imported wallet, with no Alpha
+  // session, journals or profile files. Reviewed possession of the same key
+  // must restore the existing server ledger rather than a new paid identity.
+  const freshDir = path.join(f.dir, "fresh-foundation"), freshStorage = protectedStorage(); fs.mkdirSync(freshDir);
+  const importedWallet = desktopWallet(Signer.fromWif(f.signer.getPrivateKey("wif")));
+  const freshAccount = new AccountService({ ...f.accountOptions, dataDir: freshDir, wallet: importedWallet, safeStorage: freshStorage });
+  const freshService = new CreditService({ ...f.serviceOptions, dataDir: freshDir, account: freshAccount, storage: freshStorage });
+  f.cleanup(() => freshService.dispose());
+  const savedAlphaSession = fs.readFileSync(f.account.file);
+  assert.equal(freshAccount._token(), null);
+  const guest = await freshService.run("credit-status", undefined, signal);
+  assert.equal(guest.accessKind, "device-free"); assert.equal(guest.paidAccessLocked, true); assert.deepEqual(guest.purchases, []);
+  assert.equal((await freshService.walletInfo(signal)).state, "wallet-connection-required");
+  const restored = await freshService.connectWallet(f.window, { sessionOnly: false }, signal);
+  assert.equal(restored.accountId, connected.accountId, "same wallet reconnects to its original account");
+  const recovered = await freshService.run("credit-status", undefined, signal);
+  assert.equal(recovered.owner, f.wallet.address); assert.equal(recovered.credits.purchased.available, after.credits.purchased.available);
+  assert.deepEqual(recovered.purchases, after.purchases); assert.deepEqual(recovered.usage, after.usage);
+  assert.deepEqual(fs.readFileSync(f.account.file), savedAlphaSession, "original app session is unchanged");
+  assert.equal(f.transactionSigns(), 1, "restoring credit access signs no additional transaction");
 });
 
 test("an included purchase outlives its quote, survives restart and credits once without cancellation or another signature", options, async t => {

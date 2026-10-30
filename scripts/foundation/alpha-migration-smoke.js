@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
+const http = require("node:http");
 const { _electron } = require("playwright-core");
 
 const appRoot = path.resolve(process.env.KAI_SMOKE_SOURCE_ROOT || path.join(__dirname, "../.."));
@@ -51,6 +52,15 @@ async function main() {
   const { Signer } = require(path.join(appRoot, "node_modules/koilib"));
   const { encryptKeystore, decryptKeystore } = require(path.join(appRoot, "core/lib/keystore"));
   const signer = new Signer({ privateKey: crypto.randomBytes(32).toString("hex"), compressed: false });
+  const balanceRequests = [], balanceServer = http.createServer((request, response) => {
+    const url = new URL(request.url, "http://127.0.0.1"); response.setHeader("content-type", "application/json");
+    if (url.pathname !== "/balance") { response.writeHead(404); response.end(JSON.stringify({ ok: false })); return; }
+    balanceRequests.push({ address: url.searchParams.get("address"), authorization: request.headers.authorization, cookie: request.headers.cookie });
+    response.end(JSON.stringify({ ok: true, address: signer.getAddress(), kai: "12345.67890123", pendingKai: "999" }));
+  });
+  await new Promise((resolve, reject) => { balanceServer.once("error", reject); balanceServer.listen(0, "127.0.0.1", resolve); }); balanceServer.unref();
+  const balanceOrigin = `http://127.0.0.1:${balanceServer.address().port}`;
+  report.syntheticLegacyBalance = { server: "loopback-only", kai: "12345.67890123", pendingKai: "999", realFundsRead: false };
   const keystore = encryptKeystore({ privateKeyHex: signer.getPrivateKey("hex"), address: signer.getAddress(), password });
   keystore.compressed = false;
   keystore.ethAddress = require(path.join(appRoot, "core/lib/koinos/eth")).deriveEthAddress(signer.getPrivateKey("hex"));
@@ -64,7 +74,7 @@ async function main() {
   for (const name of ["wallet/session.bin", "machine-secret.bin", "account.cfg", "credit-account-fixture.cfg", "documents/private-document.txt", "plugins/data/private-plugin.txt", "brain/private-memory.txt", "models/partial.gguf.part"]) write(path.join(source, name), sentinel + ":" + name);
   const sourceBefore = snapshot(source), externalBefore = snapshot(external);
   require(path.join(appRoot, "electron/foundation-profile")).prepareFoundationProfile(profile);
-  write(path.join(profile, "settings.json"), JSON.stringify({ network: { privacyMode: "local-only" }, earn: { autoStart: false } }));
+  write(path.join(profile, "settings.json"), JSON.stringify({ network: { privacyMode: "local-only" }, earn: { autoStart: false, schedulerUrl: balanceOrigin } }));
   write(path.join(temp, "package.json"), JSON.stringify({ name: "kai-alpha-migration-smoke", version: require(path.join(appRoot, "package.json")).version, main: "desktop.js" }));
   write(path.join(temp, "desktop.js"), `"use strict";\nrequire(${JSON.stringify(path.join(__dirname, "apps-fixture.js"))}).install(${JSON.stringify({ appRoot: runtimeRoot, appData, reportFile: exitReport, syntheticKeychain })});\nrequire(${JSON.stringify(path.join(runtimeRoot, "electron/core-main.js"))});\n`);
   const args = [];
@@ -104,14 +114,19 @@ async function main() {
       assert.equal(await page.locator("#alpha-migration-dialog").getAttribute("open"), "");
       assert.equal(await page.locator("#alpha-migration-source-path").textContent(), source);
       assert.equal(await page.locator("#alpha-migration-models").isChecked(), true); assert.equal(await page.locator("#alpha-migration-wallet").isChecked(), true);
+      assert.equal(await page.locator('#alpha-migration-dialog input[type="checkbox"]').count(), 3);
+      assert.equal(await page.locator("#alpha-migration-delete-old-models").isChecked(), false); assert.equal(await page.locator("#alpha-migration-delete-old-models").isEnabled(), true);
       const inventory = await call("migration.scan"); assert.equal(inventory.models.count, 2); assert.equal(inventory.wallet.address, signer.getAddress());
       assert.equal(/ciphertext|pwHint|privateKey|session\.bin/.test(JSON.stringify(inventory)), false, "Scan exposes only public wallet metadata");
       await capture("migration-dialog.png");
     });
     await check("Models and Wallet can be independently selected or selected together", async () => {
+      await page.locator("#alpha-migration-delete-old-models").check();
       await page.locator("#alpha-migration-models").uncheck(); assert.equal(await page.locator("#alpha-migration-submit").isEnabled(), true);
+      assert.equal(await page.locator("#alpha-migration-delete-old-models").isDisabled(), true); assert.equal(await page.locator("#alpha-migration-delete-old-models").isChecked(), false);
       await page.locator("#alpha-migration-wallet").uncheck(); assert.equal(await page.locator("#alpha-migration-submit").isDisabled(), true);
       await page.locator("#alpha-migration-models").check(); assert.equal(await page.locator("#alpha-migration-submit").isEnabled(), true);
+      assert.equal(await page.locator("#alpha-migration-delete-old-models").isChecked(), false);
       await page.locator("#alpha-migration-wallet").check();
       await page.locator("#alpha-migration-submit").click();
       const job = await waitForJob(); assert.equal(job.phase, "complete", JSON.stringify(job)); report.firstMigration = job;
@@ -154,6 +169,36 @@ async function main() {
       await until(async () => (await call("status")).wallet.unlocked === false, "Wallet did not lock"); assert.equal(fs.existsSync(path.join(profile, "wallet/session.bin")), false);
       assert.deepEqual(fs.readFileSync(targetWallet), savedWalletBytes); assert.deepEqual(snapshot(source), sourceBefore);
     });
+    await check("Earn shows the locked imported wallet's synthetic KAI balance and 1:5 drop in Local-Only", async () => {
+      const readEarn = () => page.evaluate(async () => { const response = await fetch("/core/earn"); return { status: response.status, body: await response.json() }; });
+      const before = await readEarn(); assert.equal(before.status, 200); assert.equal(before.body.worker.running, false); assert.equal(before.body.wallet.unlocked, false);
+      await page.locator('[data-page="earning"]').click();
+      await until(async () => await page.locator("#earn-wallet-kai").textContent() === "12,345.67890123", "Earn did not show the synthetic wallet KAI balance");
+      assert.equal(await page.locator("#earn-koin-drop").textContent(), "2,469.13578024");
+      const after = await readEarn(); assert.equal(after.status, 200); assert.equal(after.body.worker.running, false); assert.equal(after.body.wallet.unlocked, false);
+      assert.equal((await call("status")).network.privacyMode, "local-only"); assert.equal(readJson(path.join(profile, "settings.json")).earn.autoStart, false);
+      assert.ok(balanceRequests.length > 0); for (const request of balanceRequests) { assert.equal(request.address, signer.getAddress()); assert.equal(request.authorization, undefined); assert.equal(request.cookie, undefined); }
+      await page.locator("#earn-legacy-drop").scrollIntoViewIfNeeded(); await capture("earn-imported-wallet-balance.png");
+    });
+    await check("Opt-in cleanup removes only verified Alpha model originals and moves new same-drive files", async () => {
+      const freshModel = path.join(source, "models/alpha-move-fixture.gguf"), freshBytes = ggufFixture("fresh-same-drive-model"), freshHash = hash(freshBytes);
+      write(freshModel, freshBytes); const beforeMove = fs.statSync(freshModel);
+      await page.locator('[data-page="settings"]').click(); await page.locator("#alpha-migration-open").click();
+      await until(() => page.locator("#alpha-migration-models").isEnabled(), "Cleanup inventory did not load");
+      assert.equal(await page.locator("#alpha-migration-delete-old-models").isChecked(), false);
+      await page.locator("#alpha-migration-delete-old-models").check(); await capture("delete-old-models-review.png");
+      await page.locator("#alpha-migration-submit").click();
+      const job = await waitForJob(); assert.equal(job.phase, "complete", JSON.stringify(job)); report.cleanupMigration = job;
+      assert.equal(job.selected.deleteOldModels, true); assert.equal(job.result.models.deleted, 2); assert.equal(job.result.models.moved, 1); assert.equal(job.result.models.cleanupSkipped, 1);
+      assert.equal(fs.existsSync(folderModel), false); assert.equal(fs.existsSync(freshModel), false); assert.deepEqual(snapshot(external), externalBefore);
+      const expectedSource = { ...sourceBefore }; delete expectedSource[path.relative(source, folderModel)]; assert.deepEqual(snapshot(source), expectedSource);
+      const target = path.join(profile, "models", `alpha-${freshHash}.gguf`); assert.deepEqual(fs.readFileSync(target), freshBytes); assert.equal(fs.statSync(target).nlink, 1);
+      assert.equal(fs.statSync(target).ino, beforeMove.ino); assert.equal(fs.statSync(target).dev, beforeMove.dev);
+      assert.deepEqual(fs.readFileSync(targetWallet), savedWalletBytes); assert.equal(readJson(path.join(profile, "state.json")).customModels.length, 3);
+      await until(() => page.locator("#alpha-migration-outcome").isVisible(), "Cleanup outcome did not appear");
+      assert.match(await page.locator("#alpha-migration-outcome-models").textContent(), /2 removed/);
+      assert.doesNotMatch(await page.locator("#alpha-migration-selection-note").textContent(), /Alpha files are unchanged/); await capture("delete-old-models-complete.png");
+    });
     await check("No renderer or native startup errors occur", async () => {
       assert.deepEqual(pageErrors, []); const state = await application.evaluate(() => global.__foundationSmoke); assert.deepEqual(state.errors, []); report.blockedPublicNetwork = state.blockedNetwork;
       assert.equal(/No handler registered for/.test(logs), false);
@@ -162,7 +207,7 @@ async function main() {
     const exited = new Promise((resolve, reject) => { const timer = setTimeout(() => reject(Error("Core did not quit after 30 seconds")), 30000); child.once("exit", code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error("Core exited " + code)); }); });
     await application.evaluate(() => setTimeout(() => global.__foundationTrayMenu.find(item => item.label === "Quit KAI Core").click(), 0)); await exited; application = null;
     report.exit = readJson(exitReport); assert.deepEqual(report.exit.errors, []); assert.equal(report.exit.remainingServices, 0); assert.equal(report.exit.remainingViews, 0);
-    report.status = "passed"; report.checks.push("Core quits cleanly and original Alpha profile remains unchanged");
+    report.status = "passed"; report.checks.push("Core quits cleanly after copying or selectively moving Alpha models");
   } catch (error) {
     report.status = "failed"; report.error = error.stack || String(error);
     if (page) await page.screenshot({ path: path.join(output, "failure.png") }).catch(() => {});
@@ -173,6 +218,7 @@ async function main() {
       await application.evaluate(({ app }) => setTimeout(() => app.quit(), 0)).catch(() => {});
       await until(() => child.exitCode !== null || child.signalCode !== null, "Fixture shutdown timed out", 5000).catch(() => { report.cleanupForced = true; child.kill("SIGKILL"); });
     }
+    balanceServer.closeAllConnections(); await new Promise(resolve => balanceServer.close(resolve));
     report.logs = logs; report.pageErrors = pageErrors;
     fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(report, null, 2)); fs.writeFileSync(path.join(output, "electron.log"), logs);
     if (!process.argv.includes("--keep-profile")) fs.rmSync(temp, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });

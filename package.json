@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "KAI Foundation: a documented host for independent plugins",
   "license": "MIT",
@@ -24,7 +24,8 @@
     "prepack": "npm run build:manifest",
     "test:services": "node --test --test-concurrency=2 core/test/wallet-session-secret.test.js core/test/wallet-credential-vault.test.js core/test/wallet-first-integration.test.js core/test/koin-credit-service.test.js core/test/credit-account.test.js core/test/model-manager.test.js core/test/gateway.test.js",
     "test:foundation-native": "node scripts/foundation/native-smoke.js",
-    "test:alpha-migration": "node scripts/foundation/alpha-migration-smoke.js"
+    "test:alpha-migration": "node scripts/foundation/alpha-migration-smoke.js",
+    "test:credit-reconnect": "node scripts/foundation/credit-reconnect-smoke.js"
   },
   "devDependencies": {
     "electron": "^43.8.1",
@@ -91,6 +92,7 @@
       "core/lib/koinos/token-abi.json",
       "core/lib/koinos/wallet-history.js",
       "core/lib/koinos/wallet-nonce.js",
+      "core/lib/legacy-kai-balance.js",
       "core/lib/local-chat-messages.js",
       "core/lib/model-manager.js",
       "core/lib/network-overview.js",

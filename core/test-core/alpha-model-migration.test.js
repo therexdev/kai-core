@@ -324,3 +324,100 @@ test("cancellation preserves models already committed and reports them for a saf
   assert.equal(retried.copied, 1);
   assert.equal(retried.skipped, 1);
 });
+
+test("opt-in moves owned models without requiring duplicate disk space and leaves unrelated Alpha data", async t => {
+  const f=fixture(t,{vision:true}), custom=gguf(3), originals=[f.alphaModel("current-model.gguf",f.payload),f.alphaModel("current-mmproj.gguf",f.projector),f.alphaModel("custom-owned.gguf",custom)];
+  f.alphaState({customModels:[{path:originals[2],sha256:sha(custom),label:"Owned import",alias:"custom-owned"}],documents:["private"]});
+  const privateFile=f.write(path.join(f.sourceDir,"wallet/wallet.json"),"encrypted private data"), stateBefore=fs.readFileSync(path.join(f.sourceDir,"state.json"));
+  const stats=originals.map(file=>fs.statSync(file));
+  t.mock.method(fs,"statfsSync",()=>{throw Error("Same-volume moves must not require extra model space");});
+  const result=await migrateAlphaModels({...f,deleteOldModels:true});
+  assert.deepEqual({copied:result.copied,moved:result.moved,deleted:result.deleted,failed:result.failed,cleanupFailed:result.cleanupFailed},{copied:3,moved:3,deleted:3,failed:0,cleanupFailed:0});
+  const targets=[f.models.packagePath("tiny@1"),path.join(f.models.modelsDir,"current-mmproj.gguf"),owned(f,custom)];
+  targets.forEach((file,index)=>{const current=fs.statSync(file);assert.equal(current.ino,stats[index].ino);assert.equal(current.dev,stats[index].dev);assert.equal(current.nlink,1);assert.equal(fs.existsSync(originals[index]),false);});
+  assert.equal(result.reclaimedBytes,0);assert.equal(result.sourceBytesRemoved,stats.reduce((sum,st)=>sum+st.size,0));
+  assert.equal(f.state.get("customModels")[0].path,owned(f,custom));assert.deepEqual(fs.readFileSync(path.join(f.sourceDir,"state.json")),stateBefore);assert.equal(fs.readFileSync(privateFile,"utf8"),"encrypted private data");noTemporaryCopies(f);
+});
+
+test("cross-volume fallback verifies and removes each copied original before processing the next", async t => {
+  const f=fixture(t),first=f.alphaModel("first.gguf",gguf(4)),second=f.alphaModel("second.gguf",gguf(5));
+  const originalStats=[first,second].map(file=>fs.statSync(file)),link=fs.linkSync,unlink=fs.unlinkSync,seen=[];
+  t.mock.method(fs,"linkSync",(from,to)=>{if(path.dirname(from)===path.join(f.sourceDir,"models"))throw Object.assign(Error("different device"),{code:"EXDEV"});return link(from,to);});
+  t.mock.method(fs,"statfsSync",()=>({bavail:96,bsize:1}));
+  t.mock.method(fs,"unlinkSync",file=>{if([first,second].includes(file)){const bytes=fs.readFileSync(file),target=owned(f,bytes),record=f.state.get("customModels").find(entry=>entry.path===target);assert.ok(record,"register metadata before deleting source");assert.deepEqual(fs.readFileSync(target),bytes);seen.push(file);}return unlink(file);});
+  const result=await migrateAlphaModels({...f,deleteOldModels:true,onProgress:p=>{if(p.detail==="Copying second.gguf")assert.equal(fs.existsSync(first),false);}});
+  assert.equal(result.failed,0);assert.equal(result.cleanupFailed,0);assert.equal(result.deleted,2);assert.equal(result.moved,0);assert.equal(result.reclaimedBytes,192);assert.deepEqual(seen,[first,second]);
+  assert.notEqual(fs.statSync(owned(f,gguf(4))).ino,originalStats[0].ino);assert.notEqual(fs.statSync(owned(f,gguf(5))).ino,originalStats[1].ino);noTemporaryCopies(f);
+});
+
+test("opt-in cleanup removes verified prior copies but preserves external imported originals", async t => {
+  const f=fixture(t),source=f.alphaModel("current-model.gguf",f.payload),external=f.write(path.join(f.root,"shared/model.gguf"),gguf(3));
+  f.alphaState({customModels:[{path:external,sha256:sha(gguf(3)),alias:"custom-shared",label:"Shared model"}]});
+  const first=await migrateAlphaModels(f);assert.equal(first.deleted,0);assert.equal(fs.existsSync(source),true);
+  const target=f.models.packagePath("tiny@1"),before=fs.statSync(target);t.mock.method(fs,"statfsSync",()=>({bavail:0,bsize:4096}));
+  const result=await migrateAlphaModels({...f,deleteOldModels:true});
+  assert.equal(result.copied,0);assert.equal(result.skipped,2);assert.equal(result.deleted,1);assert.equal(result.moved,0);assert.equal(result.cleanupSkipped,1);assert.equal(result.cleanupFailed,0);
+  assert.equal(fs.existsSync(source),false);assert.equal(fs.statSync(target).ino,before.ino);assert.deepEqual(fs.readFileSync(external),gguf(3));assert.ok(result.warnings.some(w=>w.includes(external)&&w.includes("outside Alpha")));
+});
+
+test("failed registration keeps the source and rolls back an unpublished same-volume move", async t => {
+  const f=fixture(t),bytes=gguf(4),source=f.alphaModel("custom.gguf",bytes);
+  fs.writeFileSync(f.state.filePath,"damaged state");
+  const result=await migrateAlphaModels({...f,deleteOldModels:true});
+  assert.equal(result.failed,1);assert.equal(result.deleted,0);assert.equal(result.copied,0);assert.deepEqual(fs.readFileSync(source),bytes);assert.equal(fs.statSync(source).nlink,1);assert.equal(fs.existsSync(owned(f,bytes)),false);assert.equal(fs.readFileSync(f.state.filePath,"utf8"),"damaged state");
+});
+
+test("source cleanup waits for destination file and registration to be flushed and can retry a failed flush", async t => {
+  const f=fixture(t),bytes=gguf(4),source=f.alphaModel("custom.gguf",bytes),sync=fs.fsyncSync;let failFlush=true;
+  t.mock.method(fs,"fsyncSync",fd=>{if(failFlush&&fs.fstatSync(fd).isFile())throw Object.assign(Error("flush failed"),{code:"EIO"});return sync(fd);});
+  const first=await migrateAlphaModels({...f,deleteOldModels:true});assert.equal(first.copied,1);assert.equal(first.deleted,0);assert.equal(first.cleanupFailed,1);assert.equal(fs.existsSync(source),true);assert.equal(fs.statSync(source).nlink,2);assert.equal(f.state.get("customModels")[0].path,owned(f,bytes));
+  failFlush=false;
+  const scan=inspectAlphaModels({sourceDir:f.sourceDir,catalog:f.catalog,destinationDir:f.models.modelsDir});assert.equal(scan.count,1);
+  const second=await migrateAlphaModels({...f,deleteOldModels:true});assert.equal(second.deleted,1);assert.equal(second.skipped,1);assert.equal(second.cleanupFailed,0);assert.equal(fs.existsSync(source),false);assert.equal(fs.statSync(owned(f,bytes)).nlink,1);
+});
+
+test("source unlink failure keeps a verified Core model and retry safely finishes the interrupted pair", async t => {
+  const f=fixture(t),source=f.alphaModel("current-model.gguf",f.payload),unlink=fs.unlinkSync;let deny=true;
+  t.mock.method(fs,"unlinkSync",file=>{if(deny&&file===source)throw Object.assign(Error("source is busy"),{code:"EACCES"});return unlink(file);});
+  const first=await migrateAlphaModels({...f,deleteOldModels:true});assert.equal(first.cleanupFailed,1);assert.equal(first.deleted,0);assert.equal(first.copied,1);assert.equal(fs.statSync(source).nlink,2);
+  deny=false;const second=await migrateAlphaModels({...f,deleteOldModels:true});assert.equal(second.failed,0);assert.equal(second.cleanupFailed,0);assert.equal(second.deleted,1);assert.equal(fs.existsSync(source),false);assert.deepEqual(fs.readFileSync(f.models.packagePath("tiny@1")),f.payload);
+});
+
+test("interrupted two-link moves recover only their canonical hashed target and keep other hardlinks blocked", async t => {
+  const f=fixture(t),bytes=gguf(4),source=f.alphaModel("old.gguf",bytes),target=owned(f,bytes);fs.mkdirSync(f.models.modelsDir);fs.linkSync(source,target);
+  assert.equal(inspectAlphaModels({sourceDir:f.sourceDir,catalog:f.catalog,destinationDir:f.models.modelsDir}).count,1);
+  const recovered=await migrateAlphaModels({...f,deleteOldModels:true});assert.equal(recovered.skipped,1);assert.equal(recovered.deleted,1);assert.equal(f.state.get("customModels")[0].path,target);assert.equal(fs.statSync(target).nlink,1);
+  const bad=f.alphaModel("wrong-pair.gguf",gguf(5)),wrong=owned(f,gguf(6));fs.linkSync(bad,wrong);
+  const result=await migrateAlphaModels({...f,deleteOldModels:true});assert.equal(result.failed,1);assert.equal(result.deleted,0);assert.equal(fs.existsSync(bad),true);assert.equal(fs.statSync(bad).nlink,2);
+  const third=f.write(path.join(f.root,"unrelated.gguf"),gguf(7));fs.linkSync(third,path.join(f.sourceDir,"models/third-link.gguf"));fs.linkSync(third,owned(f,gguf(7)));
+  const scan=inspectAlphaModels({sourceDir:f.sourceDir,catalog:f.catalog,destinationDir:f.models.modelsDir});assert.ok(scan.warnings.some(w=>/Unsafe/.test(w)));assert.equal(fs.statSync(third).nlink,3);
+});
+
+test("source changes after verification never remove its original or register corrupted moved bytes", async t => {
+  const f=fixture(t),source=f.alphaModel("current-model.gguf",f.payload);let changed=false;
+  const result=await migrateAlphaModels({...f,deleteOldModels:true,onProgress:p=>{if(!changed&&p.detail.startsWith("Finishing move")){changed=true;fs.appendFileSync(source,"changed by Alpha");}}});
+  assert.equal(result.failed,1);assert.equal(result.deleted,0);assert.equal(result.copied,0);assert.equal(fs.existsSync(source),true);assert.equal(fs.statSync(source).nlink,1);assert.equal(fs.existsSync(f.models.packagePath("tiny@1")),false);
+});
+
+test("cancelling before commit restores an unfinished move; completed earlier moves remain in Core", async t => {
+  const f=fixture(t),source=f.alphaModel("current-model.gguf",f.payload),cancel=new AbortController();
+  await assert.rejects(migrateAlphaModels({...f,deleteOldModels:true,signal:cancel.signal,onProgress:p=>{if(p.detail.startsWith("Finishing move"))cancel.abort();}}),error=>{assert.equal(error.partialResult.deleted,0);assert.equal(error.partialResult.copied,0);return error.name==="AbortError";});
+  assert.equal(fs.existsSync(source),true);assert.equal(fs.statSync(source).nlink,1);assert.equal(fs.existsSync(f.models.packagePath("tiny@1")),false);
+  const second=f.alphaModel("next.gguf",gguf(4)),cancelLater=new AbortController();
+  await assert.rejects(migrateAlphaModels({...f,deleteOldModels:true,signal:cancelLater.signal,onProgress:p=>{if(p.detail==="Checking next.gguf")cancelLater.abort();}}),error=>{assert.equal(error.partialResult.deleted,1);assert.equal(error.partialResult.copied,1);return error.name==="AbortError";});
+  assert.equal(fs.existsSync(source),false);assert.equal(fs.existsSync(second),true);assert.deepEqual(fs.readFileSync(f.models.packagePath("tiny@1")),f.payload);assert.equal(f.models._alphaMigration,null);
+});
+
+test("retry recovers only a verified interrupted Core staging pair before source cleanup", async t => {
+  const f=fixture(t),source=f.alphaModel("current-model.gguf",f.payload),target=f.models.packagePath("tiny@1"),temporary=path.join(f.models.modelsDir,`.alpha-model-${crypto.randomUUID()}.tmp`);
+  fs.mkdirSync(f.models.modelsDir);fs.writeFileSync(temporary,f.payload);fs.linkSync(temporary,target);
+  const result=await migrateAlphaModels({...f,deleteOldModels:true});assert.equal(result.failed,0);assert.equal(result.deleted,1);assert.equal(result.skipped,1);assert.equal(fs.existsSync(temporary),false);assert.equal(fs.existsSync(source),false);assert.equal(fs.statSync(target).nlink,1);assert.deepEqual(fs.readFileSync(target),f.payload);
+});
+
+test("invalid interrupted staging bytes and unrelated linked Core files remain untouched", async t => {
+  const f=fixture(t),source=f.alphaModel("current-model.gguf",f.payload),target=f.models.packagePath("tiny@1"),temporary=path.join(f.models.modelsDir,`.alpha-model-${crypto.randomUUID()}.tmp`);
+  fs.mkdirSync(f.models.modelsDir);fs.writeFileSync(temporary,gguf(9));fs.linkSync(temporary,target);
+  const result=await migrateAlphaModels({...f,deleteOldModels:true});assert.equal(result.failed,1);assert.equal(result.deleted,0);assert.equal(fs.existsSync(source),true);assert.equal(fs.statSync(temporary).nlink,2);assert.equal(fs.statSync(target).nlink,2);
+  fs.unlinkSync(target);fs.unlinkSync(temporary);const unrelated=f.write(path.join(f.root,"other-model.gguf"),f.payload);fs.linkSync(unrelated,target);
+  const second=await migrateAlphaModels({...f,deleteOldModels:true});assert.equal(second.failed,1);assert.equal(second.deleted,0);assert.equal(fs.existsSync(source),true);assert.equal(fs.statSync(unrelated).nlink,2);assert.equal(fs.statSync(target).nlink,2);
+});

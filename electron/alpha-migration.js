@@ -68,12 +68,12 @@ function createAlphaMigration({ dataDir, appData, homeDir = os.homedir(), models
   function inventory() {
     if (!source) return { source: null, models: { available: false, count: 0, bytes: 0, detail: "No Alpha profile was found. Choose its folder to continue." }, wallet: { available: false, blocked: false, detail: "No Alpha wallet found." } };
     let modelInfo, savedWallet, walletError;
-    try { modelInfo = inspect({ sourceDir: source.path, catalog: models.catalog }); } catch (error) { modelInfo = { count: 0, bytes: 0, warnings: [error.message] }; }
+    try { modelInfo = inspect({ sourceDir: source.path, catalog: models.catalog, destinationDir: models.modelsDir }); } catch (error) { modelInfo = { count: 0, bytes: 0, warnings: [error.message] }; }
     try { savedWallet = readWallet(source.path); } catch (error) { walletError = error.message; }
     let blocked; try { blocked = walletBlocked(); } catch (error) { blocked = true; walletError = error.message; }
     reviewed = { wallet: savedWallet ? { fingerprint: savedWallet.fingerprint, identity: savedWallet.identity } : null };
-    return { source: { path: source.path, label: source.label }, models: { available: modelInfo.count > 0, count: modelInfo.count, bytes: modelInfo.bytes,
-      detail: [modelInfo.count ? `${modelInfo.count} model${modelInfo.count === 1 ? "" : "s"} found. Files are copied into Core; Alpha keeps its originals.` : "No supported model files found.", ...(modelInfo.warnings || [])].join(" ") },
+    return { source: { path: source.path, label: source.label }, models: { available: modelInfo.count > 0, count: modelInfo.count, bytes: modelInfo.bytes, cleanupEligibleCount: modelInfo.cleanupEligibleCount || 0, cleanupExternalCount: modelInfo.cleanupExternalCount || 0,
+      detail: [modelInfo.count ? `${modelInfo.count} model${modelInfo.count === 1 ? "" : "s"} found. Originals are kept unless you select deletion below.` : "No supported model files found.", ...(modelInfo.warnings || [])].join(" ") },
       wallet: { available: !!savedWallet && !blocked, address: savedWallet?.keystore.address || null, blocked,
         detail: blocked ? "Core already has wallet data. It will be preserved and cannot be replaced by migration." : walletError || (savedWallet ? "Copies the encrypted wallet. Use your Alpha wallet password to unlock it in Core." : "No Alpha wallet found.") } };
   }
@@ -110,7 +110,8 @@ function createAlphaMigration({ dataDir, appData, homeDir = os.homedir(), models
   }
   function start(selection) {
     idle();
-    if (!selection || typeof selection.models !== "boolean" || typeof selection.wallet !== "boolean" || (!selection.models && !selection.wallet) || Object.keys(selection).some(key => !["models", "wallet"].includes(key))) throw Error("Select Models, Wallet, or both.");
+    if (!selection || typeof selection.models !== "boolean" || typeof selection.wallet !== "boolean" || (!selection.models && !selection.wallet) || (selection.deleteOldModels !== undefined && typeof selection.deleteOldModels !== "boolean") || (selection.deleteOldModels && !selection.models) || Object.keys(selection).some(key => !["models", "wallet", "deleteOldModels"].includes(key))) throw Error("Select Models, Wallet, or both. Deleting old models requires Models to be selected.");
+    selection = { models: selection.models, wallet: selection.wallet, deleteOldModels: selection.deleteOldModels === true };
     if (!source || !reviewed) throw Error("Review the Alpha migration first.");
     const current = realDirectory(source.path), st = fs.statSync(current);
     if (current !== source.path || [st.dev, st.ino].join(":") !== source.identity) throw Error("Alpha profile changed. Reopen migration.");
@@ -126,14 +127,14 @@ function createAlphaMigration({ dataDir, appData, homeDir = os.homedir(), models
         }
         controller.signal.throwIfAborted();
         if (selection.models) {
-          try { result.models = await copyModels({ sourceDir: source.path, models, signal: controller.signal, onProgress: progress => { state.progress = progress; } }); if (result.models.failed) failed = true; }
+          try { result.models = await copyModels({ sourceDir: source.path, models, signal: controller.signal, deleteOldModels: selection.deleteOldModels, onProgress: progress => { state.progress = progress; } }); if (result.models.failed || result.models.cleanupFailed) failed = true; }
           catch (error) { result.models = error.partialResult || { copied: 0, skipped: 0, warnings: [] }; if (controller.signal.aborted) throw error; failed = true; result.models.error = error.message; }
         }
         state.phase = failed ? "failed" : "complete";
-        result.summary = failed ? "Migration finished with some items not copied. Review the details below." : "Migration complete. Your Alpha files are unchanged.";
+        result.summary = failed ? "Migration finished with some items needing attention. Review the details below." : selection.deleteOldModels ? "Migration complete. Verified Alpha model originals were removed where possible; your Alpha wallet and other data were kept." : "Migration complete. Your Alpha files are unchanged.";
       } catch (error) {
         state.phase = controller.signal.aborted ? "cancelled" : "failed";
-        result.summary = state.phase === "cancelled" ? "Migration cancelled. Completed copies were kept; Alpha files are unchanged." : "Migration stopped. Completed copies were kept; Alpha files are unchanged.";
+        result.summary = state.phase === "cancelled" ? "Migration cancelled. Completed copies and moves were kept; unfinished originals remain in Alpha." : "Migration stopped. Completed copies and moves were kept; unfinished originals remain in Alpha.";
         if (state.phase === "failed") state.error = error.message;
       } finally { state.result = result; job = null; }
     });

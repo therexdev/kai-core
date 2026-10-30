@@ -4,7 +4,7 @@ const { PrepaidChat } = require("./koin-prepaid-chat"), { configuration } = requ
 const { storageState } = require("../core/lib/protected-storage");
 function setupFailure(error) {
   const code = error?.code === "signin-required" ? "wallet-connection-required" : error?.code;
-  const known = ["wallet-connection-required", "wallet-required", "wallet-unlock-required", "wallet-reauthorization-required", "wallet-changed", "secure-storage-required", "service-upgrade-required", "online-required"];
+  const known = ["wallet-connection-required", "wallet-required", "wallet-unlock-required", "wallet-reauthorization-required", "wallet-changed", "secure-storage-required", "service-upgrade-required", "online-required", "identity-changed", "identity-unverified", "saved-account-unavailable"];
   return { activation: known.includes(code) ? code : /sign in/i.test(error?.message || "") ? "signin-required" : "unavailable", blocked: String(error?.message || "The network is unavailable") };
 }
 function manifest(value) {
@@ -30,11 +30,13 @@ class CreditService {
   }
   async walletInfo(signal) {
     const secureStorage = storageState(this.storage), wallet = this.account.wallet?.status?.() || {}, address = wallet.address || this.account.wallet?.address || null;
-    const base = { walletReady: Boolean(address), address, secureStorage, sessionOnly: Boolean(this.account._memorySession), connected: false, canConnect: false, capabilityAvailable: false, savedConnectionPreserved: this.account._ignoreStoredSession === true };
+    const base = { walletReady: Boolean(address), walletUnlocked: Boolean(wallet.unlocked), address, secureStorage, sessionOnly: Boolean(this.account._memorySession), connected: false, canConnect: false, capabilityAvailable: false, savedConnectionPreserved: this.account._ignoreStoredSession === true };
     if (this.service.state !== "ready") return { ...base, state: "unavailable", detail: this.service.reason };
     if (this.account.settings?.get?.("network.privacyMode", "local-only") === "local-only") return { ...base, state: "online-required", detail: "Choose Network or another online route to connect your wallet" };
     try {
       const auth = await this.account.creditAuthorization(this.service.config.schedulerUrl, signal);
+      if (address && auth.owner !== address) return { ...base, connected: true, state: "wallet-changed", creditOwner: auth.owner,
+        detail: "The saved credit connection belongs to a different wallet or account. It has been preserved. Open credit account settings to choose the account you used for your purchase." };
       const upgrade = auth.sessionOnly === true && secureStorage.available;
       return { ...base, connected: true, canConnect: upgrade && Boolean(wallet.unlocked), state: upgrade && !wallet.unlocked ? "wallet-unlock-required" : "ready",
         detail: upgrade ? wallet.unlocked ? "Save this wallet connection to buy and use paid credits. No email account is needed." : "Unlock your wallet to save this connection for purchases and paid credits. Temporary free access remains available."
@@ -51,15 +53,17 @@ class CreditService {
     if (this.deviceFree) {
       try {
         await this.deviceFree.creditAuthorization(this.service.config.schedulerUrl, signal);
-        return { ...base, freeAccess: true, state: "free-ready", detail: "Free-credit access is ready. Choose Buy credits to use your KOIN wallet for a purchase." };
+        base.freeAccess = true;
+        if (!address) return { ...base, state: "free-ready", detail: "Free-credit access is ready. Import your previous wallet to restore its purchased credits and network activity, or create a wallet when you want to buy credits." };
       } catch (error) { signal?.throwIfAborted(); /* Older services retain the existing wallet connection path. */ }
     }
     if (!address) return { ...base, state: "wallet-required", detail: "Create or import a wallet to connect to network credits" };
     try { await this.account.walletCapabilities(this.service.config, signal); }
     catch (error) { const failure = setupFailure(error); return { ...base, state: failure.activation, detail: failure.blocked }; }
-    return { ...base, capabilityAvailable: true, canConnect: Boolean(wallet.unlocked),
+    return { ...base, capabilityAvailable: true, canConnect: Boolean(wallet.unlocked) && secureStorage.available,
       state: !wallet.unlocked ? "wallet-unlock-required" : secureStorage.available ? "wallet-connection-required" : "secure-storage-required",
-      detail: !wallet.unlocked ? "Unlock your wallet once to connect to network credits" : secureStorage.available ? "Connect this wallet to use its network credits" : secureStorage.detail };
+      detail: !wallet.unlocked ? "Unlock this wallet to restore its purchased credits and network activity. Your purchased balance remains on the network."
+        : secureStorage.available ? "Reconnect this wallet to restore its purchased credits and network activity. This proves wallet ownership; it does not make a purchase or transfer KOIN." : secureStorage.detail };
   }
   async connectWallet(window, input = {}, signal) {
     if (!input || Object.keys(input).some(key => key !== "sessionOnly") || (input.sessionOnly !== undefined && typeof input.sessionOnly !== "boolean")) throw Error("Invalid wallet connection request");

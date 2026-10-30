@@ -1,7 +1,7 @@
 "use strict";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { createController, formatBytes, resultDetails } = require("../../ui-core/alpha-migration");
+const { createController, formatBytes, resultDetails, resultSummary } = require("../../ui-core/alpha-migration");
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const flush = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
 const inventory = () => ({ source: { label: "Koinos AI Alpha", path: "/alpha/profile" }, models: { available: true, count: 2, bytes: 4096 }, wallet: { available: true, address: "alpha-address" } });
@@ -19,10 +19,10 @@ function fixture(overrides = {}) {
 test("migration defaults to available items and sends only the selected booleans", async () => {
   for (const selection of [{ models: true, wallet: false }, { models: false, wallet: true }, { models: true, wallet: true }]) {
     const f = fixture(); await f.controller.open();
-    assert.deepEqual(f.controller.snapshot().selected, { models: true, wallet: true });
+    assert.deepEqual(f.controller.snapshot().selected, { models: true, wallet: true, deleteOldModels: false });
     for (const key of ["models", "wallet"]) f.controller.select(key, selection[key]);
     await f.controller.start();
-    assert.deepEqual(f.calls.find(c => c.method === "migration.start"), { method: "migration.start", input: selection });
+    assert.deepEqual(f.calls.find(c => c.method === "migration.start"), { method: "migration.start", input: { ...selection, deleteOldModels: false } });
     assert.equal(f.controller.view().busy, true);
     f.controller.dispose();
   }
@@ -31,22 +31,56 @@ test("migration defaults to available items and sends only the selected booleans
 test("a missing source, no selection, and an existing Core wallet cannot start a wallet migration", async () => {
   const source = inventory(); source.wallet.blocked = true;
   const f = fixture({ "migration.scan": source }); await f.controller.open();
-  assert.deepEqual(f.controller.snapshot().selected, { models: true, wallet: false });
+  assert.deepEqual(f.controller.snapshot().selected, { models: true, wallet: false, deleteOldModels: false });
   f.controller.select("wallet", true); assert.equal(f.controller.snapshot().selected.wallet, false);
   f.controller.select("models", false); await f.controller.start(); assert.equal(f.calls.some(c => c.method === "migration.start"), false);
   f.controller.close(); f.responses["migration.scan"] = { ...inventory(), source: null }; await f.controller.open();
-  assert.equal(f.controller.view().canStart, false); assert.deepEqual(f.controller.snapshot().selected, { models: false, wallet: false });
+  assert.equal(f.controller.view().canStart, false); assert.deepEqual(f.controller.snapshot().selected, { models: false, wallet: false, deleteOldModels: false });
+});
+
+test("old-model deletion requires a separate opt-in and is cleared when Models is unchecked", async () => {
+  const f = fixture(); await f.controller.open();
+  assert.equal(f.controller.snapshot().selected.deleteOldModels, false);
+  f.controller.select("deleteOldModels", true); assert.equal(f.controller.snapshot().selected.deleteOldModels, true);
+  f.controller.select("models", false); assert.equal(f.controller.snapshot().selected.deleteOldModels, false);
+  f.controller.select("deleteOldModels", true); assert.equal(f.controller.snapshot().selected.deleteOldModels, false);
+  await f.controller.start();
+  assert.deepEqual(f.calls.find(c => c.method === "migration.start").input, { models: false, wallet: true, deleteOldModels: false });
+  f.controller.dispose();
+});
+
+test("delete-old-model opt-in is sent explicitly and cannot change after migration begins", async () => {
+  const f = fixture(); await f.controller.open(); f.controller.select("deleteOldModels", true); await f.controller.start();
+  assert.deepEqual(f.calls.find(c => c.method === "migration.start").input, { models: true, wallet: true, deleteOldModels: true });
+  f.controller.select("deleteOldModels", false); assert.equal(f.controller.snapshot().selected.deleteOldModels, true); f.controller.dispose();
+});
+
+test("deletion opt-in resets for a new source and reopening; a cancelled chooser preserves it", async () => {
+  const f = fixture(); await f.controller.open(); f.controller.select("deleteOldModels", true);
+  await f.controller.chooseSource(); assert.equal(f.controller.snapshot().selected.deleteOldModels, true);
+  f.responses["migration.chooseSource"] = inventory(); await f.controller.chooseSource(); assert.equal(f.controller.snapshot().selected.deleteOldModels, false);
+  f.controller.select("deleteOldModels", true); f.controller.close(); await f.controller.open(); assert.equal(f.controller.snapshot().selected.deleteOldModels, false);
+});
+
+test("restored active jobs retain the deletion selection and cancellation reports completed transfers", async () => {
+  const f = fixture({ "migration.status": { phase: "running", selected: { models: true, wallet: false, deleteOldModels: true } } });
+  await f.controller.open(); assert.equal(f.controller.snapshot().selected.deleteOldModels, true);
+  f.responses["migration.status"] = { phase: "cancelled", selected: { models: true, wallet: false, deleteOldModels: true }, result: { models: { copied: 1, moved: 1, deleted: 1, cleanupFailed: 0, skipped: 0 } } };
+  await f.tick(); assert.match(f.controller.snapshot().lastResult, /Completed transfers remain in Core/);
+  assert.doesNotMatch(f.controller.snapshot().lastResult, /Alpha files are unchanged/);
+  const details = resultDetails(f.controller.snapshot().job); assert.match(details.models, /1 moved without duplicating/); assert.match(details.models, /1 removed/);
+  assert.match(resultSummary({ phase: "cancelled", selected: { models: true, deleteOldModels: false } }), /Alpha files are unchanged/);
 });
 
 test("a native folder chooser cancellation preserves the detected profile and selection", async () => {
   const f = fixture(); await f.controller.open(); f.controller.select("wallet", false);
   await f.controller.chooseSource();
   assert.equal(f.controller.snapshot().inventory.source.path, "/alpha/profile");
-  assert.deepEqual(f.controller.snapshot().selected, { models: true, wallet: false });
+  assert.deepEqual(f.controller.snapshot().selected, { models: true, wallet: false, deleteOldModels: false });
   const next = inventory(); next.source.path = "/other/alpha"; next.models.available = false;
   f.responses["migration.chooseSource"] = next; await f.controller.chooseSource();
   assert.equal(f.controller.snapshot().inventory.source.path, "/other/alpha");
-  assert.deepEqual(f.controller.snapshot().selected, { models: false, wallet: true });
+  assert.deepEqual(f.controller.snapshot().selected, { models: false, wallet: true, deleteOldModels: false });
 });
 
 test("closing a scan fences late results and restores a fresh scan on reopening", async () => {

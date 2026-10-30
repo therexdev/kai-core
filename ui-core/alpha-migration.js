@@ -12,19 +12,22 @@
   }
   function resultSummary(job) {
     if (typeof job?.result?.summary === "string") return job.result.summary;
-    return { complete: "Your selected items have been copied into KAI Core.", cancelled: "Migration stopped. Any completed copies remain in Core. Your Alpha files are unchanged.", failed: "Migration could not finish. Your Alpha files are unchanged." }[job?.phase] || "";
+    const preserved = job?.selected?.deleteOldModels ? "Completed transfers remain in Core; only verified model originals were removed." : "Your Alpha files are unchanged.";
+    return { complete: "Your selected items have been migrated into KAI Core.", cancelled: `Migration stopped. ${preserved}`, failed: `Migration could not finish. ${preserved}` }[job?.phase] || "";
   }
   function resultDetails(job) {
     const models = job?.result?.models, wallet = job?.result?.wallet;
     const count = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
     const failed = Number.isSafeInteger(models?.failed) && models.failed >= 0 ? ` · ${models.failed} failed` : models?.error ? " · copying stopped" : "";
-    const modelLines = models ? [`Models: ${count(models.copied)} files copied · ${count(models.skipped)} skipped${failed}.`, models.error, ...(Array.isArray(models.warnings) ? models.warnings : [])] : job?.selected?.models && terminal(job.phase) ? ["Models: copying did not begin."] : [];
+    const moved = count(models?.moved) > 0 ? ` (${count(models.moved)} moved without duplicating)` : "";
+    const cleanup = models && (job?.selected?.deleteOldModels || models.deleted || models.cleanupSkipped || models.cleanupFailed) ? `Alpha originals: ${count(models.deleted)} removed${models.cleanupSkipped ? ` · ${count(models.cleanupSkipped)} kept outside the Alpha model folder` : ""}${models.cleanupFailed ? ` · ${count(models.cleanupFailed)} kept because cleanup could not finish` : ""}.` : "";
+    const modelLines = models ? [`Models: ${count(models.copied)} file${count(models.copied) === 1 ? "" : "s"} ${moved ? "migrated" : "copied"}${moved} · ${count(models.skipped)} skipped${failed}.`, cleanup, models.error, ...(Array.isArray(models.warnings) ? models.warnings : [])] : job?.selected?.models && terminal(job.phase) ? ["Models: copying did not begin."] : [];
     const walletLines = wallet ? [`Wallet: ${wallet.copied ? "copied" : "not copied"}.`, wallet.copied && wallet.address ? `Address: ${wallet.address}` : "", wallet.detail, wallet.error, wallet.warning] : job?.selected?.wallet && terminal(job.phase) ? ["Wallet: copying did not begin."] : [];
     const lines = values => [...new Set(values.filter(value => typeof value === "string" && value.trim()))].join("\n");
     return { models: lines(modelLines), wallet: lines(walletLines) };
   }
   function createController({ call, render = () => {}, onComplete = () => {}, setTimer = setTimeout, clearTimer = clearTimeout }) {
-    const state = { open: false, loading: false, choosing: false, starting: false, cancelling: false, inventory: null, selected: { models: false, wallet: false }, job: null, error: "", lastResult: "" };
+    const state = { open: false, loading: false, choosing: false, starting: false, cancelling: false, inventory: null, selected: { models: false, wallet: false, deleteOldModels: false }, job: null, error: "", lastResult: "" };
     let epoch = 0, readSerial = 0, timer = null, notified = false;
     const busy = () => state.starting || state.cancelling || state.job?.phase === "running";
     const available = key => !!state.inventory?.source && state.inventory?.[key]?.available === true && !state.inventory[key].blocked;
@@ -40,7 +43,7 @@
     function acceptJob(job) {
       if (!job || !["idle", "running", "complete", "failed", "cancelled"].includes(job.phase)) throw Error("The migration status could not be read. Try again.");
       state.job = job;
-      if (job.selected) state.selected = { models: job.selected.models === true, wallet: job.selected.wallet === true };
+      if (job.selected) state.selected = { models: job.selected.models === true, wallet: job.selected.wallet === true, deleteOldModels: job.selected.models === true && job.selected.deleteOldModels === true };
       if (terminal(job.phase)) {
         state.starting = false; state.cancelling = false; stopTimer();
         state.lastResult = resultSummary(job);
@@ -50,7 +53,7 @@
     }
     function acceptInventory(inventory) {
       state.inventory = inventory;
-      state.selected = { models: available("models"), wallet: available("wallet") };
+      state.selected = { models: available("models"), wallet: available("wallet"), deleteOldModels: false };
     }
     async function poll() {
       if (!state.open || state.job?.phase !== "running") return;
@@ -66,7 +69,7 @@
     async function open() {
       if (state.open) return;
       const expected = ++epoch;
-      notified = false; state.open = true; state.loading = true; state.choosing = false; state.starting = false; state.cancelling = false; state.inventory = null; state.job = null; state.error = ""; state.selected = { models: false, wallet: false }; emit();
+      notified = false; state.open = true; state.loading = true; state.choosing = false; state.starting = false; state.cancelling = false; state.inventory = null; state.job = null; state.error = ""; state.selected = { models: false, wallet: false, deleteOldModels: false }; emit();
       try {
         const job = await call("migration.status");
         if (!current(expected)) return;
@@ -94,13 +97,15 @@
       finally { if (current(expected)) { state.choosing = false; emit(); } }
     }
     function select(key, value) {
-      if (!["models", "wallet"].includes(key) || !view().canSelect) return;
-      state.selected[key] = value === true && available(key); emit();
+      if (!["models", "wallet", "deleteOldModels"].includes(key) || !view().canSelect) return;
+      state.selected[key] = value === true && (key === "deleteOldModels" ? state.selected.models && available("models") : available(key));
+      if (!state.selected.models) state.selected.deleteOldModels = false;
+      emit();
     }
     async function start() {
       if (!state.open || !view().canStart) return;
       const expected = epoch;
-      const selected = { models: state.selected.models && available("models"), wallet: state.selected.wallet && available("wallet") };
+      const selected = { models: state.selected.models && available("models"), wallet: state.selected.wallet && available("wallet"), deleteOldModels: state.selected.models && available("models") && state.selected.deleteOldModels };
       state.starting = true; state.error = ""; notified = false; emit();
       try {
         const job = await call("migration.start", selected);
@@ -152,6 +157,8 @@
         if (!state.open && dialog.open) { dialog.close(); $("open").focus(); }
         text("last-result", state.lastResult); $("last-result").hidden = !state.lastResult;
         if (!state.open) return;
+        $("choices").hidden = view.terminal; $("copy-note").hidden = view.terminal; $("browse").hidden = view.terminal;
+        text("description", view.terminal ? "Review the completed items and any files that were kept." : "Choose what to migrate into KAI Core. Close Koinos AI Alpha, including its tray icon, before migrating.");
         const source = state.inventory?.source || state.job?.source, inventory = state.inventory;
         text("source-path", source?.path || (state.loading ? "Looking for your Alpha profile…" : view.busy ? "Migration in progress" : "No Alpha profile found. Choose its data folder to continue."));
         text("browse", state.choosing ? "Choosing folder…" : source ? "Choose another folder" : "Choose folder");
@@ -160,11 +167,13 @@
           $(key).checked = state.selected[key];
           $(key).disabled = !view.canSelect || !inventory?.[key]?.available || !!inventory[key].blocked;
         }
+        $("delete-old-models").checked = state.selected.deleteOldModels;
+        $("delete-old-models").disabled = !view.canSelect || !state.selected.models || !inventory?.models?.available;
         const modelInfo = inventory?.models, walletInfo = inventory?.wallet;
         let modelDetail = modelInfo?.detail;
         if (!modelDetail && modelInfo?.available) modelDetail = `${modelInfo.count || 0} downloaded model${modelInfo.count === 1 ? "" : "s"}. Includes vision projectors when present.`;
         text("models-detail", modelDetail || (state.loading ? "Checking downloaded models…" : view.busy && state.selected.models ? "Copying your selected models." : "No downloaded GGUF models found."));
-        text("models-size", modelInfo?.bytes ? `${formatBytes(modelInfo.bytes)} to copy` : ""); $("models-size").hidden = !modelInfo?.bytes;
+        text("models-size", modelInfo?.bytes ? `${formatBytes(modelInfo.bytes)} of model files` : ""); $("models-size").hidden = !modelInfo?.bytes;
         text("wallet-detail", walletInfo?.detail || (state.loading ? "Checking your saved wallet…" : view.busy && state.selected.wallet ? "Copying your encrypted wallet." : walletInfo?.blocked ? "A wallet already exists in Core and will be kept." : walletInfo?.available ? "Encrypted wallet ready to copy." : "No encrypted Alpha wallet found."));
         text("wallet-address", walletInfo?.address); $("wallet-address").hidden = !walletInfo?.address;
         $("wallet-note").hidden = !!walletInfo?.blocked || (!walletInfo?.available && !state.selected.wallet);
@@ -173,7 +182,7 @@
         text("cancel", state.cancelling ? "Cancelling…" : view.terminal ? "Close" : view.busy ? "Cancel migration" : "Cancel");
         $("submit").disabled = !view.canStart; $("submit").hidden = view.terminal;
         text("submit", state.starting ? "Starting…" : view.busy ? "Migrating…" : "Migrate");
-        text("selection-note", view.terminal ? "Your Alpha files are unchanged." : view.busy ? "Keep KAI Core running while copying." : state.loading ? "Checking your Alpha profile…" : "Select Models, Wallet, or both.");
+        text("selection-note", view.terminal ? state.selected.deleteOldModels ? "Completed model transfers remain in Core." : "Your Alpha files are unchanged." : view.busy ? "Keep KAI Core running while migrating." : state.loading ? "Checking your Alpha profile…" : state.selected.deleteOldModels ? "Verified model originals will be removed from Alpha." : "Select Models, Wallet, or both.");
         $("progress-section").hidden = !view.busy;
         const progress = state.job?.progress, total = Math.max(0, Number(progress?.totalBytes) || 0), completed = Math.max(0, Number(progress?.completedBytes) || 0);
         text("progress-detail", state.cancelling ? "Stopping safely. Finishing cleanup…" : progress?.detail || (state.starting ? "Preparing your migration…" : "Copying selected items…"));
@@ -191,6 +200,7 @@
     $("browse").addEventListener("click", () => void controller.chooseSource());
     $("form").addEventListener("submit", event => { event.preventDefault(); void controller.start(); });
     for (const key of ["models", "wallet"]) $(key).addEventListener("change", event => controller.select(key, event.target.checked));
+    $("delete-old-models").addEventListener("change", event => controller.select("deleteOldModels", event.target.checked));
     $("close").addEventListener("click", () => controller.close());
     $("cancel").addEventListener("click", () => void controller.cancel());
     dialog.addEventListener("cancel", event => { event.preventDefault(); controller.close(); });

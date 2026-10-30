@@ -117,6 +117,7 @@ async function start() {
       case "migration.start": return alphaMigration.start(input);
       case "migration.status": return alphaMigration.status();
       case "migration.cancel": return alphaMigration.cancel();
+      case "earn.legacyBalance": return core.gateway.earn.legacyBalance();
       case "chat.local": return coreChat.send(input);
       case "chat.stop": return coreChat.stop();
       case "status": {

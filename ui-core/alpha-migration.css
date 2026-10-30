@@ -19,6 +19,11 @@
 .alpha-migration-option>span{min-width:0}
 .alpha-migration-option strong{font-size:13px;font-weight:650;color:var(--text)}
 .alpha-migration-option-detail{display:block;margin-top:3px;font-size:11px;line-height:1.65;color:var(--text-dim)}
+.alpha-migration-suboption{display:flex;align-items:flex-start;gap:10px;margin:0 0 16px 16px;padding:2px 12px 2px 15px;border-left:2px solid var(--border);cursor:pointer}
+.alpha-migration-suboption input{width:15px;height:15px;flex:none;margin:3px 0 0;accent-color:var(--accent);cursor:inherit}
+.alpha-migration-suboption strong{font-size:11px;font-weight:600;color:var(--text)}
+.alpha-migration-suboption:has(input:disabled){cursor:default;opacity:.65}
+.alpha-migration-suboption:has(input:checked){border-left-color:var(--accent)}
 .alpha-migration-wallet-address{display:block;margin-top:4px;font:11px/1.6 Consolas,ui-monospace,monospace;overflow-wrap:anywhere;color:var(--text)}
 .alpha-migration-copy-note{font-size:10px;line-height:1.7;margin:12px 0 0;color:var(--text-dim)}
 .alpha-migration-progress-section{margin-top:19px}

@@ -2,7 +2,7 @@
 
 KAI Core 0.7 is the desktop foundation for independently installed plugins. Each plugin owns its interface, feature engines, dependencies, assets and saved work. Core exposes documented services that are available to every publisher; there are no private first-party feature APIs.
 
-This is a new architecture and a new profile. It does not automatically adopt older data. Settings offers an explicit **Migrate from Koinos AI Alpha** tool for copying **Models**, **Wallet**, or both. Documents, plugin data, connected accounts and settings are excluded. Existing Koinos AI/Core 0.6 data is left untouched. On Windows the new profile is `%APPDATA%\KAI Core\foundation-v1`. The Koinos Node plugin owns a **separate Node wallet**, clearly labelled in its interface.
+This is a new architecture and a new profile. It does not automatically adopt older data. Settings offers an explicit **Migrate from Koinos AI Alpha** tool for copying **Models**, **Wallet**, or both. An optional cleanup checkbox removes verified Alpha model originals after transfer. Documents, plugin data, connected accounts and settings are excluded. Existing Koinos AI/Core 0.6 data is left untouched. On Windows the new profile is `%APPDATA%\KAI Core\foundation-v1`. The Koinos Node plugin owns a **separate Node wallet**, clearly labelled in its interface.
 
 ## Ownership
 
@@ -48,6 +48,7 @@ npm test
 npm run test:services
 npm run test:foundation-native
 npm run test:alpha-migration
+npm run test:credit-reconnect
 npm run test:apps
 npm run dist -- --win --x64
 ```
@@ -55,3 +56,5 @@ npm run dist -- --win --x64
 The all-app smoke requires sibling plugin checkouts and Assistant's prepared payload. It uses a disposable profile and test signing key, not live wallet/account credentials. Live Docker, OAuth, microphone hardware and blockchain transactions require separate explicit testing. Preview builds do not publish an automatic update feed; Core updates remain manual.
 
 The original application lives in `therexdev/kaiapp` and is not modified by this project. Foundation is a clean plugin platform, not a compatibility layer for its old internal objects.
+
+Imported-wallet purchased credits and recent remote activity are restored from **Credits and Usage → Restore wallet credits**, after unlocking and approving the same-wallet connection. The installation keeps its own protected session; old credentials are not imported.

@@ -1,0 +1,9 @@
+.credit-connection{display:flex;align-items:center;justify-content:space-between;gap:24px;background:#f4f8ff;border-color:#cbdcff}
+.credit-connection[hidden]{display:none}
+.credit-connection>div{min-width:0;max-width:760px}
+.credit-connection h2{margin:0 0 7px;font-size:15px}
+.credit-connection p{margin:0;font-size:12px;line-height:1.65}
+.credit-connection code{padding:7px 0 0;font-size:11px;color:var(--text-dim)}
+.credit-connection>button{flex:none;white-space:nowrap;border-color:#b8d0ff;color:var(--accent)}
+#credit-connection-error{margin-top:9px;color:#c03751}
+@media(max-width:760px){.credit-connection{align-items:flex-start;flex-direction:column;gap:14px}.credit-connection>button{align-self:flex-start}}

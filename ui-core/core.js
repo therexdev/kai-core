@@ -53,6 +53,7 @@ function showPage(next, app) {
     if (page === "earning") window.KaiCoreEarning?.leave();
     if (page === "network") window.KaiCoreNetwork?.leave();
     if (page === "wallet") window.KaiCoreWallet?.leave();
+    if (page === "credits") window.KaiCreditConnection?.leave();
     if (page === "app") void bridge.call("plugins.hide").catch(error => notify(error.message, true));
     priceGeneration++;
   }
@@ -74,7 +75,7 @@ function showPage(next, app) {
   if (next === "wallet") window.KaiCoreWallet?.enter();
   if (next === "plugins") void checkPluginCatalog();
   if (next === "settings") window.KaiCoreAccount?.enter();
-  if (next === "credits") { renderCredits(); void refreshCreditActivity(); }
+  if (next === "credits") { renderCredits(); void refreshCreditActivity(); void window.KaiCreditConnection?.enter(); }
   if (next === "buy-credits") void price();
 }
 for (const b of document.querySelectorAll("[data-page],[data-go]")) b.onclick = () => showPage(b.dataset.page || b.dataset.go);
@@ -104,6 +105,7 @@ async function refresh() {
     text("wallet-address", address || "No wallet created"); text("wallet-detail", s.wallet.unlocked ? "Wallet unlocked. Plugins never receive its private key." : "Unlock to authorize wallet actions.");
     $("create-wallet").hidden = s.wallet.exists; $("restore-wallet").hidden = s.wallet.exists; $("unlock-button").hidden = !s.wallet.exists || s.wallet.unlocked; $("lock-wallet").hidden = !s.wallet.unlocked;
     window.KaiCoreWallet?.observe(s.wallet, s.network.privacyMode);
+    window.KaiCreditConnection?.observe(s.wallet, s.network.privacyMode);
     if (document.activeElement !== $("privacy")) $("privacy").value = s.network.privacyMode;
     const modelBusy = !!s.importing || s.ensure?.state === "working";
     const modelError = !modelBusy && (s.ensure?.state === "error" || !!s.importError);
@@ -286,7 +288,7 @@ function renderCredits() {
       return { kind: "purchase", title: "Purchased credits", at: when(u.confirmedAt || u.createdAt), status: confirmed ? "Added to balance" : cancelled ? "Cancelled · no purchase" : String(u.state || "Pending").replaceAll("_", " ").slice(0, 100), amount: confirmed ? creditAmount(u.credits ?? u.amount) : cancelled ? "0" : "Pending", prefix: confirmed ? "+" : "" };
     }),
   ].filter(r => filter === "all" || r.kind === filter).sort((a, b) => b.at - a.at);
-  html("credit-activity", rows.length ? `<div class="table-scroll"><table class="activity-table"><thead><tr><th scope="col">Activity</th><th scope="col">When</th><th scope="col">Status</th><th scope="col">Credits</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.title)}</td><td>${esc(r.at ? new Date(r.at).toLocaleString() : "—")}</td><td>${esc(r.status)}</td><td>${r.amount === null ? "Unavailable" : esc(r.prefix + r.amount)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">${filter === "usage" ? "Your network chat usage will appear here." : filter === "purchase" ? "Your credit purchases will appear here." : "Your purchases and network chat usage will appear here."}</p>`);
+  html("credit-activity", rows.length ? `<div class="table-scroll"><table class="activity-table"><thead><tr><th scope="col">Activity</th><th scope="col">When</th><th scope="col">Status</th><th scope="col">Credits</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.title)}</td><td>${esc(r.at ? new Date(r.at).toLocaleString() : "—")}</td><td>${esc(r.status)}</td><td>${r.amount === null ? "Unavailable" : esc(r.prefix + r.amount)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">${s.deviceFree && s.paidAccessLocked ? "Connect this wallet above to restore its purchased credits and network activity." : filter === "usage" ? "Your network chat usage will appear here." : filter === "purchase" ? "Your credit purchases will appear here." : "Your purchases and network chat usage will appear here."}</p>`);
   text("credit-activity-status", p.stale ? "Showing your last verified activity. Refresh when your connection is available." : `Checked ${new Date(s.receivedAt).toLocaleString()}`);
 }
 $("credit-filter").onchange = renderCredits;

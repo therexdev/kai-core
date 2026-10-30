@@ -84,7 +84,7 @@ test("models-only migration never imports the wallet; both selections run indepe
   assert.equal(f.calls[0].sourceDir, f.sourceDir); assert.equal(f.calls[0].models, f.models); assert.equal(result.result.wallet, undefined);
   f.service.scan(); f.service.start({ models: true, wallet: true }); result = await finished(f.service);
   assert.equal(result.phase, "complete"); assert.equal(result.result.wallet.copied, true); assert.equal(result.result.models.copied, 1);
-  assert.deepEqual(result.selected, { models: true, wallet: true }); assert.equal(result.source.path, f.sourceDir);
+  assert.deepEqual(result.selected, { models: true, wallet: true, deleteOldModels: false }); assert.equal(result.source.path, f.sourceDir);
 });
 
 test("existing, malformed, same-address and session wallet data cannot be replaced", async t => {
@@ -209,4 +209,16 @@ test("dispose aborts active copying and waits for cleanup; returned status is de
   assert.equal(f.service.status().selected.wallet, false); assert.equal(f.service.status().phase, "running");
   await started; await f.service.dispose(); assert.equal(cleaned, true); assert.equal(f.service.status().phase, "cancelled");
   assert.throws(() => f.service.scan(), /closing/);
+});
+
+test("deleting old models is opt-in, validated separately, and forwarded only with Models", async t => {
+  const f=fixture(t);f.service.scan();
+  for(const selection of [{models:false,wallet:true,deleteOldModels:true},{models:true,wallet:false,deleteOldModels:"true"},{models:true,wallet:false,deleteOldModels:1}])assert.throws(()=>f.service.start(selection),/Deleting old models/);
+  f.service.start({models:true,wallet:false});let state=await finished(f.service);assert.equal(state.selected.deleteOldModels,false);assert.equal(f.calls[0].deleteOldModels,false);
+  f.service.scan();f.service.start({models:true,wallet:false,deleteOldModels:true});state=await finished(f.service);assert.equal(state.selected.deleteOldModels,true);assert.equal(f.calls[1].deleteOldModels,true);assert.doesNotMatch(state.result.summary,/files are unchanged/);
+});
+
+test("cleanup failures are visible as partial migration with retained originals", async t => {
+  const f=fixture(t,{copyModels:async()=>({copied:1,failed:0,deleted:0,cleanupFailed:1,warnings:["Original kept because its file changed"]})});
+  f.service.scan();f.service.start({models:true,wallet:false,deleteOldModels:true});const state=await finished(f.service);assert.equal(state.phase,"failed");assert.equal(state.result.models.cleanupFailed,1);assert.match(state.result.summary,/attention/);assert.doesNotMatch(state.result.summary,/files are unchanged/);
 });
