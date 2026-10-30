@@ -1,12 +1,13 @@
 "use strict";
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
 const pluginId = "kai.assistant";
-const permissions = Object.freeze({ "assistant.list": "assistant.read", "assistant.get": "assistant.read", "assistant.save": "assistant.write", "assistant.rename": "assistant.write", "assistant.pin": "assistant.write", "assistant.delete": "assistant.write" });
+const permissions = Object.freeze({ "assistant.request": "assistant.chat", "assistant.poll": "assistant.chat", "assistant.cancel": "assistant.chat", "assistant.native": "assistant.native", "assistant.payment": "assistant.network", "assistant.navigate": "assistant.read", "assistant.external": "assistant.read", "assistant.copyText": "assistant.read", "assistant.privacy": "assistant.network", "assistant.media": "assistant.media", "assistant.list": "assistant.read", "assistant.get": "assistant.read", "assistant.save": "assistant.write", "assistant.rename": "assistant.write", "assistant.pin": "assistant.write", "assistant.delete": "assistant.write" });
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/, MAX_FILE = 32 * 1024 * 1024, MAX_TEXT = 800000;
 const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 function stat(file) { try { return fs.lstatSync(file); } catch (e) { if (e.code === "ENOENT") return null; throw e; } }
 function object(value) { return value && typeof value === "object" && !Array.isArray(value); }
 function create(ctx) {
+  let restored;
   const base = path.resolve(ctx.dataDir), dir = path.join(base, "chats"), store = ctx.core?.gateway?.chats;
   if (!store || path.resolve(store.dir) !== dir) throw Error("Saved conversation storage is unavailable");
   function directory(createIfMissing = false) {
@@ -43,7 +44,15 @@ function create(ctx) {
     return { id, revision: hash(bytes), updatedAt: doc.updatedAt };
   }
   function current(input) { const existing = read(input.id); if (typeof input.revision !== "string" || existing.revision !== input.revision) throw Error("Conversation changed elsewhere. Reopen it before saving"); return existing; }
-  return { async call(method, input = {}, signal) {
+  const restoredMethods = new Set(["assistant.request", "assistant.poll", "assistant.cancel", "assistant.native", "assistant.payment", "assistant.navigate", "assistant.external", "assistant.copyText", "assistant.privacy", "assistant.media"]);
+  const restore = () => restored ||= require("./assistant-original").create(ctx, { read, write,
+        list: signal => service.call("assistant.list", {}, signal),
+        remove(id, revision) { if (read(id).revision !== revision) throw Error("Conversation changed; reopen it before deleting"); fs.unlinkSync(file(id)); },
+      });
+  const service = { keepAliveOnWindowClose: true, startBackground: () => restore().startBackground(), async call(method, input = {}, signal) {
+    if (restoredMethods.has(method)) {
+      return restore().call(method, input, signal);
+    }
     signal?.throwIfAborted(); if (!Object.hasOwn(permissions, method)) throw Error("Unknown Assistant method");
     if (!object(input)) throw Error("Invalid Assistant request");
     if (method === "assistant.list") {
@@ -79,6 +88,7 @@ function create(ctx) {
     if (method === "assistant.rename") { if (typeof input.title !== "string" || !input.title.trim() || input.title.length > 80) throw Error("Use a conversation title from 1 to 80 characters"); doc.title = input.title.trim(); doc.renamed = true; doc.updatedAt = new Date().toISOString(); }
     if (method === "assistant.pin") { if (typeof input.pinned !== "boolean") throw Error("Invalid favorite value"); doc.pinned = input.pinned; }
     return write(input.id, doc, previous.revision);
-  } };
+  }, privacyChanged: mode => restored?.privacyChanged(mode), async dispose() { await restored?.dispose(); } };
+  return service;
 }
 module.exports = { pluginId, permissions, create };

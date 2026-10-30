@@ -36,12 +36,15 @@ test("locked wallet reads balances and history without unlock, signing, or backu
   f.controller.leave(); assert.equal(f.timers.size, 0);
 });
 
-test("Local-Only does not read the network and discards previous values", async () => {
-  const f = fixture(); await f.enter(undefined, "local-only"); assert.equal(f.calls.length, 0);
+test("AI Local-Only leaves wallet reads, verified values and unlocked send controls available", async () => {
+  const f = fixture(); await f.enter(undefined, "local-only");
+  assert.deepEqual(f.calls.map(c => c.method), ["wallet.summary", "wallet.history"]); assert.equal(f.latest().view.canSend, false);
   f.controller.observe({ exists: true, address: ADDRESS, unlocked: true }, "online"); await flush();
-  assert.equal(f.latest().view.canSend, true);
   const count = f.calls.length; f.controller.observe({ exists: true, address: ADDRESS, unlocked: true }, "local-only"); await flush();
-  assert.equal(f.calls.length, count); assert.equal(f.latest().state.summary, null); assert.deepEqual(f.latest().state.rows, []); assert.equal(f.latest().view.canSend, false);
+  assert.equal(f.calls.length, count); assert.equal(f.latest().state.summary.koin, "12345.67890123"); assert.equal(f.latest().state.rows.length, 1); assert.equal(f.latest().view.canSend, true);
+  f.action(async () => ({ state: "cancelled" }));
+  await f.controller.perform("wallet.send", { token: "koin", to: "recipient", amount: "1", password: "fixture-password" });
+  assert.equal(f.calls.at(-1).method, "wallet.send"); assert.equal(f.controller.snapshot().privacyMode, "local-only");
 });
 
 test("late summary cannot replace a different wallet or resurrect hidden data", async () => {

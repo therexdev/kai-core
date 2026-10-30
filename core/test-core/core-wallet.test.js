@@ -42,7 +42,7 @@ function fixture(t, options = {}) {
     withSpend: async run => { if (spendBusy) throw Error("Payment review already open"); spendBusy = true; try { return await run(); } finally { spendBusy = false; } },
   }, dependencies);
   t.after(async () => { await service.dispose(); fs.rmSync(dataDir, { recursive: true, force: true }); });
-  return { service, dataDir, calls, wallet, window, setMode(value) { mode = value; service.privacyChanged(value); }, setAddress(value) { currentAddress = value; }, setUnlocked(value) { unlocked = value; }, approve(value = 1) { approval = value; }, setClosing(value) { closing = value; },
+  return { service, dataDir, calls, wallet, window, setMode(value) { mode = value; service.privacyChanged(value); }, getMode() { return mode; }, setAddress(value) { currentAddress = value; }, setUnlocked(value) { unlocked = value; }, approve(value = 1) { approval = value; }, setClosing(value) { closing = value; },
     writeSettings(value) { fs.mkdirSync(path.join(dataDir, "koinos-node"), { recursive: true }); fs.writeFileSync(path.join(dataDir, "koinos-node/settings.json"), typeof value === "string" ? value : JSON.stringify(value)); },
     send(value = {}) { return service.call("wallet.send", { to: recipient, amount: "1.00000001", token: "koin", password: "synthetic password", expectedAddress: address, expectedNetwork: "mainnet", ...value }); },
   };
@@ -83,13 +83,27 @@ test("unknown network and invalid RPC settings fail closed without changing conf
   assert.equal(f.calls.length, 0);
 });
 
-test("network privacy prevents all chain reads and transfers while local copy and password backup still work", async t => {
-  const f = fixture(t); f.setMode("local-only");
-  for (const method of ["wallet.summary", "wallet.history"]) await assert.rejects(f.service.call(method), /Local-Only/);
-  await assert.rejects(f.send(), /Local-Only/);
+test("AI Local-Only preserves blockchain reads and explicitly approved wallet actions without changing AI privacy", async t => {
+  const f = fixture(t); f.setMode("local-only"); f.setUnlocked(false);
+  assert.equal((await f.service.call("wallet.summary")).address, address);
+  assert.equal((await f.service.call("wallet.history")).address, address);
+  await assert.rejects(f.send(), /Unlock/); f.setUnlocked(true);
+  assert.deepEqual(await f.send(), { state: "cancelled" });
+  assert.ok(!f.calls.some(([name]) => name === "signer"));
+  f.approve(); assert.equal((await f.send()).state, "submitted");
   assert.deepEqual(await f.service.call("wallet.copyAddress", { expectedAddress: address }), { copied: true, address });
   assert.deepEqual(await f.service.call("wallet.reveal", { password: "synthetic password", expectedAddress: address }), { wif: "synthetic backup only" });
-  assert.deepEqual(f.calls.map(([name]) => name), ["copy", "reveal"]);
+  await f.service.call("wallet.openExplorer", { expectedAddress: address, expectedNetwork: "mainnet" });
+  assert.equal(f.getMode(), "local-only");
+});
+
+test("AI privacy changes do not cancel a blockchain read or an exact reviewed transfer", async t => {
+  const read = deferred(), f = fixture(t, { balanceRead: () => read.promise });
+  const balance = f.service.call("wallet.summary"); f.setMode("local-only"); read.resolve({ koin: "1" });
+  assert.equal((await balance).koin, "0.00000001"); assert.equal(f.getMode(), "local-only");
+  const review = deferred(), g = fixture(t, { review: () => review.promise });
+  const sending = g.send(); await tick(); g.setMode("local-only"); review.resolve({ response: 1 });
+  assert.equal((await sending).state, "submitted"); assert.equal(g.getMode(), "local-only");
 });
 
 test("failed or noncanonical balances never become a made-up zero", async t => {
@@ -100,8 +114,8 @@ test("failed or noncanonical balances never become a made-up zero", async t => {
   const result = await f.service.call("wallet.summary"); assert.equal(result.koin, "0.00000001"); assert.equal(result.vhp, null); assert.equal(result.mana, null);
 });
 
-test("late balances/history are rejected after identity, network, privacy or shutdown changes", async t => {
-  for (const change of [f => f.setAddress(recipient), f => f.writeSettings({ network: "harbinger" }), f => { f.setMode("local-only"); f.setMode("local-first"); }, f => f.setClosing(true)]) {
+test("late balances/history are rejected after identity, network or shutdown changes", async t => {
+  for (const change of [f => f.setAddress(recipient), f => f.writeSettings({ network: "harbinger" }), f => f.setClosing(true)]) {
     const read = deferred(), f = fixture(t, { balanceRead: () => read.promise });
     const task = f.service.call("wallet.summary"); change(f); read.resolve({ koin: "1" });
     await assert.rejects(task, /changed|closing/);
@@ -164,8 +178,8 @@ test("serialized payment gate rejects a second send and stays held until transfe
   f.approve(0); assert.deepEqual(await f.send(), { state: "cancelled" });
 });
 
-test("hiding, minimizing, navigation, wallet lock or privacy changes during review stop signing", async t => {
-  for (const change of [f => { f.window.visible = false; f.window.emit("hide"); }, f => { f.window.minimized = true; f.window.emit("minimize"); }, f => f.window.webContents.emit("did-start-navigation", {}, "elsewhere", false, true), f => f.window.webContents.emit("render-process-gone"), f => f.setUnlocked(false), f => f.setMode("local-only")]) {
+test("hiding, minimizing, navigation or wallet lock during review stop signing", async t => {
+  for (const change of [f => { f.window.visible = false; f.window.emit("hide"); }, f => { f.window.minimized = true; f.window.emit("minimize"); }, f => f.window.webContents.emit("did-start-navigation", {}, "elsewhere", false, true), f => f.window.webContents.emit("render-process-gone"), f => f.setUnlocked(false)]) {
     const review = deferred(), f = fixture(t, { review: () => review.promise });
     const task = f.send(); await tick(); change(f); review.resolve({ response: 1 }); await assert.rejects(task);
     assert.ok(!f.calls.some(([name]) => name === "signer")); assert.equal(f.window.listenerCount("hide"), 0);

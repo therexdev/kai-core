@@ -83,6 +83,7 @@ class BridgeOrchestrator {
   }
 
   async _coSignAndBroadcast(transaction) {
+    require("./operation-lifetime").captureOperation()();
     const resp = await fetch(this.sponsorEndpoint(), {
       method: "POST",
       headers: { "content-type": "application/json", "x-koinoskit-app": this.appKey },

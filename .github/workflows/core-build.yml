@@ -26,6 +26,13 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: node node_modules/electron/install.js
+      - name: Prepare original voice and listening assets
+        run: node scripts/prepare-live-senses.js
+      - name: Build original Windows voice and computer helpers
+        if: runner.os == 'Windows'
+        run: |
+          node scripts/build-windows-voice.js
+          node scripts/build-windows-computer.js
       - run: npm test
       - run: npm run test:compat
       - name: Build preview only (no updater publication)

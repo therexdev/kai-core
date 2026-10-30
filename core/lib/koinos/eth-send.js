@@ -8,6 +8,7 @@
 // hand-rolling RLP for real money.
 
 const { ethers } = require("ethers");
+const { createEvmWallet } = require("./operation-lifetime");
 const { isValidAddress, toChecksumAddress } = require("./eth");
 const { makeProvider } = require("./eth-bridge");
 
@@ -109,7 +110,7 @@ async function sendEth({ ethPrivHex, amountEth, toAddress, provider, maxEth = DE
   }
 
   const p = provider || (await makeProvider());
-  const wallet = new ethers.Wallet(priv, p);
+  const wallet = createEvmWallet(priv, p);
   const balance = await p.getBalance(wallet.address);
   const gasLimit = await estimateSendGas(p, wallet.address, to, amountWei);
   const fee = await p.getFeeData();

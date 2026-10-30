@@ -20,7 +20,7 @@ test("only well-formed signed compatible packages are accepted", () => {
   const altered = pkg(); altered.files["index.html"] += "tampered"; assert.throws(() => verifyPackage(altered), /signature/);
   const changedManifest = pkg(); changedManifest.manifest.permissions.push("inference.local"); assert.throws(() => verifyPackage(changedManifest), /signature/);
   const unsigned = pkg(); unsigned.signature = ""; assert.throws(() => verifyPackage(unsigned), /signature/);
-  assert.throws(() => verifyPackage(pkg({ files: { "index.html": "x".repeat(MAX_BYTES) } })), /5 MB/);
+  assert.throws(() => verifyPackage(pkg({ files: { "index.html": "x".repeat(MAX_BYTES) } })), /24 MB/);
 });
 test("plugin paths reject traversal, platform device names and case collisions", () => {
   for (const id of ["../escape", "one", "a..b", "CON.plugin", "nul.package", "foo/bar", "example:", "example.test "]) assert.equal(safeId(id), false, id);
@@ -85,7 +85,7 @@ test("redirects cannot switch downloads to private hosts", async () => {
   assert.equal(requests, 1);
 });
 test("download byte limits apply while streaming", async () => {
-  await assert.rejects(downloadPackage("https://plugins.example/p", { lookup: async () => [{ address: "8.8.8.8", family: 4 }], request: async () => new Response("x".repeat(MAX_BYTES + 1)) }), /5 MB/);
+  await assert.rejects(downloadPackage("https://plugins.example/p", { lookup: async () => [{ address: "8.8.8.8", family: 4 }], request: async () => new Response("x".repeat(MAX_BYTES + 1)) }), /24 MB/);
 });
 function hostFixture(t, permissions) {
   const { manager } = fixture(t); manager.install(pkg({ permissions })); const handlers = new Map(), sessions = [];
@@ -142,4 +142,10 @@ test("local inference enforces installed models, bounds, no network fallback, ca
   const pending = host.call(event, "inference.local", { model: "local", prompt: "hi" });
   await assert.rejects(host.call(event, "inference.local", { model: "local", prompt: "hi" }), /busy/);
   record.window.destroy(); await assert.rejects(pending, /aborted/); assert.equal(host.active, 0);
+});
+
+test("signed binary assets round-trip exactly and reject ambiguous base64",()=>{
+  const files={"index.html":"<img src='picture.png'>","picture.png":Buffer.from([0,137,80,78,71,255]).toString('base64')};
+  assert.equal(verifyPackage(pkg({files})).package.files['picture.png'],files['picture.png']);
+  for(const content of ['not-base64!',files['picture.png']+'\n',''])assert.throws(()=>verifyPackage(pkg({files:{...files,'picture.png':content}})),/canonical base64/);
 });

@@ -3,6 +3,12 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("kaiCore", Object.freeze({
   call: (method, input) => ipcRenderer.invoke("kai-core:call", method, input),
   credit: (action, input) => ipcRenderer.invoke("koin:test-payments", action, input),
+  onOpenView: callback => {
+    if (typeof callback !== "function") throw TypeError("A navigation callback is required");
+    const listener = (_event, view) => callback(view);
+    ipcRenderer.on("kai-core:open-view", listener);
+    return () => ipcRenderer.removeListener("kai-core:open-view", listener);
+  },
   onPluginCatalogChange: callback => {
     if (typeof callback !== "function") throw TypeError("A catalog change callback is required");
     const listener = () => callback();

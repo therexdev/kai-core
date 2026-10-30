@@ -77,8 +77,34 @@ async function start() {
   win.on("focus", wakeCatalog); win.on("show", wakeCatalog);
   electron.powerMonitor.on("resume", wakeCatalog);
   let updateBusy = false;
+  async function setPrivacyMode(mode) {
+    const state = core.gateway.network.configure({ privacyMode: mode });
+    if (state.privacyMode === "local-only") pluginDownload?.abort();
+    catalogMonitor.privacyChanged(); coreWallet?.privacyChanged(state.privacyMode);
+    await features?.privacyChanged(state.privacyMode); return state;
+  }
+  async function openCoreView(view) {
+    if (shuttingDown) throw Error("Application is closing");
+    const target = require("./core-plugin-desktop").resolveView(view);
+    if (target.plugin) {
+      await pluginHost.open(target.plugin);
+      if (target.section) pluginHost.windows.get(target.plugin)?.window.webContents.send("kai-plugin:navigate", { section: target.section });
+      return { opened: true };
+    }
+    desktopTray.show(); win.webContents.send("kai-core:open-view", target.page); return { opened: true };
+  }
   features = new (require("./plugin-services").FeatureServices)({ dataDir, core, electron,
     getWindow: () => win, localInference: (input, signal) => pluginHost.runLocal(input, signal),
+    getCoreWindow: () => win,
+    getPluginWindow: id => pluginHost?.windows.get(id)?.window,
+    loadInstalledPlugin: id => { if (!manager.list().some(row => row.id === id && row.enabled)) return null; return manager.load(id); },
+    readCoreWalletSummary: () => coreWallet.call("wallet.summary", {}),
+    openPlugin: id => pluginHost.open(id),
+    openCoreView, setPrivacyMode,
+    withWalletSpend: run => payments.withWalletSpend(run),
+    runPayment: (action, input, options) => payments.runForPlugin(action, input, options),
+    desktopCall: require("./core-plugin-desktop").createPluginDesktop({ electron, getCoreWindow: () => win, openPlugin: async (id, section) => { await pluginHost.open(id); if (section) pluginHost.windows.get(id)?.window.webContents.send("kai-plugin:navigate", { section }); }, isClosing: () => shuttingDown,
+      confirm: async (title, detail) => { const result = await dialog.showMessageBox(win, { type: "question", title, message: title, detail, buttons: ["Cancel", "Open"], defaultId: 0, cancelId: 0 }); return result.response === 1 && !shuttingDown; } }),
     onDisposeError: async id => {
       const name = firstParty.find(plugin => plugin.id === id)?.name || "Plugin";
       const options = { type: "warning", title: `${name} could not fully stop`, message: `${name} could not finish shutting down.`,
@@ -103,7 +129,7 @@ async function start() {
       case "chat.local": return coreChat.send(input);
       case "chat.stop": return coreChat.stop();
       case "status": {
-        const installed = manager.list(), entries = catalog();
+        const installed = manager.list().map(plugin => ({ ...plugin, backgroundError: features.backgroundErrors?.get(plugin.id) || null })), entries = catalog();
         return { version: app.getVersion(), desktop: { trayAvailable: desktopTray.available }, profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
           models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null,
           plugins: installed, catalog: entries, registry: registry.status(), pluginUpdates: require("../core/lib/plugins/updates").pluginUpdates(installed, entries), catalogCheck: catalogMonitor.status() };
@@ -133,7 +159,7 @@ async function start() {
             const chosen = await dialog.showOpenDialog(win, { title: "Install a signed KAI plugin", properties: ["openFile"], filters: [{ name: "KAI plugin package", extensions: ["kaiplugin"] }] });
             if (chosen.canceled) return null;
             const file = chosen.filePaths[0];
-            if (fs.statSync(file).size > require("../core/lib/plugins/package").MAX_BYTES) throw Error("Plugin exceeds 5 MB");
+            if (fs.statSync(file).size > require("../core/lib/plugins/package").MAX_BYTES) throw Error("Plugin exceeds 24 MB");
             verified = require("../core/lib/plugins/package").verifyPackage(fs.readFileSync(file, "utf8"));
           }
           const m = verified.manifest;
@@ -141,17 +167,15 @@ async function start() {
             detail: `${m.description || ""}\n\nID: ${m.id}\nPublisher key: ${verified.fingerprint}\n\nPermissions: ${m.permissions.join(", ") || "None"}\n\nThis signature identifies a key; it does not mean KAI has reviewed this publisher. Plugins never receive wallet keys. Verified feature plugins can access only their declared feature data. Other plugins cannot read your Brain, account credentials or another plugin’s storage.`,
             buttons: ["Cancel", "Install"], defaultId: 0, cancelId: 0, noLink: true });
           if (review.response !== 1 || shuttingDown || win.isDestroyed()) return null;
-          await pluginHost.close(m.id); return manager.install(verified.package);
+          await pluginHost.close(m.id, "update"); const installed = manager.install(verified.package);
+          void features.startInstalledBackground(manager, m.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed;
         } finally { installBusy = false; pluginDownload = null; }
       }
       case "plugins.open": return pluginHost.open(input.id);
-      case "plugins.change": await pluginHost.close(input.id); return manager.change(input.id, input.action);
+      case "plugins.change": { await pluginHost.close(input.id, input.action); const installed = manager.change(input.id, input.action);
+        if (["enable", "rollback"].includes(input.action)) void features.startInstalledBackground(manager, input.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed; }
       case "privacy": {
-        const state = core.gateway.network.configure({ privacyMode: input.mode });
-        if (state.privacyMode === "local-only") pluginDownload?.abort();
-        catalogMonitor.privacyChanged();
-        coreWallet.privacyChanged(state.privacyMode);
-        await features.privacyChanged(state.privacyMode); return state;
+        return setPrivacyMode(input.mode);
       }
       case "wallet.summary":
       case "wallet.history":
@@ -196,9 +220,18 @@ async function start() {
           return { message: "Update downloaded. Check for updates again when you are ready to install." };
         } finally { updateBusy = false; }
       }
+      case "desktop.openExternal": {
+        if (typeof input?.url !== "string" || input.url.length > 4000) throw Error("Invalid website address");
+        const url = new URL(input.url);
+        if (url.protocol !== "https:" || url.username || url.password) throw Error("Use an HTTPS website address without credentials");
+        const answer = await dialog.showMessageBox(win, { type: "question", title: "Open website", message: "Open this website in your browser?", detail: url.href, buttons: ["Cancel", "Open"], defaultId: 0, cancelId: 0 });
+        if (answer.response !== 1 || shuttingDown) return { cancelled: true };
+        await electron.shell.openExternal(url.href); return { opened: true };
+      }
       default: throw Error("Unknown core operation");
     }
   });
   await win.loadURL(origin + "/");
   if (!shuttingDown) catalogMonitor.start();
+  if (!shuttingDown) void features.startInstalledBackground(manager).catch(error => console.warn("[plugin-startup]", error.message));
 }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
   <title>KAI Core</title>
-  <link rel="stylesheet" href="core.css">
+  <link rel="stylesheet" href="core.css"><link rel="stylesheet" href="account.css">
   <link rel="stylesheet" href="wallet.css">
   <link rel="stylesheet" href="earning.css">
 </head>
@@ -93,11 +93,73 @@
       <section data-panel="settings" class="page" hidden>
         <div class="page-head"><div><h1>Settings</h1><p>Make this workspace your own.</p></div></div>
         <article><h2>AI privacy</h2><label for="privacy">Where AI can run</label><select id="privacy"><option value="local-only">Local only</option><option value="local-first">Local first</option><option value="network">Network</option></select><p class="muted">Choose Local only to keep chat on this computer. Choose an online mode to use network models and credits.</p></article>
+        <article id="account-settings" class="account-settings">
+          <h2 id="account-heading">Koinos AI account</h2>
+          <button id="btn-account-scope" class="small" hidden>Website account and Connections</button>
+          <p class="hint" id="account-hint">
+            One account across your devices: sign in once, link this wallet, and your balance
+            and claims follow you. Sign-in happens at koinosai.com with a passkey, email code,
+            or Google — the app never asks for a password, it just shows a short code.
+          </p>
+          <div id="account-signedout" hidden>
+            <button id="btn-account-signin" class="primary small">Sign in / create account</button>
+            <div id="account-code-row" hidden>
+              <p class="hint">
+                On any device, open
+                <a id="account-verify-link" href="https://koinosai.com/link" target="_blank" rel="noopener">koinosai.com/link</a>,
+                sign in, and type this code:
+              </p>
+              <div id="account-code" class="mono"></div>
+              <p class="hint" id="account-poll-status">Waiting for approval…</p>
+            </div>
+          </div>
+          <div id="account-signedin" hidden>
+            <div class="hw-summary" id="account-stats"></div>
+            <div class="form-row">
+              <button id="btn-account-linkwallet" class="primary small">Link this wallet</button>
+              <button id="btn-account-signout" class="small">Sign out on this device</button>
+            </div>
+          </div>
+          <div id="account-notice" class="dismissible-notice inline-notice" hidden><p class="hint" id="account-msg" role="status" hidden></p><button id="account-msg-close" class="notice-close" type="button" aria-label="Dismiss account message" title="Dismiss message"><span aria-hidden="true">×</span></button></div>
+
+          <div id="account-web" hidden>
+            <h2>Use Koinos AI on the web</h2>
+            <p class="hint">
+              Chat and Docs in a browser, signed in to this same account — useful on a machine
+              that cannot run models. The website has no key of its own, so it can only spend
+              what you authorise here: a cap, and a date it stops. This app signs that once,
+              with this wallet, and you can end it from either side at any time.
+              A grant is permission, not funds — this wallet still needs KAI on the network to
+              draw against, same as the app. <a href="https://docs.koinosai.com/#web-app" target="_blank" rel="noopener">How it works</a>.
+            </p>
+            <div id="account-grant-none">
+              <div class="form-row">
+                <label class="hint" for="account-grant-cap">Spend up to</label>
+                <input id="account-grant-cap" type="number" min="0.5" max="500" step="0.5" value="10" />
+                <select id="account-grant-days">
+                  <option value="7">for 7 days</option>
+                  <option value="30" selected>for 30 days</option>
+                  <option value="90">for 90 days</option>
+                </select>
+                <button id="btn-account-grant" class="primary small">Authorise</button>
+              </div>
+              <p class="hint">In US dollars of model usage — the same rates the Network tab shows. Nothing is transferred now; the site draws against this as it is used.</p>
+            </div>
+            <div id="account-grant-live" hidden>
+              <div class="hw-summary" id="account-grant-stats"></div>
+              <div class="form-row">
+                <a id="account-web-open" class="link-btn" href="https://koinosai.com/app" target="_blank" rel="noopener">Open the web app</a>
+                <button id="btn-account-grant-revoke" class="small">End web access</button>
+              </div>
+            </div>
+          </div>
+
+        </article>
         <article><h2>Closing the window</h2><p id="closing-window-detail">Checking system tray availability…</p></article>
         <article><h2>Application updates</h2><p>Keep KAI Core up to date.</p><button id="check-updates">Check for updates</button><div id="update-notice" class="dismissible-notice inline-notice" hidden><p id="update-state" role="status" aria-atomic="true"></p><button id="update-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div></article>
       </section>
     </div>
   </main>
-  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="core.js"></script>
+  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="account.js"></script><script src="core.js"></script>
 </body>
 </html>

@@ -10,7 +10,7 @@ async function downloadPackage(url, { signal = AbortSignal.timeout(30000), looku
     if ([301, 302, 303, 307, 308].includes(response.status)) { await response.body?.cancel(); url = new URL(response.headers.get("location"), u).href; continue; }
     if (!response.ok) { await response.body?.cancel(); throw Error(`Plugin download failed (${response.status})`); }
     const reader = response.body.getReader(); const chunks = []; let size = 0;
-    try { for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > MAX_BYTES) throw Error("Plugin exceeds 5 MB"); chunks.push(Buffer.from(value)); } }
+    try { for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > MAX_BYTES) throw Error("Plugin exceeds 24 MB"); chunks.push(Buffer.from(value)); } }
     finally { await reader.cancel(); }
     return verifyPackage(Buffer.concat(chunks).toString("utf8"));
   }

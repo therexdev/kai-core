@@ -43,11 +43,17 @@ function showPage(next) {
   if (next === "network") window.KaiCoreNetwork?.enter();
   if (next === "wallet") window.KaiCoreWallet?.enter();
   if (next === "plugins") void checkPluginCatalog();
+  if (next === "settings") window.KaiCoreAccount?.enter();
   if (next === "credits") { renderCredits(); void refreshCreditActivity(); }
   if (next === "buy-credits") void price();
 }
 for (const b of document.querySelectorAll("[data-page],[data-go]")) b.onclick = () => showPage(b.dataset.page || b.dataset.go);
 window.addEventListener("kai-core-navigate", event => showPage(event.detail?.page));
+bridge?.onOpenView?.(target => {
+  showPage(typeof target === "string" ? target : target?.page);
+  if (target?.section === "website-account") window.KaiCoreAccount?.openWebsite();
+  if (target?.section === "credit-account") window.KaiCoreAccount?.openCredit();
+});
 function html(id, value) { if ($(id).innerHTML !== value) $(id).innerHTML = value; }
 async function refresh() {
   if (!bridge || refreshing || document.hidden) return; refreshing = true;
@@ -112,7 +118,7 @@ function renderInstalledPlugins() {
     const updateLabel = update ? `<span class="pill plugin-update-label">${blocked ? "Core update required" : "Update available"}</span>` : "";
     const version = update ? `Version ${esc(p.version)} <span aria-hidden="true">→</span><span class="sr-only"> to </span> <strong>${esc(update.version)}</strong>` : `Version ${esc(p.version)}`;
     const updateButton = update ? `<button class="primary" data-install-plugin="${esc(p.id)}" ${blocked ? "disabled" : ""}>${blocked ? "Requires newer Core" : "Review update"}</button>` : "";
-    return `<article class="plugin-card${update ? " plugin-update-available" : ""}" data-installed-plugin="${esc(p.id)}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><div class="pills"><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span>${updateLabel}</div></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted plugin-version">${version}</p>${blocked ? `<p class="muted">${esc(update.compatibilityReason || `Requires KAI Core ${update.minCoreVersion || "a newer version"}.`)}</p>` : ""}<div class="actions">${updateButton}${p.enabled ? `<button data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></article>`;
+    return `<article class="plugin-card${update ? " plugin-update-available" : ""}" data-installed-plugin="${esc(p.id)}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><div class="pills"><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span>${updateLabel}</div></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted plugin-version">${version}</p>${p.backgroundError ? `<p class="muted">Background service needs attention: ${esc(p.backgroundError)}</p>` : ""}${blocked ? `<p class="muted">${esc(update.compatibilityReason || `Requires KAI Core ${update.minCoreVersion || "a newer version"}.`)}</p>` : ""}<div class="actions">${updateButton}${p.enabled ? `<button data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></article>`;
   }).join("") : "<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a plugin below to add the tools you need.</p></article>");
 }
 function renderCatalog() {

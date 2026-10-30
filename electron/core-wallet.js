@@ -68,9 +68,9 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
   const clock = dependencies.clock || Date.now, read = dependencies.readSettings || (() => readSettings(root));
   let closed = false, epoch = 0, sending = false, activeReads = 0;
   const controllers = new Set(), transfers = new Set();
-  const mode = () => core.gateway.network.status().privacyMode;
   const active = () => { if (closed || isClosing()) throw Error("The wallet is closing"); };
-  const online = () => { active(); if (mode() === "local-only") throw Error("Local-Only blocks wallet network reads and transfers. Choose an online mode in Settings to continue"); };
+  // AI privacy never gates explicit blockchain wallet access in the original app.
+  // Wallet identity, selected chain, native review and lifetime remain independent.
   function configuration() {
     const value = read(), net = NETWORKS[value.network];
     const custom = value.customRpc?.[value.network] || "";
@@ -85,11 +85,11 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
     return address;
   }
   function context(expectedAddress, expectedNetwork, requireUnlocked = false) {
-    online();
+    active();
     const address = identity(expectedAddress, requireUnlocked), config = configuration(), version = epoch;
     if (expectedNetwork !== undefined && expectedNetwork !== config.net.id) throw Error("The wallet network changed. Review this action again");
     const assert = () => {
-      online(); identity(address, requireUnlocked);
+      active(); identity(address, requireUnlocked);
       const next = configuration();
       if (version !== epoch || next.net.id !== config.net.id || JSON.stringify(next.rpc) !== JSON.stringify(config.rpc)) throw Error("The wallet or network changed. Review this action again");
     };
@@ -121,7 +121,7 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
   }
   async function networkRead(method, value) {
     const request = input(value, method === "wallet.history" ? ["cursor"] : []);
-    online();
+    active();
     if (activeReads >= 2) throw Error("Wallet information is already loading");
     const config = configuration(), address = wallet.address || null;
     if (!address) return method === "wallet.history"
@@ -145,7 +145,7 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
   }
   async function send(value) {
     const request = input(value, ["to", "amount", "token", "password", "expectedAddress", "expectedNetwork"]);
-    online();
+    active();
     if (sending) throw Error("A wallet transfer is already being reviewed or sent");
     if (!validAddress(request.to) || !validAddress(request.expectedAddress) || !Object.hasOwn(NETWORKS, request.expectedNetwork || "") || !["koin", "vhp"].includes(request.token)) throw Error("Check the recipient, token and wallet network before sending");
     if (typeof request.amount !== "string" || !/^(0|[1-9]\d{0,11})(\.\d{1,8})?$/.test(request.amount)) throw Error("Enter a positive token amount with up to eight decimal places");
@@ -183,7 +183,7 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
       let result;
       try { result = await task; } finally { transfers.delete(task); }
       // A submission may already have reached the chain. Never retry or report
-      // cancellation merely because the view/privacy changed while confirming.
+      // cancellation merely because the view changed while confirming.
       return { state: "submitted", ...result };
     } finally {
       request.password = ""; controllers.delete(controller); sending = false;
@@ -220,7 +220,7 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
       }
       throw Error("Unknown Core wallet operation");
     },
-    privacyChanged() { epoch++; for (const controller of controllers) controller.abort(Error("Wallet privacy changed")); },
+    privacyChanged() { /* AI privacy is independent of blockchain wallet access. */ },
     async dispose() { closed = true; epoch++; for (const controller of controllers) controller.abort(Error("Wallet is closing")); await Promise.allSettled([...transfers]); },
   };
 }

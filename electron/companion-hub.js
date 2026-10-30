@@ -6,8 +6,8 @@ const { CompanionWorkflows, TYPES } = require("./companion-workflows");
 const { trustedFrame } = require("./mascot");
 
 class CompanionHub {
-  constructor({ dataDir, safeStorage, privacyMode, models, runLocal, fetchImpl, canUseModel, legacyMemory, account, openExternal, chats, lookup, legacyTasks }) {
-    this.store = new CompanionStore({ dataDir, safeStorage }); this.models = models; this.canUseModel = canUseModel; this.legacyMemory = legacyMemory;
+  constructor({ dataDir, safeStorage, privacyMode, models, runLocal, fetchImpl, canUseModel, legacyMemory, account, openExternal, chats, lookup, legacyTasks, store = null, withAgentNetwork = true }) {
+    this.store = store || new CompanionStore({ dataDir, safeStorage }); this.models = models; this.canUseModel = canUseModel; this.legacyMemory = legacyMemory;
     this.memoryMigrationError = null;
     try { this.store.migrateLegacy(legacyMemory); } catch (error) { this.memoryMigrationError = "Earlier memories could not be moved to Brain. Free storage or unlock your OS keychain and restart KAI. " + error.message; }
     this.connections = new CompanionConnections({ store: this.store, privacyMode, fetchImpl });
@@ -22,8 +22,8 @@ class CompanionHub {
     this.sources = new CompanionSources({ store: this.store, chats, privacyMode, fetchImpl, lookup });
     this.awareness = new CompanionAwareness({ store: this.store, models, runLocal, workflows: this.workflows });
     this.actions = new (require("./conversation-actions").ConversationActions)({ hub: this, privacyMode, fetchImpl, lookup });
-    this.agentNetwork = new (require("../core/lib/agent-network/network").AgentNetwork)({ store: new (require("../core/lib/agent-network/store").Store)(path.join(dataDir, "agent-network.json"), safeStorage), models, runLocal, privacyMode });
-    this.agentNetwork.start();
+    this.agentNetwork = withAgentNetwork ? new (require("../core/lib/agent-network/network").AgentNetwork)({ store: new (require("../core/lib/agent-network/store").Store)(path.join(dataDir, "agent-network.json"), safeStorage), models, runLocal, privacyMode }) : null;
+    this.agentNetwork?.start();
     this.syncing = new Set(); this.sourceControllers = new Map(); this.timer = null;
   }
   status() {
@@ -140,9 +140,10 @@ class CompanionHub {
     this.agentNetwork?.stop(); this.actions.stop(); clearInterval(this.timer); for (const c of this.sourceControllers.values()) c.abort(); this.awareness.stop(); this.workflowEvents.stop(); this.workflowAssistant.stop(); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
 }
 
-function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow, dialog }) {
+function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow, dialog, getTrustedWindow, ownsService = true }) {
   const handles = [], jobs = new Map(), sessions = new Map(); let approvalPending = false;
   const windowFor = (event, management = false) => {
+    if (getTrustedWindow) return getTrustedWindow(event, { management });
     for (const [window, route] of [[getMainWindow(), "/"], ...(!management ? [[getMascotWindow(), "/mascot.html"]] : [])])
       if (trustedFrame(event, window, origin) && new URL(event.senderFrame.url).pathname === route) return window;
     return null;
@@ -215,7 +216,14 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
     throw new CompanionError("Unknown conversation operation.");
   });
   handle("companion:cancel", false, ctx => { service.actions.stop(ctx.event.sender.id); for (const job of jobs.values()) if (job.sender === ctx.event.sender) job.controller.abort(); return true; });
-  handle("companion:manage", true, async (ctx, action, input = {}) => {
+  handle("companion:manage", true, (ctx, action, input = {}) => manageCompanion(service, { ...ctx, dialog }, action, input));
+  return { dispose() { for (const clean of [...sessions.values()]) clean(); if (ownsService) service.stop(); for (const job of jobs.values()) job.controller.abort(); for (const h of handles) ipcMain.removeHandler(h); } };
+}
+// Native callers must still scope actions to the installed, trusted plugin.
+// This shares the original desktop implementation and all its review dialogs;
+// it is never exposed as an unrestricted renderer IPC surface.
+async function manageCompanion(service, ctx, action, input = {}) {
+  const { dialog } = ctx;
     if (action === "status") return service.status();
     service.store.requireStorage();
     switch (action) {
@@ -372,7 +380,5 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       }
       default: throw new CompanionError("Unknown companion action.");
     }
-  });
-  return { dispose() { for (const clean of [...sessions.values()]) clean(); service.stop(); for (const job of jobs.values()) job.controller.abort(); for (const h of handles) ipcMain.removeHandler(h); } };
 }
-module.exports = { CompanionHub, registerCompanionIPC };
+module.exports = { CompanionHub, registerCompanionIPC, manageCompanion };

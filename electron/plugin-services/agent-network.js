@@ -9,18 +9,18 @@ const P = require("../../core/lib/agent-network/protocol");
 const pluginId = "kai.agent-network";
 const permissions = Object.freeze({
   "agentNetwork.status": "agent-network.read", "agentNetwork.export": "agent-network.read",
+  "agentNetwork.legacyStatus": "agent-network.read", "agentNetwork.saveFile": "agent-network.read", "agentNetwork.openBuilder": "agent-network.read",
+  "agentNetwork.legacySave": "agent-network.write", "agentNetwork.legacyWorkflowChoices": "agent-network.write", "agentNetwork.legacyRefresh": "agent-network.network",
   "agentNetwork.jobDetail": "agent-network.read", "agentNetwork.workflowChoices": "agent-network.write",
   "agentNetwork.save": "agent-network.write", "agentNetwork.fromWorkflow": "agent-network.write", "agentNetwork.import": "agent-network.write",
   "agentNetwork.settings": "agent-network.manage", "agentNetwork.accepting": "agent-network.manage", "agentNetwork.job": "agent-network.manage",
   "agentNetwork.discover": "agent-network.network", "agentNetwork.publish": "agent-network.network", "agentNetwork.retire": "agent-network.network",
   "agentNetwork.quote": "agent-network.network", "agentNetwork.submit": "agent-network.network", "agentNetwork.refresh": "agent-network.network"
 });
-const SAFE_NODES = new Set(["trigger", "agent", "condition", "switch", "merge", "split_out", "transform", "output_parser", "dedup", "loop", "output", "approval"]);
-function safeDefinition(value) {
-  const definition = packageDefinition(value);
-  for (const node of definition.graph.nodes) if (!SAFE_NODES.has(node.type)) throw Error("Service packages cannot execute code or native actions. Use local reasoning and data steps only.");
-  return definition;
-}
+// Use the original service-package validator, including its bounded QuickJS
+// code steps. The rental runtime still has no accounts, Brain, desktop, wallet,
+// schedules, or sub-workflow access.
+function safeDefinition(value) { return packageDefinition(value); }
 function create(ctx) {
   let active = false, disposed = false, busy = false, operationSignal = null;
   const lifecycle = new AbortController();
@@ -94,6 +94,22 @@ function create(ctx) {
       notice: state.endpoints.length ? "Private free services. Relay availability is checked when connecting; no paid marketplace is configured." : "No relay configured. Create services, export signed invitations, and test them locally. Public discovery and external jobs need a relay."
     };
   };
+  const fullStatus = () => {
+    // A saved opt-in resumes when this installed feature starts, as it did in
+    // the original application. Closing its window does not close the host.
+    if (!active && store.data.enabled) {
+      for (const agent of store.data.agents.filter(a => a.accepting)) safeDefinition(agent.definition);
+      lifecycle.signal.throwIfAborted(); network.start(); active = true;
+    }
+    return network.status();
+  };
+  const saveOriginal = async input => {
+    requireActive();
+    const workflow = input.workflowId ? ctx.getCompanionStore().data.workflows.find(w => w.id === input.workflowId && !w.draft) : null;
+    if (input.workflowId && !workflow) throw Error("Review and save the workflow first.");
+    const definition = safeDefinition(workflow || input.definition || template(input.template || "summary", input.model || ""));
+    return network.save({ ...input, definition });
+  };
   const save = async input => {
     requireActive();
     if (input.amount_atoms && input.amount_atoms !== "0") throw Error("Paid rentals are unavailable. This release supports free private services only.");
@@ -111,6 +127,24 @@ function create(ctx) {
   async function execute(method, input) {
     switch (method) {
       case "agentNetwork.status": return summary();
+      case "agentNetwork.legacyStatus": return fullStatus();
+      case "agentNetwork.legacyRefresh": if (active) await network.tick(); return fullStatus();
+      case "agentNetwork.legacySave": return saveOriginal(input);
+      case "agentNetwork.legacyWorkflowChoices": {
+        const companion = ctx.getCompanionStore(); companion.requireStorage();
+        return companion.data.workflows.map(w => ({ id: w.id, name: w.name, draft: !!w.draft }));
+      }
+      case "agentNetwork.openBuilder": {
+        if (!ctx.openPlugin) throw Error("Install the matching Core update to open Workflows.");
+        await ctx.openPlugin("kai.workflows"); return { opened: true };
+      }
+      case "agentNetwork.saveFile": {
+        if (typeof input.name !== "string" || !/^kai-agent-(?:result-)?[a-f0-9]{8}\.(?:json|txt)$/.test(input.name) || typeof input.text !== "string" || Buffer.byteLength(input.text) > 200000) throw Error("Invalid service export.");
+        const result = await ctx.electron.dialog.showSaveDialog(ctx.getWindow(), { title: "Save agent service file", defaultPath: input.name, filters: [{ name: "Agent service file", extensions: [input.name.endsWith("json") ? "json" : "txt"] }] });
+        lifecycle.signal.throwIfAborted(); operationSignal?.throwIfAborted();
+        if (result.canceled || !result.filePath) return { saved: false };
+        fs.writeFileSync(result.filePath, input.text, { mode: 0o600 }); return { saved: true };
+      }
       case "agentNetwork.settings": {
         if (typeof input.enabled !== "boolean") throw Error("Choose whether to start the service session.");
         const endpoints = input.endpoints ?? store.data.endpoints;
@@ -163,7 +197,7 @@ function create(ctx) {
         await network.discover((input.query || "").slice(0, 100)); return summary();
       }
       case "agentNetwork.quote": {
-        requireActive(); if (typeof input.input !== "string" || Buffer.byteLength(input.input) > 12000) throw Error("Service input must be text under 12 KB.");
+        requireActive(); if (Buffer.byteLength(JSON.stringify(input.input) || "") > 128000) throw Error("Service input exceeds the original service limit.");
         const card = cardFor(input.id); P.validateCard(card);
         if (card.payload.amount_atoms !== "0") throw Error("Paid services are unavailable in this release.");
         if (card.payload.owner !== network.identity().address) await approved("Request a private service quote", { service: card.payload.name, operator: card.payload.owner, relays: card.payload.endpoints, scope: "Sends the input commitment and your public service address. The actual input is held locally until you approve submission. This service is free." });
@@ -190,13 +224,15 @@ function create(ctx) {
     }
   }
   return {
+    keepAliveOnWindowClose: true,
+    startBackground() { if (disposed) throw Error("Agent Network session is closed."); return fullStatus(); },
     async call(method, input = {}, signal) {
       if (disposed) throw Error("Agent Network session is closed.");
       if (!Object.hasOwn(permissions, method)) throw Error("Unknown Agent Network operation.");
       if (!input || typeof input !== "object" || Array.isArray(input)) throw Error("Invalid service input.");
       signal?.throwIfAborted();
-      if (busy && !["agentNetwork.status", "agentNetwork.jobDetail"].includes(method)) throw Error("Agent Network is busy. Try again after the current request.");
-      const readonly = ["agentNetwork.status", "agentNetwork.jobDetail"].includes(method);
+      if (busy && !["agentNetwork.status", "agentNetwork.legacyStatus", "agentNetwork.jobDetail"].includes(method)) throw Error("Agent Network is busy. Try again after the current request.");
+      const readonly = ["agentNetwork.status", "agentNetwork.legacyStatus", "agentNetwork.jobDetail"].includes(method);
       if (!readonly) { busy = true; operationSignal = AbortSignal.any([lifecycle.signal, ...(signal ? [signal] : []), AbortSignal.timeout(60000)]); }
       const currentSignal = readonly ? signal : operationSignal;
       const abort = () => transport.stop(); currentSignal?.addEventListener("abort", abort, { once: true });

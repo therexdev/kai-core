@@ -670,6 +670,12 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     models,
     runtime,
     gateway,
+    // KAI Core installs optional capabilities lazily through their reviewed
+    // first-party plugin broker. The legacy desktop still uses extensions.
+    ensureLegacyFeature(feature) {
+      if (!this._pluginLegacyServices) this._pluginLegacyServices = require("../electron/plugin-services/legacy-core-services").createLegacyCoreServices({ core: this, dataDir, provisioner, events });
+      return this._pluginLegacyServices.ensure(feature);
+    },
     async start() {
       const p = await gateway.listen();
       mcp?.autoConnect().catch(() => {}); // only spawn tool servers after the gateway starts
@@ -749,6 +755,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     },
     async stop() {
       for (const controller of shadowRequests) controller.abort();
+      await this._pluginLegacyServices?.dispose();
       wallet.disposeCreditStorage();
       this.remote?.stop();
       speech?.close();

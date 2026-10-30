@@ -12,10 +12,18 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const http = require("node:http");
+const crypto = require("node:crypto");
 const electron = require("electron");
 const { app, protocol, ipcMain } = electron;
 const coreRoot = path.resolve(process.env.KAI_PLUGIN_CORE_ROOT || path.join(__dirname, "../.."));
+const packagedCore = path.basename(coreRoot) === "app.asar";
+if (packagedCore) {
+  assert.ok(fs.existsSync(coreRoot), "Packaged Core archive is missing");
+  // The test harness is launched by Electron with an external script. Point
+  // packaged runtime asset resolution at this build's actual extraResources.
+  // Core modules and dependencies still load from the selected app.asar.
+  Object.defineProperty(process, "resourcesPath", { value: path.dirname(coreRoot) });
+}
 const fromCore = relative => require(path.join(coreRoot, relative));
 const { PluginManager } = fromCore("core/lib/plugins/manager");
 const { downloadPackage } = fromCore("core/lib/plugins/download");
@@ -29,13 +37,17 @@ delete process.env.KAI_CORE_TOKEN; delete process.env.KAI_SESSION_SECRET;
 // reaches native storage guards; descendants remain subject to symlink checks.
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kai-plugins-smoke-profile-")));
 const profile = path.join(root, "profile"), dataDir = path.join(root, "data");
-const output = path.join(os.tmpdir(), "kai-plugins-smoke");
+const output = process.env.KAI_PLUGIN_SMOKE_OUTPUT || path.join(os.tmpdir(), "kai-plugins-smoke");
+const projectDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kai-plugins-project-")));
 const legacyNodeFile = path.join(dataDir, "koinos-node", "settings.json");
 const legacyNodeSettings = JSON.stringify({ network: "harbinger", node: { dataDir: path.join(dataDir, "preserved-node-data") }, fixture: "preserve-me" });
 for (const dir of [profile, dataDir, output]) fs.mkdirSync(dir, { recursive: true });
 app.setName("KAI Synthetic Plugin Smoke");
 app.setPath("userData", profile); app.setPath("sessionData", profile);
 app.disableHardwareAcceleration();
+// Synthetic cameras/microphones exercise Chromium's real permission flow.
+// There is deliberately no use-fake-ui-for-media-stream consent bypass.
+app.commandLine.appendSwitch("use-fake-device-for-media-stream");
 // Closing one plugin is part of the sequence, not the end of the fixture.
 app.on("window-all-closed", () => {});
 // Container-only synthetic fixture exception; production does not use this.
@@ -50,36 +62,67 @@ const safeStorage = {
   encryptString: text => Buffer.from("SYNTHETIC-TEST-ONLY:" + text),
   decryptString: bytes => { const text = bytes.toString(); assert.ok(text.startsWith("SYNTHETIC-TEST-ONLY:")); return text.slice(20); },
 };
-const nativeActions = [], blockedProcesses = [];
+const nativeActions = [], blockedProcesses = [], externalCalls = [], openDialogResponses = [], messageBoxResponses = [];
+const mediaPermissionChecks = [], mediaPermissionRequests = [];
+const models = [{ alias: "synthetic-a", label: "Synthetic A", status: "ready" }, { alias: "synthetic-b", label: "Synthetic B", status: "ready" }];
+const syntheticDisplay = process.platform === "linux" && !process.env.DISPLAY;
+// Ozone's headless monitor is 1x1. Give native window placement a realistic
+// synthetic work area while retaining actual BrowserWindows and their bounds.
+const fixtureScreen = new (require("node:events").EventEmitter)();
+const display = { id: 1, scaleFactor: 1, bounds: { x: 0, y: 0, width: 1600, height: 1000 }, workArea: { x: 0, y: 0, width: 1600, height: 1000 } };
+Object.assign(fixtureScreen, { getCursorScreenPoint: () => ({ x: 800, y: 500 }), getDisplayNearestPoint: () => display,
+  getDisplayMatching: () => display, getPrimaryDisplay: () => display, getAllDisplays: () => [display], screenToDipPoint: point => point, dipToScreenPoint: point => point });
+// Original optional engines sometimes obtain Electron directly. This process
+// owns only this synthetic profile, so their keychain calls use the same fixture.
+Object.assign(electron.safeStorage, safeStorage);
 for (const method of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"]) {
   require("node:child_process")[method] = () => { blockedProcesses.push(method); throw Error("Synthetic smoke forbids child processes"); };
 }
 const fixtureElectron = {
   ...electron, safeStorage,
+  ...(syntheticDisplay ? { screen: fixtureScreen } : {}),
+  session: { fromPartition(...args) {
+    const session = electron.session.fromPartition(...args);
+    const setCheck = session.setPermissionCheckHandler.bind(session), setRequest = session.setPermissionRequestHandler.bind(session);
+    session.setPermissionCheckHandler = handler => setCheck(handler ? (wc, permission, requestingOrigin, details) => {
+      const allowed = handler(wc, permission, requestingOrigin, details);
+      if (permission === "media") mediaPermissionChecks.push({ requestingOrigin, requestingUrl: details?.requestingUrl, isMainFrame: details?.isMainFrame, mediaType: details?.mediaType, allowed });
+      return allowed;
+    } : null);
+    session.setPermissionRequestHandler = handler => setRequest(handler ? (wc, permission, callback, details) => {
+      const record = { requestingOrigin: details?.requestingOrigin, requestingUrl: details?.requestingUrl, isMainFrame: details?.isMainFrame, mediaTypes: details?.mediaTypes };
+      if (permission === "media") mediaPermissionRequests.push(record);
+      return handler(wc, permission, allowed => { record.allowed = allowed; callback(allowed); }, details);
+    } : null);
+    return session;
+  } },
   // Headless Linux lacks a desktop compositor. Offscreen still uses the same
   // Chromium renderer/preload/security settings and gives it a real surface.
   ...(process.platform === "linux" && !process.env.DISPLAY ? { BrowserWindow: class extends electron.BrowserWindow {
     constructor(options) { super({ ...options, webPreferences: { ...options.webPreferences, offscreen: true } }); this.webContents.on("paint", (_event, _dirty, shot) => { this.smokePaint = shot; }); }
   } } : {}),
   dialog: {
-    showOpenDialog: async () => { nativeActions.push("open-dialog-cancelled"); return { canceled: true, filePaths: [] }; },
+    showOpenDialog: async () => { const result = openDialogResponses.shift() || { canceled: true, filePaths: [] }; nativeActions.push(result.canceled ? "open-dialog-cancelled" : "synthetic-folder-selected"); return result; },
     showSaveDialog: async () => { nativeActions.push("save-dialog-cancelled"); return { canceled: true }; },
+    showMessageBox: async (...args) => { const options = args.at(-1); const result = messageBoxResponses.shift() || { response: 0 }; nativeActions.push(`native-review:${options.title || options.message}:${result.response}`); return result; },
+    showErrorBox: (title, message) => { nativeActions.push("error-dialog:" + title + ":" + message); },
   },
   shell: { openExternal: async () => { throw Error("Synthetic smoke forbids external applications"); } },
 };
-let host, features, server, finished = false, localCalls = 0, activeId = null, workflowExpression = false, registryVerified = false;
+let host, features, core, finished = false, localCalls = 0, activeId = null, workflowExpression = false, registryVerified = false;
 const errors = new Map(), reports = [];
-const downloading = process.argv.includes("--download");
-const deadline = setTimeout(() => void finish(Error("Plugin smoke exceeded its deadline")), downloading ? 360000 : 120000);
+const downloading = process.argv.includes("--download"), sourcePackages = process.env.KAI_PLUGIN_SMOKE_SOURCE === "1";
+if (downloading && sourcePackages) throw Error("Source-package and published download smoke are separate modes");
+const deadline = setTimeout(() => void finish(Error("Plugin smoke exceeded its deadline")), downloading ? 480000 : 300000);
 async function finish(error) {
   if (finished) return; finished = true; clearTimeout(deadline);
   await host?.closeAll(); await features?.dispose(); ipcMain.removeHandler("kai-plugin:call");
-  server?.closeAllConnections(); server?.close();
-  const result = { coreRoot, workflowExpression, registryVerified, syntheticProfile: true, realEncryptionTested: false, captureMode: process.platform === "linux" && !process.env.DISPLAY ? "offscreen-chromium" : "desktop-chromium", localCalls, nativeActions, blockedProcesses, plugins: reports, ...(error ? { error: error.stack || String(error) } : {}) };
+  await core?.stop();
+  const result = { coreRoot, packagedCore, resourcesPath: process.resourcesPath, coreVersion: fromCore("package.json").version, platform: process.platform, workflowExpression, registryVerified, syntheticProfile: true, syntheticDisplay, realEncryptionTested: false, captureMode: process.platform === "linux" && !process.env.DISPLAY ? "offscreen-chromium" : "desktop-chromium", sourcePackages, localCalls, nativeActions, blockedProcesses, externalCalls, mediaPermissionChecks, mediaPermissionRequests, plugins: reports, ...(error ? { error: error.stack || String(error) } : {}) };
   fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(result, null, 2));
   if (error) console.error(error.stack || error);
   else console.log(`PASS: ${reports.length} signed plugins rendered and exercised; ${localCalls} loopback inference calls; screenshots/report in ${output}`);
-  try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(projectDir, { recursive: true, force: true }); } catch {}
   app.exit(error ? 1 : 0);
 }
 process.on("uncaughtException", error => void finish(error));
@@ -99,9 +142,9 @@ app.on("web-contents-created", (_event, wc) => {
 const js = (win, expression) => win.webContents.executeJavaScript(expression, true);
 const call = (win, method, input = {}) => js(win, `window.kai.call(${JSON.stringify(method)},${JSON.stringify(input)})`);
 async function until(win, expression, label) {
-  const end = Date.now() + 8000;
+  const end = Date.now() + 15000;
   while (Date.now() < end) {
-    if (await js(win, expression)) return;
+    if (await js(win, `Promise.resolve(${expression}).then(Boolean)`)) return;
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   throw Error(`${label}: ${await js(win, "document.body.innerText.slice(-2000)")}`);
@@ -121,23 +164,40 @@ async function capture(win, file, { width = 1000, height = 760 } = {}) {
 }
 
 
-// These checks run in the actual sandboxed plugin renderer, with the signed
-// package's shared styles and notice helper. They do not grant new capabilities.
+// These checks run in the actual sandboxed plugin renderer. Restored features
+// retain their original styles, including Node's slightly different palette.
 async function presentation(win, id) {
   const styles = await js(win, `(() => {
     const style = getComputedStyle(document.body), root = getComputedStyle(document.documentElement);
     return { background: style.backgroundColor, text: style.color, scheme: root.colorScheme,
-      sharedStyle: [...document.styleSheets].some(sheet => sheet.href?.endsWith('/kai-theme.css')),
+      originalStyle: [...document.styleSheets].some(sheet => sheet.href?.endsWith('/styles.css') || sheet.href?.endsWith('/node.css')),
       sharedNotice: typeof window.KaiPluginNotice?.attach === 'function' };
   })()`);
-  assert.equal(styles.background, "rgb(244, 247, 253)", id + " must use the original light workspace background");
-  assert.equal(styles.text, "rgb(20, 40, 78)", id + " must use the shared text color");
+  assert.equal(styles.background, id === "kai.koinos-node" ? "rgb(245, 248, 253)" : "rgb(244, 247, 253)", id + " must use its original light workspace background");
+  assert.equal(styles.text, id === "kai.koinos-node" ? "rgb(25, 52, 87)" : "rgb(20, 40, 78)", id + " must use its original text color");
   assert.equal(styles.scheme, "light", id + " must use light native controls");
-  assert.equal(styles.sharedStyle, true, id + " did not load the shared workspace theme");
-  assert.equal(styles.sharedNotice, true, id + " did not load the shared dismissible notice helper");
+  assert.equal(styles.originalStyle, true, id + " did not load the original workspace styles");
+  const rails = {
+    "kai.assistant": ["#chats-pane", ".chat-pane"], "kai.brain": [".hub-rail", ".hub-content"],
+    "kai.connections": [".hub-rail", ".hub-content"], "kai.workflows": [".hub-rail", ".hub-content"], "kai.agent-network": [".hub-rail", ".hub-content"],
+    "kai.documents": [".docs-side", ".docs-main"], "kai.code": [".kc-rail", ".kc-pane"], "kai.koinos-node": ["#sidebar", "#main"],
+  };
+  if (rails[id]) {
+    const [rail, pane] = rails[id];
+    await until(win, `!!document.querySelector(${JSON.stringify(rail)}) && !!document.querySelector(${JSON.stringify(pane)})`, id + " original workspace layout");
+    styles.layout = await js(win, `(() => { const r=document.querySelector(${JSON.stringify(rail)}).getBoundingClientRect(),p=document.querySelector(${JSON.stringify(pane)}).getBoundingClientRect();return {railWidth:r.width,railRight:r.right,paneLeft:p.left,paneTop:p.top,paneWidth:p.width,height:innerHeight};})()`);
+    const box = styles.layout;
+    assert.ok(box.railWidth >= 90 && box.railWidth < 330 && box.paneLeft >= box.railRight - 1 && box.paneWidth > 400 && box.paneTop < box.height / 2, id + " original content pane is hidden or below the navigation: " + JSON.stringify(box));
+  } else {
+    await until(win, "[...document.querySelectorAll('h1')].some(node=>node.getClientRects().length)", id + " original heading");
+    styles.layout = await js(win, "(() => { const node=[...document.querySelectorAll('h1')].find(node=>node.getClientRects().length),r=node.getBoundingClientRect();return {headingTop:r.top,headingWidth:r.width,height:innerHeight};})()");
+    assert.ok(styles.layout.headingTop < styles.layout.height / 2 && styles.layout.headingWidth > 300, id + " original page heading is outside the workspace");
+  }
   return styles;
 }
 async function dismissibleNotice(win, id) {
+  const shared = await js(win, "typeof window.KaiPluginNotice?.attach==='function' && !!(document.getElementById('notice') || document.getElementById('message'))");
+  if (!shared) return { mechanism: "Original feature-specific notices; covered by feature scenario where exercised", sharedNoticeTest: false };
   const before = { nativeActions: nativeActions.length, processes: blockedProcesses.length, inference: localCalls };
   const noticeId = await js(win, `(() => {
     const container = document.getElementById('notice') || document.getElementById('message');
@@ -210,127 +270,43 @@ async function compactLayout(win, id, file) {
 }
 
 async function exercise(win, id) {
-  switch (id) {
-    case "kai.assistant": {
-      await until(win, "!document.getElementById('send').disabled", "Assistant model loading");
-      assert.match(await js(win, "document.getElementById('history').innerText"), /Earlier synthetic chat/);
-      await fill(win, { prompt: "Synthetic smoke request" }); await submit(win, "#composer");
-      await until(win, "document.getElementById('messages').innerText.includes('Synthetic local response') && !document.getElementById('send').disabled", "Assistant response");
-      assert.equal((await call(win, "assistant.list")).chats.length, 2);
-      return "Loaded legacy chat; sent local prompt; saved reply";
-    }
-    case "kai.brain": {
-      await until(win, "document.getElementById('list').innerText.includes('Earlier synthetic memory')", "Brain legacy data");
-      await click(win, "#create"); await fill(win, { "note-title": "Smoke memory", "note-text": "Synthetic private memory." }); await submit(win, "#note-form");
-      await until(win, "document.getElementById('list').innerText.includes('Smoke memory')", "Brain save");
-      await click(win, "[data-tab='goals']"); await click(win, "#create"); await fill(win, { "goal-title": "Smoke goal", "goal-detail": "A test goal." }); await submit(win, "#goal-form");
-      await until(win, "document.getElementById('list').innerText.includes('Smoke goal')", "Brain goal");
-      await click(win, "[data-tab='sources']"); assert.equal((await call(win, "brain.sourceImport")).cancelled, true);
-      await click(win, "[data-tab='memories']");
-      return "Loaded legacy memory; saved memory and goal; source picker canceled";
-    }
-    case "kai.documents": {
-      await until(win, "document.getElementById('list').innerText.includes('Earlier synthetic document')", "Documents legacy data");
-      await fill(win, { title: "Smoke document", content: "Synthetic draft." }); await submit(win, "#document-form");
-      await until(win, "document.getElementById('list').innerText.includes('Smoke document')", "Documents save");
-      await js(win, "document.getElementById('assistant').open=true"); await fill(win, { prompt: "Improve this synthetic draft." }); await click(win, "#draft");
-      await until(win, "!document.getElementById('proposal').hidden && document.getElementById('draft-text').innerText.includes('Synthetic local response')", "Documents draft");
-      assert.equal((await call(win, "documents.import")).cancelled, true);
-      return "Loaded legacy document; saved draft; generated reviewable local proposal";
-    }
-    case "kai.model-compare": {
-      await until(win, "!document.getElementById('compare').disabled", "Compare model loading");
-      await fill(win, { prompt: "Compare this synthetic task." }); await submit(win, "#comparison-form");
-      await until(win, "document.getElementById('text-b').innerText.includes('Synthetic local response') && document.getElementById('history-count').innerText.includes('1')", "Compare responses");
-      assert.equal(await js(win, "document.getElementById('name-a').innerText"), "Answer 1");
-      assert.equal(await js(win, "document.getElementById('name-b').innerText"), "Answer 2");
-      await click(win, "#reveal");
-      await until(win, "document.getElementById('name-a').innerText.includes('Synthetic') && !document.getElementById('vote').hidden && !document.getElementById('compare').disabled", "Compare model reveal");
-      await click(win, "#vote [data-pick='tie']");
-      await until(win, "document.getElementById('verdict-note').innerText==='Your pick: Tie' && !document.getElementById('compare').disabled", "Compare preference save");
-      const saved = await call(win, "storage.get", { key: "history" });
-      assert.equal(saved[0].pick, "tie"); assert.equal(saved[0].revealed, true);
-      return "Compared two local models blind; revealed identities; saved paired responses and preference";
-    }
-    case "kai.workflows": {
-      await until(win, "document.getElementById('flow-list').innerText.includes('No workflows yet')", "Workflow initialization");
-      await click(win, "[data-tab='agents']"); await click(win, "#new-agent"); await fill(win, { "agent-name": "Smoke editor", "agent-instructions": "Review this input clearly." }); await click(win, "#save-agent");
-      await until(win, "document.getElementById('agent-list').innerText.includes('Smoke editor')", "Workflow agent save");
-      await click(win, "[data-tab='workflows']"); await click(win, "#new-flow");
-      assert.equal(await js(win, "document.querySelectorAll('#workflow-canvas button.flow-node').length"), 2);
-      await click(win, "#workflow-canvas button.flow-node:last-child");
-      assert.equal(await js(win, "document.querySelector('#workflow-canvas button.flow-node:last-child').getAttribute('aria-pressed')"), "true");
-      assert.equal(await js(win, "document.querySelectorAll('#steps .step').length"), 1, "only the selected workflow step belongs in the inspector");
-      await capture(win, path.join(output, id + ".builder.png"));
-      await compactLayout(win, id, path.join(output, id + ".builder-compact.png"));
-      win.setSize(1000, 760);
-      await fill(win, { "flow-name": "Smoke workflow" }); await click(win, "#save-flow");
-      await until(win, "document.getElementById('flow-list').innerText.includes('Smoke workflow')", "Workflow save");
-      const saved = (await call(win, "workflows.list")).workflows.find(w => w.name === "Smoke workflow");
-      const run = await call(win, "workflows.run", { id: saved.id, input: "Synthetic workflow input" });
-      await until(win, `window.kai.call('workflows.runGet',{id:${JSON.stringify(run.id)}}).then(r=>r.status==='completed'||r.status==='failed')`, "Workflow run");
-      const result = await call(win, "workflows.runGet", { id: run.id }); assert.equal(result.status, "completed", JSON.stringify(result));
-      await click(win, "[data-tab='runs']");
-      return "Saved reusable agent and workflow; ran local graph to completion";
-    }
-    case "kai.agent-network": {
-      await until(win, "!document.getElementById('session').innerText.includes('Loading')", "Network session");
-      assert.equal((await call(win, "agentNetwork.status")).sessionActive, false);
-      await click(win, "#load-workflows"); await click(win, "[data-tab='settings']");
-      const rejected = await js(win, "window.kai.call('agentNetwork.settings',{enabled:true,endpoints:[]}).then(()=>false,e=>/Cancelled/.test(e.message))"); assert.equal(rejected, true);
-      assert.equal((await call(win, "agentNetwork.status")).sessionActive, false);
-      await click(win, "[data-tab='services']");
-      return "Read isolated service state and workflow choices; session approval canceled";
-    }
-    case "kai.connections": {
-      await until(win, "document.getElementById('privacy').innerText.toLowerCase().includes('local')", "Connections initialization");
-      assert.equal((await call(win, "connections.status")).connections.length, 0);
-      await click(win, "[data-tab='api']");
-      assert.equal((await call(win, "connections.save", { name: "Synthetic API", baseUrl: "https://example.invalid", auth: "none", operations: [] })).cancelled, true);
-      await click(win, "[data-tab='accounts']");
-      return "Loaded provider metadata/templates; API save approval canceled";
-    }
-    case "kai.tools": {
-      await until(win, "document.getElementById('privacy').innerText.toLowerCase().includes('local')", "Tools initialization");
-      assert.equal((await call(win, "tools.status")).servers.length, 0);
-      await click(win, "[data-tab='add']");
-      assert.equal((await call(win, "tools.add", { name: "Synthetic MCP", transport: "http", url: "https://example.invalid/mcp" })).cancelled, true);
-      await click(win, "[data-tab='servers']");
-      return "Loaded MCP catalog; server save approval canceled; no process launched";
-    }
-    case "kai.code": {
-      const projects = await call(win, "code.projects"); assert.deepEqual(projects.projects, []);
-      assert.equal((await call(win, "code.choose")).cancelled, true);
-      return "Loaded project workspace; native project picker canceled";
-    }
-    case "kai.koinos-node": {
-      await until(win, "document.getElementById('network')?.options.length > 0", "Node initialization");
-      const before = await call(win, "node.status");
-      assert.equal(before.inspectionAllowed, false); assert.equal(before.checkedAt, null); assert.equal(before.docker, null);
-      assert.equal(before.owned, false); assert.equal(before.privacyMode, "local-only");
-      assert.equal(before.network, "harbinger"); assert.equal(before.dataDir, path.join(dataDir, "preserved-node-data", "harbinger"));
-      assert.equal((await call(win, "node.inspect")).cancelled, true);
-      const after = await call(win, "node.status");
-      assert.equal(after.inspectionAllowed, false); assert.equal(after.checkedAt, null); assert.equal(after.docker, null);
-      assert.equal(fs.readFileSync(legacyNodeFile, "utf8"), legacyNodeSettings);
-      return "Reused saved network and data folder; inspection approval canceled; no Docker process launched";
-    }
-    case "kai.remote-access": {
-      await until(win, "document.getElementById('state')?.innerText.toLowerCase().includes('off')", "Remote Access initialization");
-      const before = await call(win, "remote.status");
-      assert.equal(before.enabled, false); assert.equal(before.state, "off"); assert.equal(before.privacyMode, "local-only");
-      assert.deepEqual(before.keys, []); assert.equal(before.legacyEnabled, true);
-      assert.deepEqual(before.legacyKeys.map(({ id, enabled }) => ({ id, enabled })), [{ id: "key_aabbccddeeff", enabled: false }]);
-      const rejected = await js(win, "window.kai.call('remote.start',{}).then(()=>false,e=>/Local-Only/i.test(e.message))");
-      assert.equal(rejected, true, "Local-Only must prevent remote activation");
-      assert.equal((await call(win, "remote.keyCreate", { name: "Synthetic canceled key" })).cancelled, true);
-      const after = await call(win, "remote.status");
-      assert.equal(after.enabled, false); assert.deepEqual(after.keys, []);
-      assert.equal(after.legacyEnabled, true); assert.equal(after.legacyKeys[0].enabled, false);
-      return "Preserved legacy key metadata without auto-start; Local-Only blocked activation; key creation approval canceled";
-    }
-    default: throw Error("Missing smoke scenario for " + id);
+  const fixture = { root, dataDir, projectDir, models, nativeActions, blockedProcesses, externalCalls, openDialogResponses, messageBoxResponses, mediaPermissionChecks, mediaPermissionRequests, coreRoot, packagedCore, resourcesPath: process.resourcesPath, fromCore };
+  const helpers = { js, call, click, fill, submit, until, capture, compactLayout, output, features, core, fixture };
+  const groups = {
+    "kai.workflows": ["./plugin-parity-workflows", "workflow"], "kai.agent-network": ["./plugin-parity-workflows", "agentNetwork"],
+    "kai.brain": ["./plugin-parity-brain-connections", "brain"], "kai.connections": ["./plugin-parity-brain-connections", "connections"],
+    "kai.code": ["./plugin-parity-code-documents", "code"], "kai.documents": ["./plugin-parity-code-documents", "documents"],
+    "kai.koinos-node": ["./plugin-parity-node", "node"], "kai.assistant": ["./plugin-parity-assistant-remote", "assistant"], "kai.remote-access": ["./plugin-parity-assistant-remote", "remote"],
+  };
+  if (groups[id]) {
+    const [file, method] = groups[id], result = await require(file)[method](win, helpers);
+    if (id === "kai.remote-access") return result + "; " + await require("./plugin-parity-remote-features").remoteFeatures(win, helpers);
+    return result;
   }
+  if (id === "kai.model-compare") {
+    await until(win, "document.getElementById('cmp-a')?.options.length>=2", "Original comparison model choices");
+    await fill(win, { "cmp-a": "synthetic-a", "cmp-b": "synthetic-b", "cmp-input": "Compare this synthetic task." });
+    await submit(win, "#cmp-form"); await until(win, "document.getElementById('cmp-body-0').innerText.includes('Synthetic local response') && document.getElementById('cmp-body-1').innerText.includes('Synthetic local response') && !document.getElementById('cmp-run').disabled", "Original streamed comparison");
+    assert.equal(await js(win, "document.getElementById('cmp-label-0').innerText"), "Answer 1");
+    await click(win, "#cmp-reveal"); await until(win, "document.getElementById('cmp-label-0').innerText.toLowerCase().includes('synthetic')", "Reveal original blind model comparison");
+    await click(win, '.cmp-vote-btn[data-pick="tie"]'); await until(win, "document.getElementById('cmp-tally').innerText.includes('1')", "Original comparison voting tally");
+    const tally = await call(win, "storage.get", { key: "legacy-compare-tally" }); assert.ok(tally);
+    return "Original paired streaming comparison, model reveal and persisted preference tally";
+  }
+  if (id === "kai.tools") {
+    await until(win, "document.getElementById('mcp-catalog')?.options.length>1", "Original Tools catalog");
+    for (const name of ["mcp-list", "mcp-catalog", "mcp-add-catalog", "mcp-add-custom", "mcp-name", "mcp-url", "mcp-cmd", "email-panel", "calendar-panel"]) assert.equal(await js(win, `!!document.getElementById(${JSON.stringify(name)})`), true, name);
+    // Record the original renderer's post-cancellation alert without leaving a
+    // modal dialog open in a headless fixture. The native consent still denies.
+    await js(win, "window.__smokeAlerts=[];window.alert=text=>{window.__smokeAlerts.push(String(text));};void 0");
+    await fill(win, { "mcp-name": "Synthetic MCP", "mcp-url": "https://example.invalid/mcp" });
+    await click(win, "#mcp-add-custom"); await until(win, "document.getElementById('mcp-list').innerText.includes('Synthetic MCP')", "Original MCP configuration save");
+    assert.ok(await js(win, "window.__smokeAlerts.some(text=>text.includes('Action cancelled'))"), "Original Tools cancellation message missing");
+    assert.equal(blockedProcesses.length, 0); assert.equal(externalCalls.length, 0);
+    const developer = await require("./plugin-parity-tools-developer").toolsDeveloper(win, helpers);
+    return "Original MCP catalog/custom server editor, email and calendar panels; synthetic server saved without launching a process; " + developer;
+  }
+  throw Error("Missing full-parity smoke scenario for " + id);
 }
 
 app.whenReady().then(async () => {
@@ -340,44 +316,73 @@ app.whenReady().then(async () => {
   assert.ok(require.resolve("quickjs-emscripten", { paths: [coreRoot] }).startsWith(coreRoot + path.sep), "QuickJS must resolve inside the selected Core root");
   assert.equal(await fromCore("electron/workflow-values").evaluate("input.value + 1", { input: { value: 41 }, item: {}, items: [], nodes: {}, iteration: 0 }), 42);
   workflowExpression = true;
-  server = http.createServer((req, res) => {
-    assert.equal(req.url, "/core/chat/completions"); assert.equal(req.method, "POST");
-    let text = ""; req.on("data", chunk => { text += chunk; }); req.on("end", () => {
-      const input = JSON.parse(text); assert.equal(input.kai_private_desktop, true); assert.equal(input.stream, false);
-      assert.ok(["synthetic-a", "synthetic-b"].includes(input.model)); localCalls++;
-      res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ choices: [{ message: { content: `Synthetic local response from ${input.model}.` } }] }));
-    });
-  });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const realFetch = global.fetch, inferenceURL = `http://127.0.0.1:${server.address().port}/core/chat/completions`;
-  global.fetch = (url, options) => { assert.equal(String(url), inferenceURL, "Smoke attempted non-fixture network"); return realFetch(url, options); };
-  const settings = new Map([
-    ["remote", { enabled: true, token: "b".repeat(64) }],
-    ["apiKeys", { key_aabbccddeeff: { name: "Earlier synthetic gateway key", digest: "a".repeat(64) } }],
-  ]);
-  fs.mkdirSync(path.dirname(legacyNodeFile), { recursive: true });
-  fs.writeFileSync(legacyNodeFile, legacyNodeSettings);
+  const realFetch = global.fetch;
+  global.fetch = (url, options) => {
+    const wanted = `http://127.0.0.1:${core?.gateway?.port}/core/chat/completions`;
+    if (String(url) === wanted) return realFetch(url, options);
+    externalCalls.push(String(url)); throw Error("Smoke attempted non-fixture network: " + url);
+  };
+  fromCore("core/lib/hardware").detect = async () => ({ platform: process.platform, arch: process.arch, cpu: { model: "Synthetic CPU", cores: 4 }, ramBytes: 16 * 1024 ** 3, gpus: [], disk: { freeBytes: 100 * 1024 ** 3, totalBytes: 200 * 1024 ** 3 }, capabilities: { cpuFallback: true, cudaEligible: false, vulkanEligible: false, metalEligible: false } });
+  fromCore("core/lib/git").available = async () => ({ ok: false, error: "Git unavailable in synthetic fixture" });
+  fromCore("core/lib/github").GitHub.prototype.status_ = async () => ({ repo: false });
+  fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ network: { privacyMode: "local-only" }, earn: { autoStart: false }, remote: { enabled: true, token: "b".repeat(64) }, apiKeys: { key_aabbccddeeff: { name: "Earlier synthetic gateway key", digest: "a".repeat(64) } } }));
+  fs.writeFileSync(path.join(dataDir, "tasks.json"), JSON.stringify({ tasks: [{ id: "synthetic-legacy-task", name: "Earlier scheduled task", prompt: "Preserve this scheduled prompt.", model: "synthetic-a", schedule: { kind: "hourly" }, enabled: false, nextRunAt: new Date(Date.now() + 3600000).toISOString(), lastRunAt: null, lastChatId: "synthetic-legacy-chat", lastError: null }] }));
+  fs.mkdirSync(path.dirname(legacyNodeFile), { recursive: true }); fs.writeFileSync(legacyNodeFile, legacyNodeSettings);
+  fs.writeFileSync(path.join(projectDir, "README.md"), "Synthetic project preserved by plugin smoke.\n");
   const chats = new ChatStore(path.join(dataDir, "chats"));
   chats.save({ id: "synthetic-legacy-chat", title: "Earlier synthetic chat", messages: [{ role: "user", content: "A preserved synthetic conversation." }] });
   fs.mkdirSync(path.join(dataDir, "docs"));
   fs.writeFileSync(path.join(dataDir, "docs", "synthetic-legacy-doc.json"), JSON.stringify({ id: "synthetic-legacy-doc", title: "Earlier synthetic document", content: "A preserved synthetic document.", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
-  const core = {
-    models: { aliases: () => [{ alias: "synthetic-a", label: "Synthetic A", status: "ready" }, { alias: "synthetic-b", label: "Synthetic B", status: "ready" }] },
-    gateway: { port: server.address().port, chats, network: { status: () => ({ privacyMode: "local-only" }) } },
-    settings: { get: (key, fallback) => settings.get(key) ?? fallback, set: (key, value) => settings.set(key, value) },
-    runtime: { provisioner: null }, account: { _token: () => null, origin: () => null },
+  core = await fromCore("core/server").createCore({ dataDir, extensions: false, port: 0, sessionSecret: "synthetic-plugin-smoke-profile-secret", onEvent() {} });
+  await core.start();
+  core.gateway.nodeRuntime = new (fromCore("core/lib/node-runtime").NodeRuntime)({ provisioner: null, runtimesDir: path.join(dataDir, "runtimes"), probeSystemNode: () => null });
+  core.models.aliases = () => models;
+  core.gateway._chat = async function(req, res) {
+    const body = JSON.parse((await this._readBody(req)).toString("utf8"));
+    assert.ok(models.some(model => model.alias === body.model), "Only a synthetic model may run"); localCalls++;
+    const text = `Synthetic local response from ${body.model}.`;
+    if (!body.stream) return this._json(res, 200, { id: "synthetic-chat", object: "chat.completion", model: body.model, choices: [{ message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 } });
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+    res.write("data: " + JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: null }] }) + "\n\n");
+    res.write("data: " + JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 } }) + "\n\n");
+    res.end("data: [DONE]\n\n");
   };
+  const nodeHelper = require("./plugin-parity-node"), nodeModule = fromCore("electron/plugin-services/koinos-node"), createNode = nodeModule.create;
+  nodeModule.create = ctx => createNode(ctx, { full: { createEngine: () => nodeHelper.createEngine({ dataDir: ctx.dataDir }) } });
+  const manager = new PluginManager(dataDir);
+  const confirm = async title => { nativeActions.push("confirmation-cancelled: " + title); return false; };
   features = new FeatureServices({ dataDir, core, electron: fixtureElectron,
-    confirm: async title => { nativeActions.push("confirmation-cancelled: " + title); return false; },
+    confirm, getWindow: () => host?.windows.get(activeId)?.window, getPluginWindow: id => host?.windows.get(id)?.window,
+    loadInstalledPlugin: id => manager.list().some(plugin => plugin.id === id && plugin.enabled) ? manager.load(id) : null,
+    readCoreWalletSummary: async () => ({ exists: false, address: null, network: "mainnet", balances: null }),
+    getCoreWindow: () => null, openPlugin: id => host.open(id),
+    openCoreView: async view => { nativeActions.push("core-view:" + view); return { opened: true }; },
+    desktopCall: fromCore("electron/core-plugin-desktop").createPluginDesktop({ electron: fixtureElectron, getCoreWindow: () => null, openPlugin: id => host.open(id), confirm, isClosing: () => finished }),
     localInference: (input, signal) => host.runLocal(input, signal),
-    fetchImpl: async () => { throw Error("Smoke forbids online connection requests"); },
+    fetchImpl: async url => { externalCalls.push(String(url)); throw Error("Smoke forbids online connection requests"); },
+    withWalletSpend: async fn => fn(),
+    runPayment: async action => {
+      if (action === "chat-info") return { configured: false, enabled: false, models: [], blocked: "Synthetic Local-Only profile" };
+      if (action === "credit-status") return { product: "prepaid-usd-v1", credits: { unit: "USD-1e-8", available: "0", free: { available: "0", state: "unavailable" }, purchased: { available: "0" } }, purchases: [], usage: [] };
+      throw Error("Synthetic plugin smoke forbids payments");
+    },
   });
   features.getCompanionStore().note({ title: "Earlier synthetic memory", text: "A preserved synthetic memory.", category: "notes" });
-  const manager = new PluginManager(dataDir);
   host = new PluginHost({ electron: fixtureElectron, manager, core, features });
   const sourceRoot = downloading ? path.join(root, "downloaded") : path.resolve(process.env.KAI_PLUGIN_SOURCES || path.join(__dirname, "../../.."));
   const subset = process.env.KAI_PLUGIN_SMOKE_IDS?.split(",");
   let selected = publishers.filter(p => !subset || subset.includes(p.id)); assert.ok(selected.length);
+  if (sourcePackages) {
+    const pair = crypto.generateKeyPairSync("ed25519"), der = pair.publicKey.export({ format: "der", type: "spki" }), publicKey = der.toString("base64"), fingerprint = crypto.createHash("sha256").update(der).digest("hex");
+    const { canonical, BINARY } = fromCore("core/lib/plugins/package");
+    for (const publisher of selected) {
+      const repo = publisher.repository.split("/").pop(), directory = path.join(sourceRoot, repo, "plugin"), manifest = JSON.parse(fs.readFileSync(path.join(directory, "manifest.json"), "utf8")), files = {};
+      const read = (folder, prefix = "") => { for (const item of fs.readdirSync(folder, { withFileTypes: true })) { const name = prefix + item.name; if (item.isDirectory()) read(path.join(folder, item.name), name + "/"); else if (name !== "manifest.json") files[name] = fs.readFileSync(path.join(folder, item.name)).toString(BINARY.test(name) ? "base64" : "utf8"); } };
+      read(directory); Object.assign(publisher, { fingerprint, publicKey, version: manifest.version });
+      const pkg = { manifest, files, publicKey, signature: crypto.sign(null, Buffer.from(canonical({ manifest, files })), pair.privateKey).toString("base64") };
+      manager.install(pkg); assert.equal(manager.load(publisher.id).fingerprint, fingerprint);
+    }
+  }
   let registryEntries, verifyRegistryPackage;
   if (downloading) {
     const registry = fromCore("core/lib/plugins/registry");
@@ -395,7 +400,7 @@ app.whenReady().then(async () => {
     });
     registryVerified = true;
   }
-  for (const publisher of selected) {
+  for (const publisher of sourcePackages ? [] : selected) {
     const repo = publisher.repository.split("/").pop(), file = path.join(sourceRoot, repo, "dist", `${repo}-${publisher.version}.kaiplugin`);
     if (downloading) {
       console.log("Downloading " + publisher.id + " " + publisher.version);
@@ -410,6 +415,11 @@ app.whenReady().then(async () => {
     assert.equal(manager.load(publisher.id).fingerprint, publisher.fingerprint);
     assert.equal(manager.load(publisher.id).manifest.version, publisher.version);
   }
+  await features.startInstalledBackground(manager);
+  assert.deepEqual([...features.backgroundErrors], [], "An installed feature failed background startup before its window opened");
+  for (const id of ["kai.workflows", "kai.agent-network"]) if (selected.some(plugin => plugin.id === id)) {
+    assert.ok(features.services.has(id), id + " did not activate its background service at startup");
+  }
   for (const publisher of selected) {
     const id = publisher.id; activeId = id; errors.set(id, []); console.log("Opening " + id);
     await host.open(id); const win = host.windows.get(id).window;
@@ -418,20 +428,38 @@ app.whenReady().then(async () => {
     const initialScreenshot = path.join(output, id + ".initial.png");
     const compactScreenshot = path.join(output, id + ".compact.png");
     await capture(win, initialScreenshot);
-    try { theme = await presentation(win, id); transitions = await exercise(win, id); } catch (error) { failure = error; }
+    try {
+      theme = await presentation(win, id); transitions = await exercise(win, id);
+      assert.deepEqual(blockedProcesses, [], id + " attempted to launch a process");
+      assert.deepEqual(externalCalls, [], id + " attempted non-fixture external network");
+    } catch (error) { failure = error; }
     const page = await js(win, `({title:document.title,headings:[...document.querySelectorAll('h1,h2')].filter(e=>e.getClientRects().length).map(e=>e.innerText),bodyLength:document.body.innerText.trim().length,statuses:[...document.querySelectorAll('[role=status],[role=alert]')].filter(e=>e.getClientRects().length).map(e=>e.innerText),nodeAbsent:typeof require==='undefined'&&typeof process==='undefined'})`);
     const screenshot = path.join(output, id + ".png"); await capture(win, screenshot);
     if (!failure) {
       try { notice = await dismissibleNotice(win, id); compact = await compactLayout(win, id, compactScreenshot); }
       catch (error) { failure = error; await capture(win, path.join(output, id + ".failure.png"), { width: 800, height: 700 }); }
     }
-    const rendererErrors = errors.get(id); reports.push({ id, ...page, transitions, theme, notice, compact, rendererErrors, initialScreenshot, screenshot, compactScreenshot, ...(failure ? { failure: failure.message } : {}) });
-    assert.equal(page.nodeAbsent, true); assert.ok(page.headings.length, "No visible headings: " + id);
+    const rendererErrors = errors.get(id); reports.push({ id, version: publisher.version, fingerprint: manager.load(id).fingerprint, ...page, transitions, theme, notice, compact, rendererErrors, initialScreenshot, screenshot, compactScreenshot, ...(failure ? { failure: failure.message } : {}) });
+    assert.equal(page.nodeAbsent, true); assert.ok(page.bodyLength > 100, "Empty original feature: " + id);
     assert.deepEqual(rendererErrors, [], "Renderer errors: " + id);
     if (failure) throw failure;
-    console.log(`PASS ${id}: ${transitions}`); await host.close(id); activeId = null;
+    const service = features.services.get(id);
+    win.destroy();
+    if (service?.keepAliveOnWindowClose) {
+      assert.equal(features.services.get(id), service, id + " background feature ended with its window");
+      if (id === "kai.workflows") assert.ok((await service.call("workflows.status")).runs.some(run => run.status === "completed"));
+      if (id === "kai.agent-network") assert.equal((await service.call("agentNetwork.legacyStatus")).enabled, true);
+      reports.at(-1).backgroundAliveAfterWindowClose = true;
+    }
+    console.log(`PASS ${id}: ${transitions}`); activeId = null;
     await features.close(id);
   }
   assert.deepEqual(blockedProcesses, [], "A plugin attempted to launch a process");
+  assert.deepEqual(externalCalls, [], "A plugin attempted non-fixture external network");
+  assert.equal(fs.readFileSync(legacyNodeFile, "utf8"), legacyNodeSettings, "Original node settings changed");
+  assert.equal(fs.readFileSync(path.join(projectDir, "README.md"), "utf8"), "Synthetic project preserved by plugin smoke.\n");
+  assert.equal(chats.get("synthetic-legacy-chat").messages[0].content, "A preserved synthetic conversation.", "Earlier conversation changed");
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, "docs", "synthetic-legacy-doc.json"), "utf8")).content, "A preserved synthetic document.", "Earlier document changed");
+  assert.ok(features.getCompanionStore().data.notes.some(note => note.title === "Earlier synthetic memory" && note.text === "A preserved synthetic memory."), "Earlier Brain memory changed");
   await finish();
 }).catch(error => void finish(error));

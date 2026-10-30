@@ -24,6 +24,7 @@ async function fetchSponsorAddress(settings) {
 }
 
 async function coSignAndBroadcast(settings, appKey, transaction) {
+  require("./operation-lifetime").captureOperation()();
   const resp = await fetch(sponsorEndpoint(settings), {
     method: "POST",
     headers: { "content-type": "application/json", "x-koinoskit-app": appKey },

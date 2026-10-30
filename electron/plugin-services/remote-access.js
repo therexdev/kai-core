@@ -4,6 +4,8 @@ const { isDeepStrictEqual } = require("node:util");
 const { RemoteTunnel, RELAY } = require("./remote-tunnel");
 const pluginId = "kai.remote-access";
 const permissions = Object.freeze({
+  "remote.api": "remote-access.keys",
+  "remote.features": "remote-access.features",
   "remote.status": "remote-access.read", "remote.keys": "remote-access.read", "remote.copyEndpoint": "remote-access.read",
   "remote.start": "remote-access.control", "remote.stop": "remote-access.control", "remote.rotate": "remote-access.control",
   "remote.keyCreate": "remote-access.keys", "remote.keyRevoke": "remote-access.keys", "remote.keyAdopt": "remote-access.keys",
@@ -14,6 +16,8 @@ function object(value, fields = []) {
 }
 function create(ctx) {
   let closed = false, busy = false, tunnel = null, stopping = null, privacyTimer = null, clipboardTimer = null, copiedKey = null, sessionRevision = 0;
+  let legacy = null;
+  const original = () => legacy ||= require("./remote-original").create(ctx, { checkSettings, active });
   let settingsExisted = fs.existsSync(path.join(ctx.dataDir, "settings.json"));
   const mode = () => ctx.core.gateway.network.status().privacyMode;
   function active(signal) { signal?.throwIfAborted(); if (closed) throw Error("Remote Access is closed"); }
@@ -66,8 +70,12 @@ function create(ctx) {
     copiedKey = null;
   }
   return {
+    keepAliveOnWindowClose: true,
+    startBackground: () => original().startBackground(),
     async call(method, value = {}, signal) {
-      active(signal); if (!Object.hasOwn(permissions,method)) throw Error("Unknown Remote Access operation");
+      active(signal); if (method === "remote.api") return original().call(value, signal);
+      if (method === "remote.features") return original().features(value, signal);
+      if (!Object.hasOwn(permissions,method)) throw Error("Unknown Remote Access operation");
       if (method === "remote.status") { object(value); return status(); }
       if (method === "remote.keys") { object(value); return metadata(); }
       if (method === "remote.stop") { object(value); await stop(); return status(); }
@@ -124,8 +132,8 @@ function create(ctx) {
         }
       }finally{busy=false;}
     },
-    async privacyChanged(privacyMode){if(privacyMode==="local-only")await stop();},
-    async dispose(){closed=true;await stop();clearCopiedKey();},
+    async privacyChanged(privacyMode){if(privacyMode==="local-only"){await stop(); await legacy?.pause();}},
+    async dispose(){closed=true;await stop();await legacy?.dispose();clearCopiedKey();},
   };
 }
 module.exports={pluginId,permissions,create};

@@ -29,21 +29,21 @@
     const state = { active: false, wallet: null, privacyMode: "local-only", summary: null, rows: [], cursor: null, historyObserved: null, expanded: false, loading: false, busy: false, balanceError: "", historyError: "", notice: "", noticeError: false, noticeVersion: 0, readVersion: 0 };
     let generation = 0, secretGeneration = 0, pending = null, timer = null;
     const fresh = () => state.summary && !state.balanceError && now() - state.summary.observedAt < 60000 && state.summary.observedAt <= now() + 5000;
-    const paint = () => render(state, { fresh: !!fresh(), canSend: !!(state.wallet?.unlocked && state.privacyMode !== "local-only" && fresh() && !state.busy) });
+    const paint = () => render(state, { fresh: !!fresh(), canSend: !!(state.wallet?.unlocked && fresh() && !state.busy) });
     function secrets() { secretGeneration++; clearSecrets(); }
     function stop() { generation++; pending = null; state.loading = false; clearTimer(timer); timer = null; }
     function reset() { state.summary = null; state.rows = []; state.cursor = null; state.historyObserved = null; state.expanded = false; state.balanceError = ""; state.historyError = ""; }
     function notice(message, error = false) { state.notice = message; state.noticeError = error; state.noticeVersion++; paint(); }
     function observe(wallet, privacyMode) {
       const previous = state.wallet, next = { exists: wallet?.exists === true, address: wallet?.address || null, unlocked: wallet?.unlocked === true };
-      const changed = previous?.address !== next.address || state.privacyMode !== privacyMode;
+      const changed = previous?.address !== next.address;
       if (changed) { stop(); reset(); secrets(); state.notice = ""; }
       else if (previous?.unlocked && !next.unlocked) { secrets(); state.notice = ""; }
       state.wallet = next; state.privacyMode = privacyMode;
       paint(); if (changed && state.active) void refresh();
     }
     async function refresh(older = false, automatic = false) {
-      if (!state.active || !state.wallet?.address || state.privacyMode === "local-only" || older && !state.cursor) { paint(); return; }
+      if (!state.active || !state.wallet?.address || older && !state.cursor) { paint(); return; }
       if (pending) return pending;
       const version = generation, address = state.wallet.address, current = () => state.active && version === generation && address === state.wallet?.address;
       clearTimer(timer); state.loading = true; if (!automatic) state.readVersion++; paint();
@@ -132,7 +132,7 @@
       host.replaceChildren(...rows);
     }
     function render(state, view) {
-      const wallet = state.wallet, summary = state.summary, localOnly = state.privacyMode === "local-only";
+      const wallet = state.wallet, summary = state.summary;
       $("wallet-account").hidden = !wallet?.address; $("wallet-access").hidden = !!wallet?.unlocked; $("wallet-unlocked").hidden = !wallet?.unlocked;
       text("wallet-access-title", wallet?.exists ? "Unlock your wallet" : "Create a wallet");
       text("wallet-detail", wallet?.exists ? "You can view balances and history while locked. Unlock to send or back up your wallet." : "Your private key is generated locally and encrypted with your password on this computer.");
@@ -140,12 +140,12 @@
       text("wallet-network", summary ? `${summary.network === "mainnet" ? "Mainnet" : "Harbinger testnet"} · Share this address to receive ${summary.tokenSymbol} or VHP.` : "Share this address to receive KOIN or VHP.");
       text("wallet-koin-label", `${summary?.tokenSymbol || "KOIN"} (liquid)`);
       for (const name of ["koin", "vhp", "mana"]) text("wallet-" + name, amount(summary?.[name]));
-      text("wallet-balance-note", localOnly ? "Local-Only is on. Choose an online mode in Settings to check wallet balances and history." : state.balanceError ? summary ? `Previously checked balances from ${new Date(summary.observedAt).toLocaleTimeString()}. Refresh to check the current amounts.` : "Balances unavailable. Refresh to try again." : summary ? `Balances checked ${new Date(summary.observedAt).toLocaleTimeString()}. Mana is a resource balance, not a separate token.` : "Checking balances…");
-      text("wallet-history-status", localOnly ? "History is unavailable in Local-Only mode." : state.historyError ? state.rows.length ? "Showing previously loaded history. Refresh to check for updates." : "Transaction history unavailable. Try again to check for updates." : state.historyObserved ? state.rows.length ? `On-chain activity · checked ${new Date(state.historyObserved).toLocaleTimeString()}. Confirming transactions can still change.` : state.cursor ? "No transfers in this page. Load older transactions to continue." : "No transactions were found for this wallet on this network." : state.balanceError ? "Refresh wallet balances to load transaction history." : "Loading transaction history…");
-      $("wallet-refresh").disabled = state.loading || localOnly;
-      $("wallet-history-refresh").hidden = !state.historyError && !state.expanded; $("wallet-history-refresh").disabled = state.loading || localOnly; text("wallet-history-refresh", state.expanded && !state.historyError ? "Back to latest" : "Try again");
-      $("wallet-history-more").hidden = !state.cursor; $("wallet-history-more").disabled = state.loading || localOnly;
-      $("wallet-copy").disabled = !wallet?.address || state.busy; $("wallet-explorer").hidden = summary?.network !== "mainnet"; $("wallet-explorer").disabled = state.busy || localOnly;
+      text("wallet-balance-note", state.balanceError ? summary ? `Previously checked balances from ${new Date(summary.observedAt).toLocaleTimeString()}. Refresh to check the current amounts.` : "Balances unavailable. Refresh to try again." : summary ? `Balances checked ${new Date(summary.observedAt).toLocaleTimeString()}. Mana is a resource balance, not a separate token.` : "Checking balances…");
+      text("wallet-history-status", state.historyError ? state.rows.length ? "Showing previously loaded history. Refresh to check for updates." : "Transaction history unavailable. Try again to check for updates." : state.historyObserved ? state.rows.length ? `On-chain activity · checked ${new Date(state.historyObserved).toLocaleTimeString()}. Confirming transactions can still change.` : state.cursor ? "No transfers in this page. Load older transactions to continue." : "No transactions were found for this wallet on this network." : state.balanceError ? "Refresh wallet balances to load transaction history." : "Loading transaction history…");
+      $("wallet-refresh").disabled = state.loading;
+      $("wallet-history-refresh").hidden = !state.historyError && !state.expanded; $("wallet-history-refresh").disabled = state.loading; text("wallet-history-refresh", state.expanded && !state.historyError ? "Back to latest" : "Try again");
+      $("wallet-history-more").hidden = !state.cursor; $("wallet-history-more").disabled = state.loading;
+      $("wallet-copy").disabled = !wallet?.address || state.busy; $("wallet-explorer").hidden = summary?.network !== "mainnet"; $("wallet-explorer").disabled = state.busy;
       $("wallet-open-send").disabled = !view.canSend; $("wallet-send-submit").disabled = !view.canSend; $("wallet-reveal-submit").disabled = state.busy || !wallet?.unlocked;
       $("wallet-send-token").options[0].textContent = summary?.tokenSymbol || "KOIN";
       paintHistory(state);

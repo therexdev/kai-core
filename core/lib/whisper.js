@@ -148,13 +148,15 @@ class VoiceManager {
   }
 
   /** Fetch engine + model (idempotent). Kicked by POST /core/voice/setup. */
-  async ensure() {
+  async ensure({ signal } = {}) {
+    signal?.throwIfAborted();
     if (this._setup?.state === "running") return;
     this._setup = { state: "running" };
     try {
       if (!this._binPath()) {
         if (!this.provisioner) throw new Error("KAI_WHISPER_BIN not set and no provisioner available");
-        await this.provisioner.ensure("whisper");
+        await this.provisioner.ensure("whisper", { signal });
+        signal?.throwIfAborted();
         // Same ggml loader as llama.cpp, same Arrow Lake variant-probe crash:
         // strip the exotic CPU-variant DLLs down to the safe baseline NOW,
         // not after a user's first transcription dies (v0.22.x field lesson).
@@ -162,12 +164,14 @@ class VoiceManager {
         if (bin) stripCpuVariants(bin);
       }
       if (!this._modelPath()) {
+        signal?.throwIfAborted();
         if (!this.model) throw new Error("no voice model in catalog");
         if (!pinned(this.model.sha256)) throw new Error("voice model not yet published (hash unpinned)");
         fs.mkdirSync(this.voiceDir, { recursive: true });
         const dest = path.join(this.voiceDir, this.model.filename);
         let lastPct = -1;
         await downloadFile(this.model.url, dest, {
+          signal,
           sha256: this.model.sha256,
           sizeBytes: this.model.sizeBytes,
           onProgress: (p) => {
@@ -178,6 +182,7 @@ class VoiceManager {
           },
         });
       }
+      signal?.throwIfAborted();
       this._setup = { state: "done" };
       this.onEvent({ type: "voice:ready" });
     } catch (e) {

@@ -138,6 +138,8 @@ class ProducerVault {
     return { id: this.draft.id, summary: draft.summary, expiresAt: this.draft.expiresAt };
   }
   async send({ confirm, draftId } = {}) {
+    const assertActive = require("./operation-lifetime").captureOperation();
+    assertActive();
     if (confirm !== true) throw new Error("Review and confirm the operation before requesting wallet approval.");
     if (this.hasPending()) throw new Error("A Koin Vault approval is already pending.");
     const draft = this.draft;
@@ -149,6 +151,7 @@ class ProducerVault {
     const reservation = this.recovery ? await this.recovery.begin(draft, () => { this.assertContext(draft.summary); return active(); }) : null;
     this.assertContext(draft.summary);
     if (!active()) { this.restorePending(); throw new Error("Wallet request stopped; recover the retained approval."); }
+    assertActive();
     this.draft = null;
     this.pending = { ...draft, ...(reservation ? { nonceReservation: reservation } : {}), status: "sending", expiresAt: Math.min(this.session.expiresAt, this.now() + 10 * 60000) };
     try {

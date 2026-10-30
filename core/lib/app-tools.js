@@ -55,7 +55,11 @@ const READS = Object.freeze({
   voice: "Installed voice engines and available natural voices",
 });
 
-function registerAppTools(registry, { request, privacyMode }) {
+function registerAppTools(registry, { request, privacyMode, documentRevisions = false }) {
+  const actions = documentRevisions ? { ...ACTIONS,
+    save_document: { ...ACTIONS.save_document, keys: [...ACTIONS.save_document.keys, "revision"], description: ACTIONS.save_document.description + " To replace an existing document, first read it and include its exact returned revision." },
+    delete_document: { ...ACTIONS.delete_document, keys: [...ACTIONS.delete_document.keys, "revision"], description: ACTIONS.delete_document.description + " First read it and include its exact returned revision." },
+  } : ACTIONS;
   const localOnly = () => privacyMode() === "local-only";
   const external = () => { if (localOnly()) throw new Error("Privacy is Local-Only. Enable internet in the app's Privacy settings to read live network data."); };
   const rpc = async (channel, payload, context) => { external(); return (await request("/core/koinos/rpc", "POST", { channel, payload }, context)).data; };
@@ -63,7 +67,7 @@ function registerAppTools(registry, { request, privacyMode }) {
   registry.register({
     name: "app_capabilities", egress: false, sensitive: false,
     description: "Discover everything KAI can read or do in the app, including downloads, earning, node controls, documents, schedules and settings. Use this before app_action to get exact arguments.", params: { action: "optional exact action name to get its full details" },
-    handler: ({ action } = {}) => ({ reads: Object.keys(READS), actions: Object.fromEntries(Object.entries(ACTIONS).filter(([name]) => !action || name === action).map(([name, a]) => [name, action ? { description: a.description, arguments: a.keys, available: !a.egress || !localOnly() } : a.keys])),
+    handler: ({ action } = {}) => ({ reads: Object.keys(READS), actions: Object.fromEntries(Object.entries(actions).filter(([name]) => !action || name === action).map(([name, a]) => [name, action ? { description: a.description, arguments: a.keys, available: !a.egress || !localOnly() } : a.keys])),
       instructions: "Every action needs approval. Call app_capabilities again with action for its full details before executing it.",
       ...(action ? { handoffs: "Wallet/financial/password/setup/host coding workflows use app_open and their existing forms." } : {
       handoffs: { wallet: "Use app_open koinos-wallet for send, create, restore, unlock, backup or remove wallet. Enter passwords/keys ONLY in the existing wallet form, never in chat.",
@@ -129,7 +133,7 @@ function registerAppTools(registry, { request, privacyMode }) {
     params: { action: "exact action from app_capabilities", args: "object with the action's documented arguments" },
     handler: async (input, context) => {
       fields(input, ["action", "args"]);
-      const a = Object.hasOwn(ACTIONS, input.action) && ACTIONS[input.action];
+      const a = Object.hasOwn(actions, input.action) && actions[input.action];
       if (!a) throw new Error("Unknown app action. Use app_capabilities or open the relevant app screen.");
       const args = fields(input.args || {}, a.keys);
       for (const k of ["enabled", "produce", "on"]) if (a.keys.includes(k) && typeof args[k] !== "boolean" && !(input.action === "update_task" && args[k] === undefined)) throw new Error(k + " must be true or false");

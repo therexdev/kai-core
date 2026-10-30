@@ -67,3 +67,12 @@ test("service-owned inference is cancelled even when its caller omits a signal",
   const pending = f.broker.call(f.record(), "fixture.run", {}), rejected = assert.rejects(pending, /cancelled/);
   await started.promise; await f.broker.close("kai.fixture"); await rejected; assert.equal(signal.aborted, true);
 });
+
+test("closing a persistent plugin window retains its service, while explicit disable disposes it", async () => {
+  let disposals=0, instances=0, current={id:1};
+  const f=fixture(ctx=>{instances++;return {keepAliveOnWindowClose:true,call(){return ctx.getWindow().id;},dispose(){disposals++;}};},{getPluginWindow:()=>current});
+  assert.equal(await f.broker.call(f.record(),'fixture.run',{}),1);
+  await f.broker.detachWindow('kai.fixture');assert.equal(disposals,0);
+  current={id:2};assert.equal(await f.broker.call(f.record(),'fixture.run',{}),2);assert.equal(instances,1);
+  await f.broker.close('kai.fixture');assert.equal(disposals,1);await f.broker.dispose();
+});

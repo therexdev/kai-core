@@ -71,11 +71,12 @@ const CATALOG = [
 ];
 
 class McpManager {
-  constructor({ settings, registry, nodeRuntime = null, onEvent }) {
+  constructor({ settings, registry, nodeRuntime = null, onEvent, Connection = McpConnection }) {
     this.settings = settings; // JsonStore
     this.registry = registry;
     this.nodeRuntime = nodeRuntime; // provisions Node when a server needs npx
     this.onEvent = onEvent || (() => {});
+    this.Connection = Connection;
     this._conns = new Map(); // id -> McpConnection
     this._connecting = new Map(); // includes children still completing their handshake
     this._generation = 0;
@@ -157,7 +158,7 @@ class McpManager {
     if (!s) throw new Error("no such tool server");
     if (this._conns.has(id)) return this._conns.get(id).tools;
     if (this._connecting.has(id)) return this._connecting.get(id).promise;
-    const conn = new McpConnection(this._resolveCommand(s), this.onEvent);
+    const conn = new this.Connection(this._resolveCommand(s), this.onEvent);
     const generation = this._generation;
     const pending = { conn, promise: null };
     this._connecting.set(id, pending);

@@ -84,7 +84,19 @@ class RuntimeProvisioner {
 
   /** Ensure the runtime binary exists locally; download + extract if not. */
   async ensure(kind, opts = {}) {
-    if (this._active) return this._active;
+    opts.signal?.throwIfAborted();
+    if (this._active) {
+      if (!opts.signal) return this._active;
+      // A voice setup can join an already-running model-runtime setup. Its
+      // own cancellation must release its waiter without stopping that other
+      // operation or keeping plugin disposal blocked behind the download.
+      return new Promise((resolve, reject) => {
+        const cleanup = () => opts.signal.removeEventListener("abort", abort);
+        const abort = () => { cleanup(); reject(opts.signal.reason); };
+        opts.signal.addEventListener("abort", abort, { once: true });
+        this._active.then(value => { cleanup(); if (opts.signal.aborted) reject(opts.signal.reason); else resolve(value); }, error => { cleanup(); reject(error); });
+      });
+    }
     const run = this._ensure(kind, opts);
     this._active = run;
     try {
@@ -95,6 +107,7 @@ class RuntimeProvisioner {
   }
 
   async _ensure(kind, opts) {
+    opts.signal?.throwIfAborted();
     const build = this.selectBuild(kind, opts);
     const bin = path.join(this.runtimesDir, kind, build.version, build.key, ...build.binPath.split("/"));
     if (fs.existsSync(bin)) return bin;
@@ -121,6 +134,7 @@ class RuntimeProvisioner {
       /* statfs unsupported — proceed */
     }
     for (let i = 0; i < archives.length; i++) {
+      opts.signal?.throwIfAborted();
       const a = archives[i];
       // llama.cpp ships Windows builds as .zip and Linux builds as .tar.gz —
       // keep the downloaded file's real extension so extraction picks the
@@ -130,9 +144,11 @@ class RuntimeProvisioner {
       // A finished download that never got extracted (app closed mid-setup)
       // is reused after hash verification — nobody re-downloads gigabytes.
       const reusable = fs.existsSync(zipPath) && (await sha256File(zipPath)) === String(a.sha256).toLowerCase();
+      opts.signal?.throwIfAborted();
       if (!reusable) {
         let lastPct = -1;
         await downloadFile(a.url, zipPath, {
+          signal: opts.signal,
           sha256: a.sha256,
           sizeBytes: a.sizeBytes,
           onProgress: (p) => {
@@ -146,16 +162,20 @@ class RuntimeProvisioner {
           },
         });
       }
+      opts.signal?.throwIfAborted();
       // Unpacking runs off the main thread — Core shares the app's main
       // process, and a synchronous 1.4 GB extract froze the window for
       // minutes (field finding). The UI shows "Setting up engine…".
       this._progress = { kind, phase: "extracting" };
       this.onEvent({ type: "runtime:extracting", kind, archive: i + 1, archives: archives.length });
+      opts.signal?.throwIfAborted();
       if (isTar) await extractTarGzAsync(zipPath, installDir);
       else await extractZipAsync(zipPath, installDir);
+      opts.signal?.throwIfAborted();
       fs.rmSync(zipPath, { force: true });
       this._progress = null;
     }
+    opts.signal?.throwIfAborted();
     if (!fs.existsSync(bin)) {
       throw new Error(
         `Runtime archive for ${build.key} did not contain expected binary at ${build.binPath} — catalog binPath is wrong`

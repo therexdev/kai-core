@@ -41,8 +41,11 @@ class SetupService {
     this.downloadDir = downloadDir;
     this.state = state;
     this.onEvent = onEvent || (() => {});
+    this.assertActive = () => {};
+    this._watchEpoch = 0;
     this._op = null;
     this._abort = null;
+    this._download = httpDownload;
     this._cliPath = null; // memoized docker CLI location
     this._installWatch = null; // post-install completion watcher
     this._installPollMs = 10000; // overridable in tests
@@ -51,6 +54,8 @@ class SetupService {
   // Captures stdout/stderr as raw Buffers (so callers can decode UTF-16LE from
   // Windows tools) while still exposing UTF-8 strings for the common case.
   _exec(bin, args, opts = {}) {
+    this.assertActive();
+    require("./operation-lifetime").captureOperation()();
     return new Promise((resolve) => {
       execFile(
         bin,
@@ -300,6 +305,8 @@ class SetupService {
   }
 
   async installDocker() {
+    const assertOperation = require("./operation-lifetime").captureOperation();
+    this.assertActive();assertOperation();
     const asset = dockerAsset(this.platform, this.arch);
     if (!asset) throw new Error("On Linux, install Docker Engine from the documentation link.");
     if (this._op?.running) throw new Error("A download is already in progress");
@@ -319,13 +326,14 @@ class SetupService {
     this._abort = new AbortController();
 
     this.onEvent({ type: "setup", message: "Downloading Docker Desktop…" });
-    httpDownload(asset.url, dest, {
+    this._installPending = this._download(asset.url, dest, {
       signal: this._abort.signal,
       onProgress: (done, total) => {
         op.progress = { stage: "download", pct: total ? (done / total) * 100 : null, doneBytes: done, totalBytes: total };
       },
     })
       .then(async () => {
+        this._abort.signal.throwIfAborted();this.assertActive();assertOperation();
         op.progress = { stage: "launch", pct: 100 };
         op.lines.push("Download complete — launching the installer.");
         await this._launchInstaller(asset, dest);
@@ -359,12 +367,15 @@ class SetupService {
    *  quietly (the setup card still advances on its own once detection flips). */
   _watchInstallDone() {
     if (this._installWatch) return;
-    const startedAt = Date.now();
+    const startedAt = Date.now(), epoch = this._watchEpoch;
     const tick = async () => {
       this._installWatch = null;
       try {
         this._regAppAt = 0; // the whole point is to notice a change
-        if (await this._dockerApp()) {
+        const app = await this._dockerApp();
+        if(epoch!==this._watchEpoch)return;
+        this.assertActive();require("./operation-lifetime").captureOperation()();
+        if (app) {
           this.onEvent({ type: "setup", message: "Docker Desktop is installed — starting it now." });
           await this.startDocker().catch((e) =>
             this.onEvent({ type: "setup", level: "error", message: `Docker installed, but starting it failed: ${e.message}` })
@@ -374,15 +385,17 @@ class SetupService {
       } catch {
         /* detection hiccup — keep watching */
       }
-      if (Date.now() - startedAt > 15 * 60 * 1000) return;
-      this._installWatch = setTimeout(tick, this._installPollMs);
+      if (epoch!==this._watchEpoch || Date.now() - startedAt > 15 * 60 * 1000) return;
+      try {this.assertActive();require("./operation-lifetime").captureOperation()();} catch {return;}
+      this._installWatch = setTimeout(() => {this._installWatchPending=tick();}, this._installPollMs);
       this._installWatch.unref?.();
     };
-    this._installWatch = setTimeout(tick, this._installPollMs);
+    this._installWatch = setTimeout(() => {this._installWatchPending=tick();}, this._installPollMs);
     this._installWatch.unref?.();
   }
 
   stopWatchers() {
+    this._watchEpoch++;
     if (this._installWatch) clearTimeout(this._installWatch);
     this._installWatch = null;
   }
@@ -396,6 +409,7 @@ class SetupService {
   }
 
   async _launchInstaller(asset, dest) {
+    this.assertActive();require("./operation-lifetime").captureOperation()();
     const launch = (cmd, args, opts = {}) => {
       const child = spawn(cmd, args, { detached: true, stdio: "ignore", ...opts });
       child.on("error", (e) => this.onEvent({ type: "setup", level: "error", message: `Couldn't launch the installer: ${e.message}` }));
@@ -414,6 +428,7 @@ class SetupService {
       throw new Error("Start the Docker service with your init system, e.g. `sudo systemctl start docker`.");
     }
     const app = await this._dockerApp();
+    this.assertActive();require("./operation-lifetime").captureOperation()();
     if (!app) {
       if (!installIfMissing) throw new Error("Docker Desktop is not installed. Open Node setup to install it.");
       // Field report: a leftover docker CLI can make Docker look installed

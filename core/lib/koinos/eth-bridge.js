@@ -6,6 +6,7 @@
 // signing rather than hand-rolling RLP for real money.
 
 const { ethers } = require("ethers");
+const { createEvmWallet } = require("./operation-lifetime");
 const { utils } = require("koilib");
 const { BRIDGE } = require("./bridge-constants");
 const { weiToVethSats } = require("./bridge");
@@ -160,7 +161,7 @@ async function sendDeposit({ ethPrivHex, amountEth, koinosRecipient, network = "
   if (!weiToVethSats(amountWei).bridgeable) throw new Error("Amount is below the bridge minimum");
 
   const p = provider || (await makeProvider());
-  const wallet = new ethers.Wallet(priv, p);
+  const wallet = createEvmWallet(priv, p);
   const bridge = new ethers.Contract(cfg.ethBridge, BRIDGE_ABI, wallet);
   if (await bridge.paused()) throw new Error("The Vortex bridge is currently paused");
 
@@ -186,7 +187,7 @@ async function requestNewSignatures({ ethPrivHex, ethTxHash, network = "mainnet"
   const priv = normPriv(ethPrivHex);
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(ethTxHash))) throw new Error("Invalid Ethereum tx hash");
   const p = provider || (await makeProvider());
-  const wallet = new ethers.Wallet(priv, p);
+  const wallet = createEvmWallet(priv, p);
   const bridge = new ethers.Contract(cfg.ethBridge, BRIDGE_ABI, wallet);
   const tx = await bridge.RequestNewSignatures(ethTxHash);
   return { hash: tx.hash };

@@ -39,6 +39,8 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   let root = fs.existsSync(path.join(usdRoot, "deployment.json")) ? usdRoot : fs.existsSync(path.join(prepaidRoot, "deployment.json")) ? prepaidRoot : path.join(dataDir, "koin-foundation-test");
   let configFile = path.join(root, "deployment.json"), journals = path.join(root, "journals");
   let journal, payments, sessionClient, sessionId, sessionRun, access, chatAbort, sessionAbort, worker, workerAbort, workerTrack, stopVersion = 0, busy = false, disposed = false;
+  const pluginPaymentContext = new (require("node:async_hooks").AsyncLocalStorage)();
+  const requestOwners = new Map();
   const creditService = new (require("./credit-service").CreditService)({ dataDir, account: core.creditAccount || core.account, dialog,
     storage: (core.creditAccount || core.account)?.safeStorage, service: require("../core/lib/koin-network/credit-service.json"),
     purchaseProgress: value => {
@@ -46,7 +48,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (!disposed && progress && trustedMainDocument({ sender: window?.webContents, senderFrame: window?.webContents.mainFrame }, window, origin))
         window.webContents.send("koin:purchase-progress", progress);
     },
-    progress: value => { const window = getMainWindow(); if (window && !window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
+    progress: value => { const window = pluginPaymentContext.getStore()?.window || getMainWindow(); if (window && !window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   let creditBusy = false, purchaseSync = null;
   const creditProvider = new (require("./credit-provider").CreditProvider)({ service: creditService, core, dialog });
   const creditRunExecutor = new (require("./credit-run-executor").CreditRunExecutor)({ service: creditService, core });
@@ -84,11 +86,13 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   };
   const withChatSignal = async (window, run, payment = false, provider = false) => {
     const controller = new AbortController(); activeRequests.add(controller); if (payment) paymentRequests.add(controller); const stop = () => controller.abort();
+    requestOwners.set(controller, window);
     const navigation = (_event, _url, _inPlace, mainFrame) => { if (mainFrame) stop(); };
     for (const event of ["hide", "minimize", "closed"]) window.on(event, stop);
     window.webContents.on("did-start-navigation", navigation); window.webContents.on("render-process-gone", stop);
     const release = core.gateway.network.trackShadowRequest(controller);
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)]);
+    const callerSignal = pluginPaymentContext.getStore()?.signal;
+    const signal = AbortSignal.any([controller.signal, ...(callerSignal ? [callerSignal] : []), AbortSignal.timeout(600000)]);
     try { return await run(signal); }
     catch (error) {
       if (signal.aborted && provider) throw Error("Provider setup stopped. Check Earn for the current sharing status.");
@@ -100,13 +104,14 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       throw error;
     }
     finally { release(); for (const event of ["hide", "minimize", "closed"]) window.removeListener(event, stop);
-      window.webContents.removeListener("did-start-navigation", navigation); window.webContents.removeListener("render-process-gone", stop); activeRequests.delete(controller); paymentRequests.delete(controller); }
+      window.webContents.removeListener("did-start-navigation", navigation); window.webContents.removeListener("render-process-gone", stop); activeRequests.delete(controller); paymentRequests.delete(controller); requestOwners.delete(controller); }
   };
   const inFlight = new Set();
   const handlePayment = async (event, action, input) => {
     if (disposed) throw Error("Credit service is closing");
-    const window = getMainWindow();
-    if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
+    const pluginCaller = pluginPaymentContext.getStore();
+    const window = pluginCaller?.window || getMainWindow();
+    if (pluginCaller ? window?.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== pluginCaller.entry : !trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (action === "network-overview") {
       if (input !== undefined || disposed) throw Error("Network overview takes no arguments and requires an open app");
       // An activated credit network owns its model/qualification/receipt view.
@@ -491,6 +496,22 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     try { await providerPending; } finally { providerTick = false; providerPending = null; }
   }, 15000); providerTimer.unref();
   return {
+    // Called only by verified Assistant and Tools brokers, never registered as a new
+    // renderer IPC surface. Uses the existing account, journals and busy gates.
+    runForPlugin(action, input, { window, signal } = {}) {
+      const entry = window && !window.isDestroyed() ? window.webContents.mainFrame.url : "";
+      const allowed = new Set(entry === "kai-plugin://kai.assistant/index.html" ? ["credit-status", "chat-info", "chat-completion", "chat-ack", "chat-recover", "stop", "run-open", "run-chat", "run-execute", "run-input", "run-list", "run-status", "run-stop"] : entry === "kai-plugin://kai.tools/index.html" ? ["chat-info", "stop", "run-open", "run-execute", "run-input", "run-list", "run-status", "run-stop"] : []);
+      if (!allowed.has(action)) return Promise.reject(Error("Plugin payment action denied"));
+      signal?.throwIfAborted();
+      if (action === "stop") {
+        for (const [controller, owner] of requestOwners) if (owner === window) controller.abort();
+        return Promise.resolve({ state: "stopped" });
+      }
+      const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
+      const pending = pluginPaymentContext.run({ window, signal, entry: event.senderFrame.url }, () => handlePayment(event, action, input));
+      inFlight.add(pending);
+      return pending.finally(() => inFlight.delete(pending));
+    },
     // Wallet transfers and credit purchases share one signer. Acquire the same
     // review gate before either can sign or select a nonce; background payment
     // reconciliation also yields until the explicit transfer has settled.

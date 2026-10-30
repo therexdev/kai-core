@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "private": true,
   "description": "KAI Core desktop: shared models and identity with isolated optional plugins",
   "license": "MIT",
@@ -33,14 +33,7 @@
     "electron": "^43.8.1",
     "electron-builder": "^26.15.3",
     "js-yaml": "^4.3.2",
-    "playwright-core": "^1.62.1",
-    "@huggingface/transformers": "3.5.1",
-    "imapflow": "^1.7.1",
-    "kokoro-js": "1.2.1",
-    "mailparser": "3.9.43",
-    "nodemailer": "10.1.4",
-    "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
-    "sherpa-onnx-node": "1.13.7"
+    "playwright-core": "^1.62.1"
   },
   "main": "electron/core-main.js",
   "build": {
@@ -53,29 +46,60 @@
       "electron/**",
       "core/**",
       "ui-core/**",
-      "ui/credit-account.js",
-      "ui/reward-summary.js",
-      "ui/agents.js",
+      "ui/**",
       "cli/**",
       "!core/test/**",
       "!core/test-core/**",
       "build/icon.*",
       "package.json",
-      "!core/scheduler/**",
-      "ui/workflow-model.js"
+      "!core/scheduler/**"
     ],
-    "extraResources": [],
+    "extraResources": [
+      {
+        "from": "node_modules/@ricky0123/vad-web/dist/bundle.min.js",
+        "to": "live-senses/vad/bundle.min.js"
+      },
+      {
+        "from": "node_modules/@ricky0123/vad-web/dist/vad.worklet.bundle.min.js",
+        "to": "live-senses/vad/vad.worklet.bundle.min.js"
+      },
+      {
+        "from": "node_modules/@ricky0123/vad-web/dist/silero_vad_v5.onnx",
+        "to": "live-senses/vad/silero_vad_v5.onnx"
+      },
+      {
+        "from": "node_modules/.cache/kai-live-senses/turn/smart-turn-v3.2-cpu.onnx",
+        "to": "live-senses/turn/smart-turn-v3.2-cpu.onnx"
+      },
+      {
+        "from": "docs/licenses/KAI-LIVE-SENSES.txt",
+        "to": "live-senses/LICENSE.txt"
+      }
+    ],
     "asarUnpack": [
       "core/lib/jail.js",
       "build/icon.png",
-      "build/icon.ico"
+      "build/icon.ico",
+      "cli/**",
+      "ui/agents.js",
+      "node_modules/onnxruntime-node/**",
+      "node_modules/kokoro-js/**",
+      "node_modules/phonemizer/**",
+      "node_modules/onnxruntime-web/**",
+      "node_modules/sherpa-onnx*/**"
     ],
     "win": {
       "target": [
         "nsis",
         "portable"
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "extraResources": [
+        {
+          "from": "build/bin",
+          "to": "bin"
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,
@@ -134,7 +158,14 @@
     "ethers": "^6.17.0",
     "koilib": "^9.4.0",
     "cron-parser": "5.10.0",
-    "quickjs-emscripten": "0.32.0"
+    "quickjs-emscripten": "0.32.0",
+    "@huggingface/transformers": "3.5.1",
+    "imapflow": "^1.7.1",
+    "kokoro-js": "1.2.1",
+    "mailparser": "3.9.43",
+    "nodemailer": "10.1.4",
+    "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
+    "sherpa-onnx-node": "1.13.7"
   },
   "overrides": {
     "protobufjs": "7.6.6",

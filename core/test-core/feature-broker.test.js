@@ -12,7 +12,7 @@ test("private feature broker requires exact plugin identity, publisher and opera
   record.controller.abort();await assert.rejects(broker.call(record,"brain.list",{}),/closing/);
   await broker.dispose();assert.equal(created,1);
 });
-test("feature contracts match the exact exported service operations",()=>{for(const [id,spec] of Object.entries(contracts)){const service=require('../../electron/plugin-services/'+spec.module);assert.equal(service.pluginId,id);assert.deepEqual(spec.permissions,service.permissions);}});
+test("feature contracts match the exact exported service operations",()=>{for(const [id,spec] of Object.entries(contracts)){const service=require('../../electron/plugin-services/'+spec.module);assert.equal(service.pluginId,id);assert.deepEqual(spec.permissions,{...service.permissions,"desktop.openView":"desktop.navigate","desktop.openExternal":"desktop.external","desktop.preferencesRead":"desktop.preferences"});}});
 test("shared encrypted companion writes cannot silently overwrite external changes", t=>{
   const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'kai-feature-store-'));t.after(()=>fs.rmSync(dataDir,{recursive:true,force:true}));
   const safeStorage={isEncryptionAvailable:()=>true,encryptString:s=>Buffer.from(s),decryptString:b=>b.toString()};

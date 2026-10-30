@@ -2,8 +2,10 @@
 const { CompanionConnections, TEMPLATES } = require("../companion-connections");
 const { CompanionComposio } = require("../companion-composio");
 const { connectURL } = require("../../core/lib/composio-client");
+const { createUi, permissionsFor } = require("./companion-feature-ui");
 const pluginId = "kai.connections";
 const permissions = Object.freeze({
+  ...permissionsFor("connections"),
   "connections.status": "connections.read", "connections.templates": "connections.read", "connections.save": "connections.manage", "connections.remove": "connections.manage", "connections.execute": "connections.execute",
   "connections.composio.settings": "connections.manage", "connections.composio.catalog": "connections.read", "connections.composio.tools": "connections.read", "connections.composio.refresh": "connections.read", "connections.composio.connect": "connections.manage", "connections.composio.disconnect": "connections.manage", "connections.composio.permissions": "connections.manage",
 });
@@ -13,6 +15,7 @@ function object(input, allowed) {
 }
 function key(value) { if (typeof value !== "string" || value.length > 100 || !/^[a-zA-Z0-9_-]+$/.test(value)) throw Error("Invalid connection ID"); return value; }
 function create(ctx) {
+  const ui = createUi(ctx, "connections");
   let api, composio, store, closed = false, busy = false;
   const privacyMode = () => ctx.core.gateway.network.status().privacyMode;
   function load() {
@@ -58,7 +61,10 @@ function create(ctx) {
     signal?.throwIfAborted(); if (closed) throw Error("Connections is closed"); return true;
   }
   return {
+    keepAliveOnWindowClose: true,
+    startBackground: () => ui.startBackground(),
     async call(method, value = {}, signal) {
+      if (ui.accepts(method)) return ui.call(method, value, signal);
       try {
       if (!Object.hasOwn(permissions, method)) throw Error("Unknown Connections operation"); if (closed) throw Error("Connections is closed"); signal?.throwIfAborted();
       if (method === "connections.templates") return structuredClone(TEMPLATES);
@@ -110,7 +116,7 @@ function create(ctx) {
       } finally { busy = false; }
       } catch (error) { let message = String(error?.message || "Connection request failed"); if (store) { try { message = clean(message); } catch { message = "Connection request failed"; } } throw Error(message); }
     },
-    dispose() { closed = true; api?.cancel(); composio?.cancel(); },
+    async dispose() { closed = true; api?.cancel(); composio?.cancel(); await ui.dispose(); },
   };
 }
 module.exports = { pluginId, permissions, create };

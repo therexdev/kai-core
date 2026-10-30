@@ -1,69 +1,70 @@
 "use strict";
 const { test } = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), os = require("node:os"), path = require("node:path");
-const { CompanionStore } = require("../../electron/companion-store"), M = require("../../ui/workflow-model");
-const { create, safeSpec, permissions } = require("../../electron/plugin-services/workflows");
+const { CompanionStore } = require("../../electron/companion-store"), { CompanionWorkflows } = require("../../electron/companion-workflows"), M = require("../../ui/workflow-model");
+const { create, safeSpec, permissions, workflowStatus } = require("../../electron/plugin-services/workflows");
 function setup(t, overrides = {}) {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-workflows-plugin-"));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-workflows-parity-")), prompts = [], requests = [], savedChats = [];
   const store = new CompanionStore({ dataDir, safeStorage: { isEncryptionAvailable: () => true, encryptString: s => Buffer.from(s), decryptString: b => b.toString() } });
-  const prompts = [], service = create({ dataDir, core: { models: { aliases: () => [{ alias: "local", status: "ready" }] } }, getCompanionStore: () => store, confirm: async () => true, localInference: async i => { prompts.push(i.prompt); return { text: "answer " + prompts.length }; }, ...overrides });
-  t.after(() => { service.dispose(); fs.rmSync(dataDir, { recursive: true, force: true }); });
-  return { store, service, prompts, call: (method, input, signal) => service.call("workflows." + method, input, signal) };
+  const models = () => [{ alias: "local", status: "ready" }];
+  const connections = { list: () => store.data.connections.map(({ secret, ...c }) => c), prepare: (connectionId, operationId) => ({ name: "Selected request", method: operationId === "write" ? "POST" : "GET", connectionId, operationId, url: "https://example.org/api" }), execute: async request => { requests.push(request); return "selected connection result"; } };
+  const workflows = new CompanionWorkflows({ store, models, connections, privacyMode: () => "local-first", chats: { save: value => { savedChats.push(value); return { id: "saved-chat" }; } }, runLocal: async ({ model, prompt, signal }) => { prompts.push(prompt); return overrides.inference ? overrides.inference({ model, prompt }, signal) : "answer " + prompts.length; } });
+  const hub = { store, workflows }; let released = 0;
+  const ctx = { dataDir, core: { models: { aliases: models } }, getLegacyHub: feature => { assert.equal(feature, "workflows"); return hub; }, releaseLegacyFeature: () => { released++; workflows.stop(); }, confirm: overrides.confirm || (async () => true),
+    legacyManage: async (_feature, action, input, signal) => {
+      signal?.throwIfAborted();
+      switch (action) {
+        case "status": return { ...structuredClone(store.data), available: true, locked: false, models: models(), connections: connections.list() };
+        case "workflow": return workflows.save(input);
+        case "workflowDraft": return workflows.save(input, { draft: true });
+        case "workflowValidate": return workflows.validate(input);
+        case "workflowEnabled": return workflows.setEnabled(input.id, input.enabled);
+        case "run": return workflows.begin(input.id, input.input);
+        case "workflowPreview": return workflows.begin(input.id, input.input, "preview", { dryRun: true });
+        case "workflowReject": return workflows.decide(input.id, "rejected");
+        case "cancelRun": return workflows.cancel(input.id);
+        case "removeWorkflow": return workflows.remove(input.id);
+        default: throw Error("Fixture action unavailable: " + action);
+      }
+    }
+  };
+  const service = create(ctx); t.after(async () => { await service.dispose(); workflows.stop(); await new Promise(resolve => setTimeout(resolve, 20)); fs.rmSync(dataDir, { recursive: true, force: true }); });
+  return { store, workflows, service, prompts, requests, savedChats, get released() { return released; }, call: (method, input, signal) => service.call("workflows." + method, input, signal) };
 }
-async function settled(call, key, predicate = r => r.status !== "running") { for (let i = 0; i < 300; i++) { const r = await call("runGet", { id: key }); if (predicate(r)) return r; await new Promise(resolve => setTimeout(resolve, 5)); } throw Error("Workflow did not settle"); }
-const ask = (name = "Flow") => ({ name, model: "local", steps: [{ type: "agent", text: "Write about {{input}}" }, { type: "output", text: "{{previous}}" }] });
-test("saved agents and sub-workflows execute through shared runtime and preserve private legacy data", async t => {
-  const { call, store, prompts } = setup(t);
-  store.change(d => { d.notes.push({ id: "private", title: "Private", text: "brain-secret" }); d.connections.push({ id: "account", token: "account-secret" }); d.runs.push({ id: "old-run", status: "running", previous: "private old output" }); });
-  const untouched = JSON.stringify({ notes: store.data.notes, connections: store.data.connections, run: store.data.runs[0] });
-  const a = await call("agentSave", { name: "Editor", model: "local", instructions: "Use clear language" });
-  const child = await call("save", { name: "Edit", steps: [{ type: "saved_agent", agentId: a.id, text: "{{previous}}" }] });
-  const parent = await call("save", { name: "Write and edit", model: "local", steps: [{ type: "agent", text: "Draft about {{input}}" }, { type: "sub_workflow", workflowId: child.id }, { type: "output", text: "{{previous}}" }] });
-  const { id } = await call("run", { id: parent.id, input: "stars" }); const result = await settled(call, id);
-  assert.equal(result.status, "completed", result.error); assert.equal(prompts.length, 2); assert.match(prompts[0], /stars/); assert.match(prompts[1], /Use clear language/); assert.match(prompts[1], /answer 1/); assert.match(result.previous, /answer 2/);
-  assert.equal(untouched, JSON.stringify({ notes: store.data.notes, connections: store.data.connections, run: store.data.runs.find(r => r.id === "old-run") }));
-  assert.equal((await call("runs")).length, 1); await assert.rejects(call("runGet", { id: "old-run" }), /earlier app/); assert.doesNotMatch(JSON.stringify(await call("list")), /secret|private old output/);
+async function settled(call, key) { for (let i = 0; i < 300; i++) { const r = await call("runGet", { id: key }); if (r.status !== "running") return r; await new Promise(resolve => setTimeout(resolve, 5)); } throw Error("Workflow did not settle"); }
+function flow(name, middle, end = {}) { const nodes = [M.node("trigger", "start"), ...middle, M.node("output", "end", undefined, end)]; return { name, model: "local", graph: { version: 2, nodes, edges: nodes.slice(1).map((n, i) => M.edge(nodes[i].id, n.id, nodes[i].type === "approval" ? "approved" : "main")) } }; }
+test("original graphs execute Brain reads, selected app actions, code and saved chat output", async t => {
+  const f = setup(t); f.store.note({ title: "Stars", text: "Stars are bright", category: "notes" }); f.store.change(d => d.connections.push({ id: "api", name: "Selected API", enabled: true, allowSync: true, secret: "never-return-token", operations: [{ id: "read", name: "Read", method: "GET" }] }));
+  const spec = flow("Original capabilities", [M.node("memory", "memory", undefined, { operation: "search", query: "Stars" }), M.node("tool_call", "api", undefined, { connectionId: "api", operationId: "read" }), M.node("code", "code", undefined, { source: 'return [{ text: "Full graph output" }];' })], { text: "=item.text", saveChat: true });
+  const saved = await f.call("workflow", spec), run = await f.call("run", { id: saved.id }); const result = await settled(f.call, run.id);
+  assert.equal(result.status, "completed", result.error); assert.equal(result.previous, "Full graph output"); assert.equal(f.requests.length, 1); assert.equal(f.savedChats.length, 1);
+  assert.equal(f.store.data.connections[0].secret, "never-return-token"); assert.doesNotMatch(JSON.stringify(await f.call("status")), /never-return-token/);
 });
-test("unsafe legacy flows remain intact and nested capabilities cannot bypass the broker", async t => {
-  const { call, store } = setup(t), graph = M.template("ask", "local").graph;
-  graph.nodes[1] = M.node("memory", "n1", undefined, { operation: "search", query: "hidden" });
-  store.change(d => d.workflows.push({ id: "old", name: "Private recall", graph }));
-  const before = JSON.stringify(store.data.workflows);
-  assert.equal((await call("list")).workflows[0].runnable, false);
-  await assert.rejects(call("get", { id: "old" }), /memory/); await assert.rejects(call("run", { id: "old" }), /memory/);
-  await assert.rejects(call("save", { name: "Sneak", steps: [{ type: "sub_workflow", workflowId: "old" }] }), /memory/);
-  const injected = M.template("ask", "local"); injected.graph.nodes[1].config.tools = [{ connectionId: "account", operationId: "read" }];
-  await assert.rejects(call("save", injected), /without connected tools/);
-  injected.graph.nodes[1].config.tools = []; injected.graph.nodes[1].config.connectionId = "secret";
-  await assert.rejects(call("save", injected), /Unsupported settings/); assert.equal(JSON.stringify(store.data.workflows), before);
-  assert.throws(() => safeSpec({ name: "script", graph: { version: 2, nodes: [M.node("trigger", "start"), M.node("code", "script")], edges: [M.edge("start", "script")] } }), /local reasoning/);
+test("original schedule, retries and full graph capacity survive saving", async t => {
+  const f = setup(t), spec = flow("Scheduled flow", Array.from({ length: 22 }, (_, i) => M.node("transform", "node" + i, { x: 80, y: i * 100 }, { set: { text: "value" }, retries: 2 })));
+  assert.equal(f.service.startBackground().workflows, f.workflows, "Background startup activates the original workflow runtime without a window");
+  spec.graph.nodes[0].config = { kind: "schedule", schedule: { kind: "interval", minutes: 15 } }; spec.enabled = true;
+  const saved = await f.call("workflow", spec); assert.equal(saved.enabled, true); assert.equal(saved.graph.nodes.length, 24); assert.ok(saved.nextRunAt); assert.equal(saved.graph.nodes[1].config.retries, 2);
+  await f.call("workflowEnabled", { id: saved.id, enabled: false }); assert.equal(f.store.data.workflows[0].enabled, false); assert.equal(safeSpec(spec).graph.nodes.length, 24);
 });
-test("human review is native, run results persist, and explicit cancellation aborts model work", async t => {
-  let approved = false; const { call } = setup(t, { confirm: async () => approved });
-  const flow = await call("save", { name: "Review", steps: [{ type: "approval", text: "Review {{input}}" }, { type: "output", text: "accepted" }] });
-  const { id } = await call("run", { id: flow.id, input: "draft" }); assert.equal((await settled(call, id)).status, "waiting");
-  assert.deepEqual(await call("decide", { id, decision: "approved" }), { approved: false }); assert.equal((await call("runGet", { id })).status, "waiting");
-  approved = true; await call("decide", { id, decision: "approved" }); assert.equal((await settled(call, id)).status, "completed");
-  let aborted = false; const running = setup(t, { localInference: (_i, signal) => new Promise((_res, reject) => { signal.addEventListener("abort", () => { aborted = true; reject(signal.reason); }, { once: true }); }) });
-  const local = await running.call("save", ask()); const task = await running.call("run", { id: local.id, input: "go" });
-  await new Promise(resolve => setTimeout(resolve, 15)); await running.call("cancel", task); assert.equal((await running.call("runGet", task)).status, "cancelled"); assert.equal(aborted, true);
+test("historical workflow receipts remain usable without forwarding unrelated private state", async t => {
+  const f = setup(t); f.store.change(d => { d.runs.push({ id: "historical", workflowId: "legacy", status: "completed", previous: "Saved result" }); d.notes.push({ id: "secret", title: "Private", text: "unrelated private note" }); d.connections.push({ id: "account", name: "Account", enabled: true, secret: "private-token", operations: [] }); });
+  assert.equal((await f.call("runGet", { id: "historical" })).previous, "Saved result");
+  const state = await f.call("status"); assert.equal(state.connections[0].name, "Account"); assert.doesNotMatch(JSON.stringify(state), /unrelated private note|private-token/); assert.equal(state.runs[0].id, "historical");
 });
-test("permissions are declared per operation and closed plugins cannot access state", async t => {
-  const { service, call } = setup(t); assert.equal(permissions["workflows.run"], "workflows.run"); assert.equal(permissions["workflows.list"], "workflows.read");
-  await assert.rejects(service.call("brain.read", {}), /Unknown/); await assert.rejects(call("save", { name: "Too large", steps: Array(19).fill({ type: "output" }) }), /1–18/);
-  await assert.rejects(call("agentSave", { name: "Remote", instructions: "Help", model: "desktop:openai" }), /local/);
-  service.dispose(); await assert.rejects(call("list"), /closed/);
+test("native review and explicit cancellation preserve original execution gates", async t => {
+  let approved = false; const f = setup(t, { confirm: async () => approved });
+  const saved = await f.call("workflow", flow("Review", [M.node("approval", "review", undefined, { text: "Continue?" })], { text: "approved" })), run = await f.call("run", { id: saved.id });
+  assert.equal((await settled(f.call, run.id)).status, "waiting"); assert.deepEqual(await f.call("decide", { id: run.id, decision: "approved" }), { approved: false });
+  approved = true; await f.call("decide", { id: run.id, decision: "approved" }); assert.equal((await settled(f.call, run.id)).status, "completed");
+  let aborted = false; const running = setup(t, { inference: (_input, signal) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => { aborted = true; reject(signal.reason); }, { once: true })) });
+  const task = await running.call("workflow", flow("Cancel", [M.node("agent", "ask", undefined, { prompt: "Wait", model: "local" })])), started = await running.call("run", { id: task.id }); await new Promise(resolve => setTimeout(resolve, 15));
+  await running.call("cancel", { id: started.id }); assert.equal(aborted, true); assert.equal((await running.call("runGet", { id: started.id })).status, "cancelled"); await running.service.dispose(); await assert.rejects(running.call("status"), /closed/); assert.equal(running.released, 1);
 });
-test("closing during a native review cannot resume a disposed runtime", async t => {
-  let resolveReview; const { call, service, store } = setup(t, { confirm: () => new Promise(resolve => { resolveReview = resolve; }) });
-  const flow = await call("save", { name: "Review before result", steps: [{ type: "approval", text: "Continue?" }, { type: "output", text: "done" }] });
-  const run = await call("run", { id: flow.id, input: "draft" }); await settled(call, run.id);
-  const decision = call("decide", { id: run.id, decision: "approved" }); service.dispose(); const before = JSON.stringify(store.data); resolveReview(true);
-  await assert.rejects(decision, /closed/); assert.equal(JSON.stringify(store.data), before);
-});
-test("a late deadline after completed history is removed cannot throw", async t => {
-  const { call } = setup(t), nativeTimeout = global.setTimeout; let deadline;
-  const flow = await call("save", { name: "Pure result", steps: [{ type: "output", text: "done" }] });
-  global.setTimeout = (fn, ms, ...args) => ms === 10 * 60 * 1000 ? (deadline = fn, { unref() {} }) : nativeTimeout(fn, ms, ...args);
-  let run; try { run = await call("run", { id: flow.id }); } finally { global.setTimeout = nativeTimeout; }
-  await settled(call, run.id); await call("remove", { id: flow.id }); assert.equal(typeof deadline, "function"); assert.doesNotThrow(deadline);
+test("scoped dispatch rejects unrelated operations and a late review cannot resume after disposal", async t => {
+  let resolveReview; const f = setup(t, { confirm: () => new Promise(resolve => { resolveReview = resolve; }) });
+  assert.equal(permissions["workflows.workflow"], "workflows.write"); assert.equal(permissions["workflows.workflowEnabled"], "workflows.run"); assert.equal(f.service.keepAliveOnWindowClose, true);
+  await assert.rejects(f.service.call("brainSearch", {}), /Unknown/); await assert.rejects(f.call("status", []), /Invalid/);
+  const saved = await f.call("workflow", flow("Delayed review", [M.node("approval", "approve")], { text: "done" })), run = await f.call("run", { id: saved.id }); await settled(f.call, run.id);
+  const review = f.call("decide", { id: run.id, decision: "approved" }); await f.service.dispose(); const before = JSON.stringify(f.store.data); resolveReview(true);
+  await assert.rejects(review, /closed/); assert.equal(JSON.stringify(f.store.data), before); assert.deepEqual(workflowStatus({ locked: true, available: true, notes: ["secret"] }), { locked: true, available: true });
 });

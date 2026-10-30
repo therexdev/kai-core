@@ -11,7 +11,7 @@ function trustedFrame(event, window, origin) {
 
 // A second view of the same running Core. Hiding either window never stops the
 // node, changes the wallet, or creates another model/runtime process.
-function createMascotController({ BrowserWindow, screen, desktopCapturer, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, hasTray = () => true, globalShortcut, describeModel = () => null }) {
+function createMascotController({ BrowserWindow, screen, desktopCapturer, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, hasTray = () => true, globalShortcut, describeModel = () => null, pocketVoice: suppliedPocketVoice }) {
   const actions = app && dialog ? require("./desktop-actions").createFolderActions({ app, dialog, shell }) : null;
   const approval = dialog ? require("./tool-approval").createToolApproval({ dialog }) : null;
   const navigation = require("../ui/app-navigation");
@@ -23,7 +23,7 @@ function createMascotController({ BrowserWindow, screen, desktopCapturer, ipcMai
   const send = (type, value) => {
     if (window && !window.isDestroyed()) window.webContents.send("mascot:event", { type, value });
   };
-  const pocketVoice = new (require("./pocket-voice").PocketVoice)({ dir: path.join(app?.getPath?.("userData") || require("os").tmpdir(), "speech", "pocket") });
+  const pocketVoice = suppliedPocketVoice || new (require("./pocket-voice").PocketVoice)({ dir: path.join(app?.getPath?.("userData") || require("os").tmpdir(), "speech", "pocket") });
   const computer = new (require("./computer-control").ComputerControl)({ dialog, shell, globalShortcut,
     getWindow: () => window, describeModel, onEvent: value => send("computer", value),
     highlight: (view, args) => require("./computer-highlight").highlight({ BrowserWindow, screen }, view, args) });
@@ -96,7 +96,7 @@ function createMascotController({ BrowserWindow, screen, desktopCapturer, ipcMai
       const point = valid ? { x: saved.x - 1, y: saved.y - 1 } : screen.getCursorScreenPoint();
       const area = screen.getDisplayNearestPoint(point).workArea;
       const anchor = valid ? saved : { x: area.x + area.width - 24, y: area.y + area.height - 16 };
-      perched = valid && saved.perched === true;
+      perched = !!valid && saved.perched === true;
       if (perched) anchor.y = area.y + area.height;
       expanded = false;
       window = new BrowserWindow({
@@ -277,7 +277,7 @@ function createMascotController({ BrowserWindow, screen, desktopCapturer, ipcMai
       screen.removeListener("display-metrics-changed", onDisplayChange);
       for (const channel of handles) ipcMain.removeHandler(channel);
       for (const [channel, listener] of listeners) ipcMain.removeListener(channel, listener);
-      if (window && !window.isDestroyed()) { savePosition(); window.destroy(); }
+      if (window && !window.isDestroyed()) { try { savePosition(); } finally { window.destroy(); } }
     },
   };
 }

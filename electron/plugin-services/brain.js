@@ -3,7 +3,8 @@ const fs = require("node:fs"), path = require("node:path"), crypto = require("no
 const { CompanionBrain, digest } = require("../companion-brain");
 const { CompanionSources } = require("../companion-sources");
 const { id } = require("../companion-store");
-const permissions = { "brain.list": "brain.read", "brain.get": "brain.read", "brain.search": "brain.read", "brain.save": "brain.write", "brain.remove": "brain.write", "brain.goals": "brain.read", "brain.goalSave": "brain.write", "brain.goalRemove": "brain.write", "brain.sources": "brain.read", "brain.sourceImport": "brain.import", "brain.sourceRemove": "brain.write", "brain.export": "brain.export" };
+const { createUi, permissionsFor } = require("./companion-feature-ui");
+const permissions = { ...permissionsFor("brain"), "brain.list": "brain.read", "brain.get": "brain.read", "brain.search": "brain.read", "brain.save": "brain.write", "brain.remove": "brain.write", "brain.goals": "brain.read", "brain.goalSave": "brain.write", "brain.goalRemove": "brain.write", "brain.sources": "brain.read", "brain.sourceImport": "brain.import", "brain.sourceRemove": "brain.write", "brain.export": "brain.export" };
 function inspect(file) {
   try { const s = fs.lstatSync(file); if (!s.isFile() || s.isSymbolicLink() || s.size > 36 * 1024 * 1024) throw Error("Brain data must be a regular, bounded file. Existing data was not changed."); const j = JSON.parse(fs.readFileSync(file, "utf8")); if (j.version !== 1 || typeof j.encrypted !== "string") throw Error("Brain data is unreadable. Existing data was not changed."); }
   catch (e) { if (e.code !== "ENOENT") throw e; }
@@ -13,10 +14,12 @@ function requireRevision(value, revision) { if (!value || typeof revision !== "s
 function bounded(value, max, label, empty = false) { if (typeof value !== "string" || value.length > max || (!empty && !value.trim())) throw Error(`${label} must be text, up to ${max} characters.`); return value; }
 function checkRoot(dataDir) { const st = fs.lstatSync(dataDir); if (!st.isDirectory() || st.isSymbolicLink()) throw Error("Profile must be a real directory."); }
 function create(ctx) {
+  const ui = createUi(ctx, "brain");
   let brain, sources, store;
   function access() { checkRoot(ctx.dataDir); inspect(path.join(ctx.dataDir, "companion-hub.json")); store = ctx.getCompanionStore(); store.requireStorage(); brain ||= new CompanionBrain({ store }); sources ||= new CompanionSources({ store, chats: ctx.core.gateway.chats, privacyMode: () => "local-only" }); return store; }
   const notes = () => store.data.notes;
-  return { async call(method, input = {}, signal) {
+  return { keepAliveOnWindowClose: true, startBackground: () => ui.startBackground(), async call(method, input = {}, signal) {
+    if (ui.accepts(method)) return ui.call(method, input, signal);
     signal?.throwIfAborted(); if (!Object.hasOwn(permissions, method)) throw Error("Unknown Brain operation."); access();
     if (!input || typeof input !== "object" || Array.isArray(input)) throw Error("Invalid Brain request.");
     if (method === "brain.list" || method === "brain.search") {
@@ -80,6 +83,6 @@ function create(ctx) {
       try { fs.writeFileSync(temp, store.markdown(), { flag: "wx", mode: 0o600 }); fs.renameSync(temp, file); } finally { fs.rmSync(temp, { force: true }); }
       return { exported: true, name: path.basename(file) };
     }
-  } };
+  }, dispose: () => ui.dispose() };
 }
 module.exports = { pluginId: "kai.brain", permissions, create };

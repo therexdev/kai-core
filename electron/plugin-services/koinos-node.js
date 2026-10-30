@@ -7,7 +7,7 @@ const { SetupService } = require("../../core/lib/koinos/setup");
 const { NETWORKS } = require("../../core/lib/koinos/constants");
 const { DOCKER_DOCS } = require("../../core/lib/koinos/setup-plan");
 const pluginId = "kai.koinos-node";
-const permissions = Object.freeze({ "node.status":"koinos-node.read", "node.inspect":"koinos-node.manage", "node.logs":"koinos-node.read", "node.configure":"koinos-node.manage", "node.start":"koinos-node.manage", "node.stop":"koinos-node.manage", "node.setup":"koinos-node.manage" });
+const legacyPermissions = Object.freeze({ "node.status":"koinos-node.read", "node.inspect":"koinos-node.manage", "node.logs":"koinos-node.read", "node.configure":"koinos-node.manage", "node.start":"koinos-node.manage", "node.stop":"koinos-node.manage", "node.setup":"koinos-node.manage" });
 const services = new Set(["amqp","chain","mempool","block_store","block_producer","p2p","jsonrpc","grpc","rest","transaction_store"]);
 const templateRoot = path.join(__dirname,"../../core/koinos-node-template");
 const plain = value => value && typeof value === "object" && !Array.isArray(value);
@@ -31,7 +31,7 @@ function redact(value) {
 // Unlike the legacy JsonStore constructor, this never restores or rewrites a
 // corrupt primary merely because a plugin was opened. Unrelated fields survive.
 class GuardedStore {
-  constructor(file) { this.file=file; const bytes=readFile(file); this.digest=hash(bytes); try { this.data=bytes ? JSON.parse(bytes) : {}; } catch { throw Error("Saved node settings are unreadable; original data was preserved"); }
+  constructor(file) { this.file=file;this.filePath=file; const bytes=readFile(file); this.digest=hash(bytes); try { this.data=bytes ? JSON.parse(bytes) : {}; } catch { throw Error("Saved node settings are unreadable; original data was preserved"); }
     if(!plain(this.data))throw Error("Saved node settings need recovery");
     if(!bytes && readFile(file+".last-good"))throw Error("Node settings primary is missing. Restore its backup deliberately before using Node");
   }
@@ -86,7 +86,7 @@ function nativeRuntime({dataRoot,intentPath,state,assertActive,assertFiles,onSta
   const dockerApp=setup._dockerApp.bind(setup);setup._dockerApp=async()=>{const target=await dockerApp();if(closing)throw Error("Node setup was cancelled");assertActive();return target;};
   return {manager,setup,cancel(){if(closing)return;closing=true;for(const child of children)if(!cleanupChildren.has(child))child.kill();},async stop(network){cleanup=true;try{if(manager._commandPending)await manager._commandPending.catch(()=>{});const result=await manager.stop(network);if(manager._commandPending)await manager._commandPending;const op=manager.currentOp();if(op?.name==="stop"&&op.code!==0)throw Error(redact(op.error||"Docker did not stop the node. Use Docker Desktop to stop it manually"));return result;}finally{cleanup=false;}},dispose(){closing=true;for(const child of children)child.kill();setup.stopWatchers();manager.dispose();}};
 }
-function create(ctx, dependencies={}) {
+function createLegacy(ctx, dependencies={}) {
   const root=path.join(fs.realpathSync(ctx.dataDir),"koinos-node");safePath(root);const settings=new GuardedStore(path.join(root,"settings.json"));
   let selected=settings.get("network","mainnet");if(!Object.hasOwn(NETWORKS,selected))throw Error("Saved node network is unrecognized; original settings were preserved");
   const savedPath=settings.get("node.dataDir",null);if(savedPath!==null&&(typeof savedPath!=="string"||!path.isAbsolute(savedPath)||/[\r\n\0$]/.test(savedPath)))throw Error("Saved node directory needs recovery");
@@ -95,7 +95,7 @@ function create(ctx, dependencies={}) {
   let runtime=null,closed=false,busy=false,inspection=false,owned=null,snapshot=null,disposing=null,stopTask=null;
   const mode=()=>ctx.core.gateway.network.status().privacyMode;
   function active(signal){signal?.throwIfAborted();if(closed)throw Error("Koinos Node is closed");settings.assert();safePath(root);safePath(dataRoot);}
-  function online(signal){active(signal);if(mode()==="local-only")throw Error("Local-Only blocks running or installing a network node");}
+  function online(signal){active(signal);} // Node opt-in is independent of AI privacy.
   function files(network,trust=false){
     safePath(dataRoot);const base=path.join(dataRoot,network);for(const folder of [base,path.join(base,"config"),path.join(base,"basedir"),path.join(base,"basedir/block_producer"),path.join(base,"basedir/chain"),path.join(base,"basedir/jsonrpc"),path.join(base,"basedir/jsonrpc/descriptors")])safePath(folder);
     const names=["docker-compose.yml",".env","config/config.yml","config/rabbitmq.conf","config/koinos_descriptors.pb","config/genesis_data.json","basedir/config.yml","basedir/chain/genesis_data.json","basedir/jsonrpc/descriptors/koinos_descriptors.pb","basedir/block_producer/public.key"];
@@ -114,7 +114,7 @@ function create(ctx, dependencies={}) {
   function stopNode(network){if(stopTask)return stopTask;const currentRuntime=runtime;const task=(async()=>{await currentRuntime.stop(network);if(owned===network)owned=null;})().finally(()=>{if(stopTask===task)stopTask=null;});stopTask=task;return task;}
   function stopOwned(){if(stopTask)return stopTask;return owned?stopNode(owned):Promise.resolve();}
   return {
-    async call(method,value={},signal){if(!Object.hasOwn(permissions,method))throw Error("Unknown node operation");active(signal);
+    async call(method,value={},signal){if(!Object.hasOwn(legacyPermissions,method))throw Error("Unknown node operation");active(signal);
       if(method==="node.status"){input(value,[]);return status();}
       if(busy)throw Error("Wait for the current node action to finish");busy=true;
       try{
@@ -122,15 +122,28 @@ function create(ctx, dependencies={}) {
         if(method==="node.logs"){const v=input(value,["service","tail"]);if(!inspection)throw Error("Check this node first to approve local Docker inspection");if(v.service!==undefined&&v.service!==""&&!services.has(v.service))throw Error("Choose a known node service");const tail=v.tail===undefined?120:v.tail;if(!Number.isSafeInteger(tail)||tail<1||tail>300)throw Error("Choose between 1 and 300 log lines");files(selected,true);const text=await getRuntime().manager.logs(selected,v.service||undefined,tail);active(signal);return {text:redact(text)};}
         if(method==="node.configure"){const v=input(value,["network"]);if(!Object.hasOwn(NETWORKS,v.network))throw Error("Choose Mainnet or Harbinger");if(owned||runtime?.manager._op?.running||snapshot?.isRunning)throw Error("Stop the selected node before changing networks");if(!await review("Change node network?",`Select ${NETWORKS[v.network].label}? Existing databases stay in their current folders. This does not start a node.`,signal))return {cancelled:true};settings.set("network",v.network);selected=v.network;snapshot=null;return status();}
         if(method==="node.start"){const v=input(value,["mode"]);if(!["sync","resume"].includes(v.mode))throw Error("Choose sync or resume mode");online(signal);const address=v.mode==="resume"?producer():null;if(v.mode==="resume"&&!address)throw Error("No saved producer address exists for this network");if(owned)throw Error("This plugin already started a node");const context=hash(readFile(path.join(dataRoot,selected,"config/config.yml")));
-          if(!await review("Start Koinos node?",`${NETWORKS[selected].label}\nFolder: ${path.join(dataRoot,selected)}\n${address?"Resume saved block producer: "+address:"Sync only; block production is disabled"}\n\nDocker may download Koinos images and use substantial storage, CPU and network bandwidth. Managed configuration is backed up then regenerated. Chain databases and producer keys stay in place. The node stops when this plugin closes or Local-Only is selected. No wallet transactions are authorized.`,signal))return {cancelled:true};online(signal);if(context!==hash(readFile(path.join(dataRoot,selected,"config/config.yml"))))throw Error("Node configuration changed during review; try again");files(selected,true);const rt=getRuntime();const current=await rt.manager.status(selected);online(signal);if(current.isRunning)throw Error("This node is already running. Stop it explicitly before starting it from this plugin");if(!current.docker?.ok)throw Error(current.docker?.error||"Install and start Docker first");if(current.control?.ok!==true)throw Error(redact(current.control?.message||"Cannot verify this node ownership; no changes were made"));backupConfig();files(selected);
+          if(!await review("Start Koinos node?",`${NETWORKS[selected].label}\nFolder: ${path.join(dataRoot,selected)}\n${address?"Resume saved block producer: "+address:"Sync only; block production is disabled"}\n\nDocker may download Koinos images and use substantial storage, CPU and network bandwidth. Managed configuration is backed up then regenerated. Chain databases and producer keys stay in place. The node stops when this plugin closes. Node networking is independent of AI privacy. No wallet transactions are authorized.`,signal))return {cancelled:true};online(signal);if(context!==hash(readFile(path.join(dataRoot,selected,"config/config.yml"))))throw Error("Node configuration changed during review; try again");files(selected,true);const rt=getRuntime();const current=await rt.manager.status(selected);online(signal);if(current.isRunning)throw Error("This node is already running. Stop it explicitly before starting it from this plugin");if(!current.docker?.ok)throw Error(current.docker?.error||"Install and start Docker first");if(current.control?.ok!==true)throw Error(redact(current.control?.message||"Cannot verify this node ownership; no changes were made"));backupConfig();files(selected);
           try{await rt.manager.start(selected,address);if(rt.manager._commandPending)await rt.manager._commandPending;online(signal);const op=rt.manager.currentOp();if(op?.code!==0)throw Error(redact(op?.error||"Node failed to start"));inspection=true;return await inspect(signal);}catch(e){await stopOwned().catch(()=>{});throw e;}}
         if(method==="node.stop"){input(value,[]);files(selected,true);if(!await review("Stop Koinos node?",`Stop only ${NETWORKS[selected].label} in ${path.join(dataRoot,selected)}? Block production pauses. Chain data, configuration and keys are retained.`,signal))return {cancelled:true};getRuntime();await stopNode(selected);active(signal);snapshot=null;return {stopped:true};}
         if(method==="node.setup"){const v=input(value,["action"]);if(!["dockerDocs","installWsl","startDocker"].includes(v.action))throw Error("Choose a supported setup action");online(signal);
           const descriptions={dockerDocs:"Open the official Docker installation guide in your browser? Download and install Docker there, then return to Check node. The plugin does not download or run installers automatically.",installWsl:"Install Windows Subsystem for Linux using the Windows system installer? Windows will ask for administrator permission. You may need to restart Windows manually afterward.",startDocker:"Open your installed Docker Desktop application? It may start other containers configured by you. No installer will run if Docker is missing."};if(v.action==="installWsl"&&process.platform!=="win32")throw Error("WSL setup is available only on Windows");if(v.action==="startDocker"&&process.platform==="linux")throw Error("Use your distribution's service manager to start Docker Engine");if(!await review("Set up Docker",descriptions[v.action],signal))return {cancelled:true};online(signal);if(v.action==="dockerDocs"){await ctx.electron.shell.openExternal(DOCKER_DOCS[process.platform]||DOCKER_DOCS.linux);return {opened:true};}const rt=getRuntime();const result=v.action==="installWsl"?await rt.setup.installWsl():await rt.setup.startDocker({installIfMissing:false});active(signal);return result;}
       }finally{busy=false;}
     },
-    async privacyChanged(next){if(next!=="local-only")return;runtime?.cancel();await stopOwned();runtime?.dispose();runtime=null;inspection=false;snapshot=null;},
+    async privacyChanged(){ /* Original Node opt-in is independent of AI privacy. */ },
     async dispose(){if(disposing)return disposing;closed=true;runtime?.cancel();disposing=(async()=>{try{await stopOwned();}finally{runtime?.dispose();runtime=null;}})();return disposing;},
+  };
+}
+const full = require("./koinos-node-full");
+const permissions = Object.freeze({ ...legacyPermissions, ...full.permissions });
+function create(ctx, dependencies={}) {
+  let legacy=createLegacy(ctx,dependencies), complete;
+  const getLegacy=()=>legacy;
+  const getComplete=()=>complete ||= full.create(ctx,dependencies.full);
+  return {keepAliveOnWindowClose:!ctx.manifest||["koinos-node.read","koinos-node.manage","koinos-node.wallet","koinos-node.fund"].every(scope=>ctx.manifest.permissions.includes(scope)),
+    startBackground(){return getComplete().startBackground();},
+    call(method,input,signal){return Object.hasOwn(full.permissions,method)?getComplete().call(method,input,signal):getLegacy().call(method,input,signal);},
+    async privacyChanged(mode){await legacy?.privacyChanged(mode);await complete?.privacyChanged(mode);},
+    async dispose(options){await legacy?.dispose(options);await complete?.dispose(options);}
   };
 }
 module.exports={pluginId,permissions,create,GuardedStore,redact,nativeRuntime};

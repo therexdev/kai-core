@@ -729,7 +729,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("fund:routeCStart", async ({ amountEth, amountUsdt, amountVkoin, source, slippageBps, password } = {}) => {
     requirePassword(password); // same intent-level authorisation as the bridge
     const job = await routeC.start({ amountEth, amountUsdt, amountVkoin, source, slippageBps });
-    routeC.advance().catch(() => {}); // kick the first Ethereum tx immediately
+    await routeC.advance(); // keep the approved wallet operation until the first step finishes
     return job;
   });
   handle("fund:bridgeMax", async () => {
@@ -920,6 +920,20 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
         return await fn(input); } finally { producerMutation = false; }
     });
   }
+  // Native review data is not a renderer channel. Keep approvals bound to the
+  // original stored draft/configuration and show its human-readable summary.
+  channels.review = channel => {
+    if (channel === "producer:vaultSend") {
+      if (!vault.draft) throw Error("Prepare a fresh Koin Vault transaction.");
+      return { draftId: vault.draft.id, summary: structuredClone(vault.draft.summary), fingerprint: require("node:crypto").createHash("sha256").update(JSON.stringify(vault.draft)).digest("hex") };
+    }
+    if (channel === "producer:broadcast") {
+      const draft = custody.savedDraft();
+      return { transactionId: draft.transaction.id, summary: draft.summary, fingerprint: require("node:crypto").createHash("sha256").update(JSON.stringify(draft)).digest("hex") };
+    }
+    if (channel === "rewards:runNow") return { configuration: structuredClone(rewards.config()) };
+    return null;
+  };
   return channels;
 }
 
@@ -931,12 +945,12 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
  * Nothing here starts a node or touches the network on its own; the advancer
  * timers only do work once the user has started a flow.
  */
-function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
+function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {}, storeFactory = (file, defaults) => new JsonStore(file, defaults), configureServices = () => {}, networkAllowed = () => true, runBackground = (_name, run) => run() }) {
   const root = path.join(dataDir, "koinos-node");
   fs.mkdirSync(root, { recursive: true });
 
-  const settings = new JsonStore(path.join(root, "settings.json"), DEFAULT_SETTINGS);
-  const state = new JsonStore(path.join(root, "state.json"), {});
+  const settings = storeFactory(path.join(root, "settings.json"), DEFAULT_SETTINGS);
+  const state = storeFactory(path.join(root, "state.json"), {});
   const chain = new ChainService(settings);
 
   /*
@@ -970,16 +984,14 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   });
 
   nodeMgr.startDocker = () => setup.startDocker({ installIfMissing: false });
-  nodeMgr.supervise(() => chain.network().id);
 
   const stats = new ProducerStats({ chain, state });
   const rewards = new RewardEngine({ chain, wallet, settings, state, stats, onEvent });
-  rewards.start(); // auto-reburn; signs with the unlocked wallet, sends nothing away
 
   const bridge = new BridgeOrchestrator({
     wallet,
     provider: chain.provider(),
-    store: new JsonStore(path.join(root, "fund-bridge.json"), { job: null }),
+    store: storeFactory(path.join(root, "fund-bridge.json"), { job: null }),
     settings,
     appKey: ONRAMP_APP_KEY,
     network: settings.get("network", "mainnet"),
@@ -988,23 +1000,32 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   const routeC = new RouteCOrchestrator({
     wallet,
     provider: chain.provider(),
-    store: new JsonStore(path.join(root, "fund-routec.json"), { routeCJob: null }),
+    store: storeFactory(path.join(root, "fund-routec.json"), { routeCJob: null }),
     settings,
     appKey: ONRAMP_APP_KEY,
     network: settings.get("network", "mainnet"),
     onEvent,
   });
 
+  // Core plugins inject guarded stores and lifecycle/spend coordination while
+  // preserving the same channel handlers used by the original application.
+  configureServices({ settings, state, chain, nodeMgr, setup, rewards, bridge, routeC });
+  nodeMgr.supervise(() => {
+    if (!networkAllowed()) throw new Error("Node supervision is paused in Local-Only mode");
+    return chain.network().id;
+  });
+  rewards.start();
+
   // Advancers. A bridge or swap the user STARTED (and proved the password for)
   // finishes on its own; these only ever act on a job already in flight.
   const bridgeTimer = setInterval(() => {
     const job = bridge.status();
-    if (job && !["done", "error", "depositing"].includes(job.status)) bridge.advance().catch(() => {});
+    if (networkAllowed() && job && !["done", "error", "depositing"].includes(job.status)) Promise.resolve().then(() => runBackground("bridge", () => bridge.advance())).catch(() => {});
   }, 15000);
   const routeCTimer = setInterval(() => {
     const job = routeC.status();
-    if (job && !["done", "error"].includes(job.status) && wallet.status().unlocked) {
-      routeC.advance().catch(() => {});
+    if (networkAllowed() && job && !["done", "error"].includes(job.status) && wallet.status().unlocked) {
+      Promise.resolve().then(() => runBackground("routeC", () => routeC.advance())).catch(() => {});
     }
   }, 8000);
   bridgeTimer.unref?.();
@@ -1014,11 +1035,12 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   const producerCache = createProducerCache();
   const channels = buildChannels({
     settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC,
-    userData: root, appVersion, defaultNodeData, priceCache, producerCache,
+    userData: root, appVersion, defaultNodeData, priceCache, producerCache, onEvent,
   });
 
   return {
     channels,
+    review: channel => channels.review(channel),
     settings,
     nodeMgr,
     /** The KOIN price as of now, without waiting on Ethereum. Shared with the

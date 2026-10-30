@@ -37,6 +37,7 @@ class NodeManager {
     this._control = new Map();
     this._ownership = new Map();
     this._disposed = false;
+    this.assertOperation = () => {};
     this.templateRoot = templateRoot;
     this.dataRoot = dataRoot;
     this.platform = platform;
@@ -163,6 +164,7 @@ class NodeManager {
     const net = NETWORKS[networkId];
     const d = this.dirs(networkId);
     if (!["ps", "logs", "version", "config"].includes(args[0])) await this._assertControl(networkId);
+    this.assertOperation(args[0]);
     return this._exec(cmd.bin, [...cmd.pre, "-p", net.composeProject, "-f", path.join(d.root, "docker-compose.yml"), ...args], {
       cwd: d.root,
       ...opts,
@@ -192,6 +194,7 @@ class NodeManager {
       await this._assertControl(networkId);
       cmd = await this.composeCmd();
       if (!cmd) throw new Error("Docker Compose not available");
+      this.assertOperation(args[0]);
     } catch (e) {
       op.running = false; op.code = 1; op.finishedAt = Date.now(); op.error = e.message;
       this.onEvent({ type: "node", level: "error", message: `${opName} failed: ${e.message}` });
@@ -304,9 +307,9 @@ class NodeManager {
         if (this._watch) this._watch.health = { ok: false, reason: e.reason || "supervisor-unavailable", message: e.message };
       } finally { this._supervising = false; }
     };
-    this._nudge = tick;
-    this._supervisor = setInterval(tick, WATCH_INTERVAL_MS); this._supervisor.unref?.();
-    void tick();
+    this._nudge = () => {if(this._supervising)return this._supervisionPending;return this._supervisionPending=tick();};
+    this._supervisor = setInterval(this._nudge, WATCH_INTERVAL_MS); this._supervisor.unref?.();
+    void this._nudge();
   }
 
   nudge() { return this._nudge?.(); }
@@ -910,7 +913,7 @@ class NodeManager {
     };
     this._op = op;
     this._qsAbort = new AbortController();
-    this._runQuickSync(networkId, net, op)
+    this._quickSyncPending = this._runQuickSync(networkId, net, op)
       .then(() => {
         op.running = false;
         op.finishedAt = Date.now();

@@ -1,9 +1,10 @@
 "use strict";
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
 const { DocStore } = require("../../core/lib/docs");
-const permissions = { "documents.list": "documents.read", "documents.get": "documents.read", "documents.save": "documents.write", "documents.remove": "documents.write", "documents.import": "documents.import", "documents.export": "documents.export", "documents.draft": "documents.draft" };
+const permissions = { "desktop.preferencesRead": "desktop.preferences", "documents.ai": "documents.draft", "documents.poll": "documents.draft", "documents.cancel": "documents.draft", "documents.list": "documents.read", "documents.get": "documents.read", "documents.save": "documents.write", "documents.remove": "documents.write", "documents.import": "documents.import", "documents.export": "documents.export", "documents.draft": "documents.draft" };
 const digest = d => crypto.createHash("sha256").update(JSON.stringify(d)).digest("hex");
-const MAX = 1000000;
+// Match the original gateway request budget; stored records include native metadata.
+const MAX = 10 * 1024 * 1024, MAX_STORED = MAX + 64 * 1024;
 function stat(file) { try { return fs.lstatSync(file); } catch (e) { if (e.code === "ENOENT") return null; throw e; } }
 function text(v, n, label) { if (typeof v !== "string" || v.length > n) throw Error(`${label} must be text up to ${n} characters.`); return v; }
 function create(ctx) {
@@ -11,7 +12,7 @@ function create(ctx) {
   function directory() { const profile = stat(ctx.dataDir); if (!profile?.isDirectory() || profile.isSymbolicLink()) throw Error("Profile must be a real directory."); const s = stat(root); if (s && (!s.isDirectory() || s.isSymbolicLink())) throw Error("Document directory must be a real directory."); }
   function get(id) {
     directory(); const file = store._file(id), s = stat(file);
-    if (!s?.isFile() || s.isSymbolicLink() || s.size > 6 * MAX) throw Error("Document is unavailable or unsafe. Existing data was not changed.");
+    if (!s?.isFile() || s.isSymbolicLink() || s.size > MAX_STORED) throw Error("Document is unavailable or unsafe. Existing data was not changed.");
     let doc, fd; try {
       fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
       const opened = fs.fstatSync(fd);
@@ -25,13 +26,26 @@ function create(ctx) {
   function save(input) {
     directory(); const old = input.id ? get(input.id) : null; if (old) expected(old, input.revision);
     const id = old?.id || `d${Date.now().toString(36)}${crypto.randomBytes(3).toString("hex")}`, file = store._file(id);
-    const title = text(input.title || "Untitled", 200, "Title").trim() || "Untitled", content = text(input.content ?? "", MAX, "Document");
+    const content = text(input.content ?? "", MAX, "Document");
+    if (Buffer.byteLength(JSON.stringify({id: input.id || null, title: input.title || "", content}), "utf8") > MAX) throw Error("Document exceeds the original 10 MiB request limit.");
+    const title = text(input.title || (content.split("\n").find(line => line.trim()) || "Untitled").replace(/^#+\s*/, "").slice(0, 80), 200, "Title").trim() || "Untitled";
     const doc = { ...(old || {}), id, title, content, createdAt: old?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const bytes = Buffer.from(JSON.stringify(doc), "utf8"); if (bytes.length > MAX_STORED) throw Error("Saved document exceeds the original storage budget; existing data was preserved.");
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); directory(); const temp = file + "." + crypto.randomUUID() + ".tmp";
-    try { fs.writeFileSync(temp, JSON.stringify(doc), { flag: "wx", mode: 0o600 }); fs.renameSync(temp, file); } finally { fs.rmSync(temp, { force: true }); }
+    try { fs.writeFileSync(temp, bytes, { flag: "wx", mode: 0o600 }); fs.renameSync(temp, file); } finally { fs.rmSync(temp, { force: true }); }
     return { ...doc, revision: digest(doc) };
   }
+  let closed = false;
   return { async call(method, input = {}, signal) {
+    if (closed) throw Error("Documents plugin is closed");
+    if (method === "documents.poll") return ctx.legacyPoll("documents", input.streamId, signal);
+    if (method === "documents.cancel") return ctx.legacyCancel("documents", input.streamId);
+    if (method === "documents.ai") {
+      if (!input || typeof input !== "object" || !Array.isArray(input.messages) || input.messages.length > 100 || input.messages.some(message => !message || !["system", "user", "assistant"].includes(message.role) || typeof message.content !== "string")) throw Error("Invalid writing request");
+      const body={model:input.model,stream:true,messages:input.messages};
+      if (Buffer.byteLength(JSON.stringify(body), "utf8") > MAX) throw Error("Selected text exceeds the original 10 MiB model request limit; select a shorter passage.");
+      return ctx.legacyRequest("documents", {path:"/core/chat/completions", method:"POST", body, stream:true}, signal);
+    }
     signal?.throwIfAborted(); if (!Object.hasOwn(permissions, method)) throw Error("Unknown Documents operation.");
     if (!input || typeof input !== "object" || Array.isArray(input)) throw Error("Invalid Documents request."); directory();
     if (method === "documents.list") {
@@ -47,7 +61,7 @@ function create(ctx) {
     if (method === "documents.import") {
       const choice = await ctx.electron.dialog.showOpenDialog(ctx.getWindow(), { title: "Import a document", properties: ["openFile"], filters: [{ name: "Text or Markdown", extensions: ["txt", "md"] }] });
       signal?.throwIfAborted(); if (choice.canceled) return { cancelled: true }; const file = choice.filePaths[0], s = stat(file);
-      if (!s?.isFile() || s.isSymbolicLink() || s.size > MAX || !/\.(txt|md)$/i.test(file)) throw Error("Choose a regular text or Markdown file under 1 MB.");
+      if (!s?.isFile() || s.isSymbolicLink() || s.size > MAX || !/\.(txt|md)$/i.test(file)) throw Error("Choose a regular text or Markdown file within the original 10 MiB request budget.");
       const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0)); let content;
       try { const current = fs.fstatSync(fd); if (current.ino !== s.ino || current.dev !== s.dev || current.size > MAX) throw Error("Selected file changed."); content = fs.readFileSync(fd, "utf8"); } finally { fs.closeSync(fd); }
       if (content.includes("\0")) throw Error("Choose a text document."); return save({ title: path.basename(file).replace(/\.(md|txt)$/i, "").slice(0,200), content });
@@ -71,6 +85,6 @@ function create(ctx) {
       if (typeof proposal !== "string" || proposal.length > MAX) throw Error("The model returned an invalid draft.");
       return { text: proposal, saved: false };
     }
-  } };
+  }, async dispose() { closed = true; await ctx.legacyRelease?.("documents"); } };
 }
-module.exports = { pluginId: "kai.documents", permissions, create };
+module.exports = { pluginId: "kai.documents", permissions, create, MAX_REQUEST_BYTES: MAX, MAX_STORED_BYTES: MAX_STORED };

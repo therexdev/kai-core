@@ -16,6 +16,7 @@
 // token-generic path Route B uses; the record's koinosToken is KOIN.
 
 const { ethers } = require("ethers");
+const { createEvmWallet } = require("./operation-lifetime");
 const { makeProvider, requestNewSignatures } = require("./eth-bridge");
 const { fetchEthDepositRecord, isRedeemable } = require("./bridge");
 const { buildRedeemTransaction } = require("./koinos-bridge");
@@ -80,7 +81,7 @@ class RouteCOrchestrator {
   async _eth() {
     if (!this._ethWallet) {
       this._ethProvider = await makeProvider();
-      this._ethWallet = new ethers.Wallet(this.wallet.ethPrivateKey(), this._ethProvider);
+      this._ethWallet = createEvmWallet(this.wallet.ethPrivateKey(), this._ethProvider);
     }
     return this._ethWallet;
   }

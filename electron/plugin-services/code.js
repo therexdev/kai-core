@@ -1,11 +1,12 @@
 "use strict";
-// First-party coding capability. The renderer receives opaque grants, never a
-// general filesystem API. CodeAgent's command/MCP tools are intentionally not
-// registered here: file changes are a reviewed, hash-bound operation.
+// First-party coding capability. The original full workspace is routed through
+// code-workspace.js and the original native CodeAgent. The earlier bounded
+// single-file editor API below remains available for installed-package compatibility.
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), crypto = require("node:crypto");
 const { CodeProjects } = require("../../core/lib/code-projects");
 const pluginId = "kai.code";
-const permissions = Object.freeze({
+const permissions = Object.freeze({ "desktop.preferencesRead": "desktop.preferences",
+  "code.request": "code.execute", "code.poll": "code.execute", "code.cancel": "code.execute", "code.chooseFolder": "code.read",
   "code.projects": "code.read", "code.choose": "code.read", "code.open": "code.read", "code.browse": "code.read", "code.read": "code.read",
   "code.sessions": "code.read", "code.session": "code.read", "code.revoke": "code.read", "code.propose": "code.assist", "code.stage": "code.write", "code.apply": "code.write",
 });
@@ -59,7 +60,7 @@ function diff(before, after, name) {
   while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
   return `--- ${name}\n+++ ${name}\n@@ -${start + 1},${a.length - start - end} +${start + 1},${b.length - start - end} @@\n` + a.slice(start, a.length - end).map(l => "-" + l).concat(b.slice(start, b.length - end).map(l => "+" + l)).join("\n");
 }
-function create(ctx) {
+function createBoundedEditor(ctx) {
   const registry = path.join(ctx.dataDir, "code-projects.json");
   const profile = fs.lstatSync(ctx.dataDir);
   if (!profile.isDirectory() || profile.isSymbolicLink()) throw Error("Coding profile must be a real directory");
@@ -169,6 +170,20 @@ function create(ctx) {
       }
     },
     dispose() { disposed = true; grants.clear(); proposals.clear(); },
+  };
+}
+function create(ctx) {
+  const editor = createBoundedEditor(ctx); let workspace, closed = false;
+  return {
+    async call(method, input, signal) {
+      if (closed) throw Error("Code plugin is closed");
+      if (["code.request", "code.poll", "code.cancel", "code.chooseFolder"].includes(method)) {
+        workspace ||= require("./code-workspace").create(ctx);
+        return workspace.call(method, input, signal);
+      }
+      return editor.call(method, input, signal);
+    },
+    async dispose() { closed = true; await Promise.allSettled([editor?.dispose?.(), workspace?.dispose?.()]); },
   };
 }
 module.exports = { pluginId, permissions, create, relativePath, projectRoot, readFile, diff };

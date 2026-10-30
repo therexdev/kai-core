@@ -10,6 +10,7 @@
 // return). We wait on the receipt, not the return value, so this is safe.
 
 const { ethers } = require("ethers");
+const { createEvmWallet } = require("./operation-lifetime");
 const { requireValidTo } = require("./eth-send");
 const { makeProvider } = require("./eth-bridge");
 const { USDT, USDT_DECIMALS } = require("./route-constants");
@@ -96,7 +97,7 @@ async function sendUsdt({ ethPrivHex, amountUsdt, toAddress, provider, maxUsdt =
     throw new Error(`Amount ${formatUsdt(sats)} USDT exceeds the safety cap of ${maxUsdt} USDT`);
   }
   const p = provider || (await makeProvider());
-  const wallet = new ethers.Wallet(priv, p);
+  const wallet = createEvmWallet(priv, p);
   const c = new ethers.Contract(USDT, USDT_ABI, wallet);
   const [bal, ethBal] = await Promise.all([c.balanceOf(wallet.address), p.getBalance(wallet.address)]);
   if (bal < sats) throw new Error("Insufficient USDT balance");

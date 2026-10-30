@@ -95,9 +95,10 @@ class DesktopProviders {
   }
 }
 
-function registerProviderIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow }) {
+function registerProviderIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow, getTrustedWindow }) {
   const handles = [], jobs = new Map();
   function allowed(event, settings = false) {
+    if (getTrustedWindow) return !!getTrustedWindow(event, { management: settings });
     // Exact document path as well as main frame: an embedded same-origin node
     // screen or a window navigated to another Core resource has no capability.
     const check = (window, pathname) => trustedFrame(event, window, origin) && new URL(event.senderFrame.url).pathname === pathname;

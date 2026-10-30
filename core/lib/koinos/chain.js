@@ -103,7 +103,7 @@ class ChainService {
   }
 
   provider(urls) {
-    return createProvider(urls ?? this.rpcUrls());
+    return require("./operation-lifetime").guardKoinosProvider(createProvider(urls ?? this.rpcUrls()));
   }
 
   isValidAddress(address) {

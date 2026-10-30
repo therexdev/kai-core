@@ -1,130 +1,53 @@
 # KAI Core
 
-Plugin-based successor to Koinos AI. This repository is independent of the old
-Alpha/Test release pipelines, starting from `kaiapp` Test commit
-`34d17faa0526213b8fc0ac7a65aa7f2c186c6547` with the original history retained in the source repository.
+KAI Core is the plugin-based successor to Koinos AI. The **Core 0.5.0 / first-party plugins 0.2.x** source restores the original feature workspaces and engines in separately installed windows. It replaces the reduced 0.1.1 plugin interfaces.
 
-## What runs now
+The reference is `therexdev/kaiapp` Test commit [`34d17faa0526213b8fc0ac7a65aa7f2c186c6547`](https://github.com/therexdev/kaiapp/commit/34d17faa0526213b8fc0ac7a65aa7f2c186c6547). This repository starts from that source snapshot; earlier Git history remains in `kaiapp`. Source version numbers and passing development tests do not establish that a corresponding installer has been published or verified on every platform.
 
-- Familiar pearl/cobalt desktop with Chat, Models, Plugins, Wallet, Credits and Usage,
-  Earn KOIN, and the original bottom-left Settings and Network navigation.
-- Simple built-in text chat with separate local/network conversations. Local chat
-  cannot fall back to the network; network chat uses the existing verified credit
-  service and delivery recovery. Advanced tools remain optional plugins.
-- Your Credits shows available balance, purchases and usage; Buy credits opens a
-  separate purchase screen with the existing native quote approval.
-- Wallet restores the original address, KOIN/VHP/Mana balance cards, transaction
-  history, Send/Lock controls and password-protected backup view. Balances and
-  history work while locked; transfers require a password and native review.
-- Earn includes the original Wallet KAI and estimated KOIN Drop amounts beside
-  Reward activity, separate from the paid KOIN rewards and chat credits.
-- All eleven first-party plugins use the original app’s light workspace styling and feature layouts in separate windows. Plugin 0.1.1 updates are available from the signed catalog.
-- Wallet warnings and other action messages have a dismiss button. Dismissed
-  messages stay hidden during background refresh; an explicit retry can show a new result.
-- Closing the window keeps Core and active earning in the system tray. Use the
-  tray icon to reopen it, or **Quit KAI Core** to stop services and release the shared
-  profile. If a tray icon cannot be created, closing the window quits normally.
-- Existing local models/runtime manager and OpenAI-compatible local API.
-- Existing wallet/address, encrypted credential identity, credits and provider services.
-- The same user profile and model paths. Alpha, Test and Core use one Electron lock:
-  fully quit the other app (including its tray process) before starting Core.
-- Verified configuration backup before the new runtime opens an existing profile.
-- Signed plugin packages installed from a file or public HTTPS URL, with native
-  permission review, enable/disable, removal, one-version rollback and isolated storage.
-- Sandboxed plugin windows with an explicit capability broker. Public capabilities:
-  installed-model metadata, bounded local inference, and private plugin JSON data;
-  API 2 adds publisher-bound feature adapters.
-- A separate Core installer ID and updater feed. Preview builds do not publish to
-  either the old app's feed or the Core updater automatically.
+## The desktop
 
-## Development
+Core keeps the familiar pearl/cobalt shell, simple local/network text chat, model installation and runtime management, Wallet, Credits and Usage, Earn KOIN, Plugins, and the original bottom-left Network and Settings navigation. The wallet retains balances, history, sends and native password-protected backup. As in the original app, explicit wallet actions and the opted-in Koinos Node use the blockchain independently of AI Local-Only; they never change AI privacy to enable online AI. Earn retains Wallet KAI and estimated KOIN Drop amounts separately from paid KOIN rewards and chat credits. Settings includes the original website-account linking controls; website and AI-credit identities remain separate.
 
-Requires Node 24 and npm. Run `npm ci`, then `npm start`.
-The desktop uses your existing KAI profile by design. Core must not be launched
-headlessly against that profile; the direct server entry is disabled for this build.
+The full Assistant, Brain, Connections, Workflows, Agent Network, Documents, Model Compare, Code, Tools, Koinos Node and Remote Access experiences live in plugins. Their original screens call reviewed native adapters to the original engines. This includes advanced Assistant modes and desktop companion, scheduled workflows, connected actions, coding commands, tool servers, the full Node wallet/funding/producer controls and the original authenticated remote API. See the [parity matrix and retained limitations](docs/core/PLUGIN_PARITY.md).
 
-`npm test` runs the Core suite; `npm run test:compat` runs the retained wallet,
-model, credit and gateway checks. Some backend integration tests require a separate
-backend checkout and report skips when it is absent.
+Closing the main window hides Core in the tray when a tray is available. **Quit KAI Core** drains native work and releases the shared profile. Background-capable plugins retain their configured services when their windows close; disable/remove stops the feature. Node deliberately preserves the original Docker behavior on Core quit: use **Stop node** to stop containers, or disable/remove the plugin. If a tray cannot be created, closing Core quits normally.
 
-`npm run test:desktop` exercises a temporary synthetic profile through the real
-Electron app. `npm run test:plugin-sandbox` tests the real plugin renderer/broker.
-On Windows, `npm run test:native-profile` checks all Alpha/Test/Core lock combinations
-and reuses a synthetic OS-encrypted credential between separate executables.
+## Existing data
 
-`npm run dist -- --linux --x64` builds a local AppImage. The **Core preview
-installers** GitHub workflow builds Windows, Linux x64/arm64 and macOS artifacts.
-These are preview artifacts, not signed public releases. Platform signing and
-native upgrade verification are required before replacing the old app publicly.
+Core preserves the `Koinos AI` Electron profile/credential identity, wallet/address, model locations and original feature stores. It makes verified configuration backups before opening an existing profile. It does not replace an existing wallet, move model files or automatically restore payment journals. Alpha, Test and Core exclude one another through the shared singleton: fully quit the other application, including its tray process, before starting Core.
 
-## Install the feature plugins
+An installed, enabled, verified 0.2.0-or-later feature can resume its original saved intent at Core startup: for example configured workflow schedules, Brain awareness, approved MCP auto-connect, enabled remote access or existing Node supervision. Installing a feature does not authorize new automation or new spending. Original passwords, grants, step approvals, privacy rules and financial reviews remain applicable. Corrupt, unavailable or externally changed protected data fails closed instead of being silently reset. See [profile compatibility](docs/core/PROFILE_COMPATIBILITY.md).
 
-Core 0.4.5 includes direct install cards for eleven signed first-party plugins in
-**Plugins**. Core checks the signed public
-[plugin registry](https://github.com/therexdev/kai-plugin-registry) at startup and
-every 15 minutes. Returning to the app or opening Plugins checks again when the
-last attempt is at least one minute old; failed checks retry after five minutes.
-**Refresh catalog** also checks immediately. A numbered Plugins badge and update
-cards show installed plugins with newer versions, including disabled plugins.
-The count excludes uninstalled entries, older releases and other publishers;
-updates needing a newer Core are labeled. Checks cover entries in the catalog.
-Catalog installs
-verify the exact package digest, publisher, permissions and Core compatibility.
-Bundled official releases are available before the first registry refresh. After
-loading a catalog, an expired or invalid catalog must be refreshed before choosing
-a catalog release; installed plugins and direct package installation still work.
-Every installation asks you to review permissions; nothing installs automatically.
-Local-Only privacy pauses automatic checks and blocks downloads; a downloaded `.kaiplugin` file can be installed
-under **Install 3rd Party Plugins** at the bottom of the marketplace. Third-party signed packages still use the public API.
+## Install and update plugins
 
-Available repositories: [Assistant](https://github.com/therexdev/kai-plugin-assistant),
-[Brain](https://github.com/therexdev/kai-plugin-brain),
-[Connections](https://github.com/therexdev/kai-plugin-connections),
-[Workflows](https://github.com/therexdev/kai-plugin-workflows),
-[Agent Network](https://github.com/therexdev/kai-plugin-agent-network),
-[Documents](https://github.com/therexdev/kai-plugin-documents),
-[Model Compare](https://github.com/therexdev/kai-plugin-model-compare),
-[Code](https://github.com/therexdev/kai-plugin-code),
-[Tools](https://github.com/therexdev/kai-plugin-tools),
-[Koinos Node](https://github.com/therexdev/kai-plugin-koinos-node), and
-[Remote Access](https://github.com/therexdev/kai-plugin-remote-access).
+Use **Plugins** for the signed catalog. Listings have icons, readable names and descriptions. Core refreshes catalog metadata at startup, every 15 minutes, and on app/Plugins returns with a one-minute throttle; failed checks retry after five minutes. A numbered badge shows installed plugins with newer versions, including disabled plugins. Updates requiring a newer Core remain visible with that requirement.
 
-Their renderers are independently versioned packages. Reviewed native adapters and
-the shared workflow runtime stay in Core. Each private API is bound to its matching
-plugin ID, publisher key and explicit grant. Account tokens and wallet keys remain
-in the native process. Processes/files/account actions receive additional review.
+Catalog refresh does **not** install packages. Every installation/update requires native permission review and verifies its signature, publisher, exact catalog digest and Core compatibility. One previous package is retained for rollback. Removal retains private plugin data and publisher ownership for reinstall. Local-Only pauses catalog checks and downloads; a previously downloaded package can still be selected locally.
 
-## Preview scope
+**Install 3rd Party Plugins** is the expandable form at the bottom of the marketplace. Developers can host signed packages in their own GitHub repositories or other public HTTPS locations and submit entries to the separate [registry](https://github.com/therexdev/kai-plugin-registry). Community plugins use the public API; an unrelated signature cannot claim an official ID or its private feature permissions.
 
-These are preview feature releases, not full legacy feature parity. Built-in simple
-chat keeps conversations in memory for the current app session; the Assistant plugin
-provides saved conversations. The original data remains in the shared profile.
-Assistant supports saved text conversations; legacy desktop mascot/live microphone
-features are not extracted. Workflows runs the supported local/manual graph subset;
-unsafe legacy flows and saved schedules remain preserved and inactive. Agent Network
-supports private free services; external discovery needs a configured compatible
-relay. Paid rental contracts are not deployed or enabled by these plugins. Code edits
-selected project files with native approval and does not run arbitrary shell commands.
-Each repository documents its implemented operations and limits.
+**Core updates remain manual.** Settings starts an update check, asks before downloading, and asks again before restarting to install. Core does not automatically download or install updates. Its installer identity and release feed are separate from Alpha/Test. Availability depends on an actually published compatible release.
 
-Koinos Node reuses saved node settings and paths, with reviewed Docker inspection,
-configuration and explicit start/stop controls. Opening it never resumes production,
-reward automation or wallet operations. Remote Access is opt-in, uses scoped API
-keys and only exposes installed-model listing and bounded local inference through
-the configured relay. It never forwards the private Core API. Both services stop
-when their plugin closes or Local-Only is selected.
+## Development and verification
 
-Platform signing,
-real-install upgrade checks, macOS Keychain and Linux Secret Service continuity still
-need verification before recommending replacement of the old app. Existing profile
-backup and mutual exclusion remain mandatory. No plugin auto-imports wallet funds,
-launches saved MCP servers, resumes legacy schedules or publishes agent services.
+Requires Node 24 and npm:
 
-Legacy source is retained for continued extraction. Speech/mail dependencies remain
-development-only. The shared workflow engine's QuickJS and cron dependencies ship
-with Core, but the workflow broker does not expose native or unrestricted code nodes.
+```sh
+npm ci
+npm start
+npm test
+npm run test:compat
+```
 
-- [Profile compatibility](docs/core/PROFILE_COMPATIBILITY.md)
+The desktop intentionally uses the existing KAI profile. Use the supplied temporary-profile fixtures for unattended testing; do not start a headless server against a real profile. Core's direct server entry is disabled in this build.
+
+`npm run test:plugins` exercises the eleven original plugin workspaces in the actual Electron host with synthetic services. `npm run test:desktop` covers the Core shell, and `npm run test:plugin-sandbox` covers the renderer boundary. Feature-specific tests cover saved-data preservation, approvals, streaming, cancellation, background lifetimes and Node signing/broadcast guards. Native fixtures use generated profiles and controlled transports; they do not spend real funds or publish user services. See [verification scope](docs/core/PLUGIN_PARITY.md#verification-scope).
+
+`npm run test:native-profile` is the separate executable/profile-continuity check. Windows/macOS/Linux packaging, real OS keychains, microphone/camera/voice devices, live relays and real provider integrations need their own native verification. A Linux headless synthetic smoke is not evidence that those work on a user's machine.
+
+`npm run dist -- --linux --x64` builds locally with publication disabled. The **Core preview installers** workflow builds platform artifacts. Source publication, package signing and installer publication are distinct steps; follow the [release gates](docs/core/ARCHITECTURE.md#release-gates) before recommending replacement of an earlier app.
+
+- [Feature parity and original limitations](docs/core/PLUGIN_PARITY.md)
 - [Plugin API and packaging](docs/core/PLUGIN_API.md)
-- [Plugin repositories and extraction order](docs/core/PLUGIN_REPOSITORIES.md)
+- [Plugin repositories](docs/core/PLUGIN_REPOSITORIES.md)
 - [Architecture and release gates](docs/core/ARCHITECTURE.md)

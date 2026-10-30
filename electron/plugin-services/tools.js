@@ -78,7 +78,7 @@ class OwnedConnection extends McpConnection {
     })(); return this.closing;
   }
 }
-function create(ctx) {
+function createPrevious(ctx) {
   const connections = new Map(); let closed = false, busy = false, runtime;
   const mode = () => ctx.core.gateway.network.status().privacyMode;
   function settings() {
@@ -160,4 +160,51 @@ function create(ctx) {
     async dispose() { closed = true; await Promise.all([...connections.keys()].map(disconnect)); },
   };
 }
-module.exports = { pluginId, permissions, create, validateConfig, cleanEnv };
+const previousPermissions = permissions;
+const allPermissions = Object.freeze({ ...permissions, "tools.ui.request": "tools.manage", "tools.ui.poll": "tools.manage", "tools.ui.cancel": "tools.manage", "tools.payment": "tools.execute" });
+function create(ctx) {
+  let previous;
+  const developer = require("./tools-developer").create(ctx);
+  function assertSettings() {
+    const file=path.join(ctx.dataDir,"settings.json");let stat;try{stat=fs.lstatSync(file);}catch(error){if(error.code==="ENOENT")return;throw error;}
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>40*1024*1024)throw Error("Settings need recovery; existing data was preserved");
+    let disk;try{disk=JSON.parse(fs.readFileSync(file,"utf8"));}catch{throw Error("Settings are unreadable; existing data was preserved");}
+    const unchanged=(saved,memory)=>!saved||typeof saved!=="object"||Array.isArray(saved)?isDeepStrictEqual(saved,memory):Object.entries(saved).every(([key,value])=>Object.hasOwn(memory||{},key)&&unchanged(value,memory[key]));
+    if(!unchanged(disk,ctx.core.settings.all()))throw Error("Settings changed outside Core; restart before editing");
+  }
+  const requests = require("./feature-requests").createFeatureRequests(ctx, "tools", async (input, signal) => {
+    if (input.bodyBase64 !== undefined) throw Error("Tools accepts JSON requests only");
+    const pathname = new URL(input.path, "http://127.0.0.1").pathname, method = String(input.method || "GET").toUpperCase();
+    if (require("./tools-developer").isDeveloperPath(pathname)) { assertSettings(); await developer.authorize(input, signal); assertSettings(); return; }
+    if (method === "GET") return;
+    assertSettings();
+    let body = {}; if (input.body) { try { body = typeof input.body === "string" ? JSON.parse(input.body) : input.body; } catch { throw Error("Invalid tool request"); } }
+    let title, detail, reviewedRow;
+    const serverId=pathname.match(/^\/core\/mcp\/([\w-]+)\/(?:connect|flags)$/)?.[1];
+    if (serverId && (pathname.endsWith("/connect") || [body.trusted,body.autoConnect,body.localSafe].includes(true))) {
+      const row=ctx.core.settings.get("mcp.servers",[]).find(item=>item.id===serverId);if(!row)throw Error("Tool server no longer exists");
+      reviewedRow=JSON.stringify(row);
+      title=pathname.endsWith("/connect")?"Start tool server?":"Change tool server permissions?";
+      detail=`${row.name}\n${row.transport==="stdio"?JSON.stringify({command:row.command,args:row.args})+"\nThis local program runs with your user account permissions.":row.url}`;
+      if(body.trusted===true)detail+="\nAllow its tools to act without asking before each use.";
+      if(body.autoConnect===true)detail+="\nStart this server automatically while the Tools plugin is enabled.";
+      if(body.localSafe===true)detail+="\nAllow this program in Local-Only mode. Confirm it operates without network access.";
+    } else if (pathname === "/core/email/send") { title = "Send email?"; detail = JSON.stringify(body, null, 2); }
+    else if (pathname === "/core/calendar/create") { title = "Create calendar event?"; detail = JSON.stringify(body, null, 2); }
+    if (title && !await ctx.confirm(title, detail)) throw Error("Action cancelled");
+    signal.throwIfAborted();assertSettings();
+    if(reviewedRow!==undefined&&JSON.stringify(ctx.core.settings.get("mcp.servers",[]).find(item=>item.id===serverId))!==reviewedRow)throw Error("Tool server changed during review; review its current configuration again");
+  });
+  return { keepAliveOnWindowClose: true,
+    async startBackground() { assertSettings(); await ctx.legacyEnsure?.("tools"); await ctx.core.gateway.mcp?.autoConnect(); },
+    call(method, input, signal) {
+      if (method === "tools.payment") return developer.payment(input, signal);
+      if (method.startsWith("tools.ui.") && Object.hasOwn(allPermissions, method)) return requests[method.slice(9)](input, signal);
+      if (!Object.hasOwn(previousPermissions, method)) throw Error("Unknown Tools operation");
+      previous ||= createPrevious(ctx); return previous.call(method, input, signal);
+    },
+    async dispose() { developer.dispose(); await requests.dispose(); await previous?.dispose(); },
+    async privacyChanged(mode) { await previous?.privacyChanged?.(mode); },
+  };
+}
+module.exports = { pluginId, permissions: allPermissions, create, validateConfig, cleanEnv };

@@ -47,7 +47,7 @@ class ProducerCustody {
     // by the next KAI process.
     const { JsonStore } = require("../store");
     const { DEFAULT_SETTINGS } = require("./constants");
-    const reread = new JsonStore(this.settings.filePath, DEFAULT_SETTINGS);
+    const reread = typeof this.settings.reopen === "function" ? this.settings.reopen() : new JsonStore(this.settings.filePath, DEFAULT_SETTINGS);
     const expectedAddress = mode === "external" ? address : this.wallet.address;
     const persistedMode = reread.get("producer.mode", "local");
     const persistedAddress = mode === "external" ? reread.get(`producer.addresses.${this.chain.network().id}`, "") : this.wallet.address;
@@ -177,6 +177,8 @@ class ProducerCustody {
     return draft;
   }
   async broadcast({ transaction, confirm }) {
+    const assertActive = require("./operation-lifetime").captureOperation();
+    assertActive();
     this.requireExternal();
     if (confirm !== true) throw new Error("Review and confirm the signed transaction before broadcasting.");
     const draft = this.state.get("producerDraft", null);
@@ -201,6 +203,7 @@ class ProducerCustody {
         throw Error("The external signing request changed during nonce validation");
       if (draft.summary.action === "register" && draft.summary.publicKey !== this.hotPublicKey()) throw Error("The hot key changed during nonce validation");
     }
+    assertActive();
     this.state.set("producerDraft", null);
     const tx = new Transaction({ provider, transaction });
     await tx.send();

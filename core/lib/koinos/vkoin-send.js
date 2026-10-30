@@ -7,6 +7,7 @@
 // Mirrors usdt-send.js; gas is paid in ETH. REAL vKOIN moves in sendVkoin().
 
 const { ethers } = require("ethers");
+const { createEvmWallet } = require("./operation-lifetime");
 const { requireValidTo } = require("./eth-send");
 const { makeProvider } = require("./eth-bridge");
 const { VKOIN, VKOIN_DECIMALS } = require("./route-constants");
@@ -87,7 +88,7 @@ async function sendVkoin({ ethPrivHex, amountVkoin, toAddress, provider, maxVkoi
     throw new Error(`Amount ${formatVkoin(sats)} vKOIN exceeds the safety cap of ${maxVkoin} vKOIN`);
   }
   const p = provider || (await makeProvider());
-  const wallet = new ethers.Wallet(priv, p);
+  const wallet = createEvmWallet(priv, p);
   const c = new ethers.Contract(VKOIN, VKOIN_ABI, wallet);
   const [bal, ethBal] = await Promise.all([c.balanceOf(wallet.address), p.getBalance(wallet.address)]);
   if (bal < sats) throw new Error("Insufficient vKOIN balance");

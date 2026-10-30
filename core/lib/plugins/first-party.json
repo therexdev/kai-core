@@ -3,102 +3,124 @@
   "plugins": [
     {
       "id": "kai.assistant",
-      "name": "Assistant",
-      "version": "0.1.1",
+      "name": "KAI Assistant",
+      "version": "0.2.0",
       "repository": "therexdev/kai-plugin-assistant",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-assistant/releases/download/v0.1.1/kai-plugin-assistant-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-assistant/releases/download/v0.2.0/kai-plugin-assistant-0.2.0.kaiplugin",
+      "description": "The original KAI chat workspace, advanced agents and research, desktop providers, voice and animated desktop companion.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.brain",
       "name": "Brain",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "repository": "therexdev/kai-plugin-brain",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-brain/releases/download/v0.1.1/kai-plugin-brain-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-brain/releases/download/v0.2.0/kai-plugin-brain-0.2.0.kaiplugin",
+      "description": "The original complete Brain workspace: memories, graph, goals, sources, awareness, orchestration and your existing encrypted data.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.connections",
-      "name": "Connections",
-      "version": "0.1.1",
+      "name": "KAI Connections",
+      "version": "0.2.0",
       "repository": "therexdev/kai-plugin-connections",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-connections/releases/download/v0.1.1/kai-plugin-connections-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-connections/releases/download/v0.2.0/kai-plugin-connections-0.2.0.kaiplugin",
+      "description": "The original complete Connections workspace: app catalog, account sign-in, selected actions, custom APIs and encrypted credentials.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.workflows",
       "name": "Workflows",
-      "version": "0.1.1",
+      "version": "0.2.1",
       "repository": "therexdev/kai-plugin-workflows",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-workflows/releases/download/v0.1.1/kai-plugin-workflows-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-workflows/releases/download/v0.2.1/kai-plugin-workflows-0.2.1.kaiplugin",
+      "description": "The original workflow builder and runtime: reusable agents, full graphs, schedules, event triggers, tools, connections, approvals and run history.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.agent-network",
       "name": "Agent Network",
-      "version": "0.1.1",
+      "version": "0.2.1",
       "repository": "therexdev/kai-plugin-agent-network",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-agent-network/releases/download/v0.1.1/kai-plugin-agent-network-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-agent-network/releases/download/v0.2.1/kai-plugin-agent-network-0.2.1.kaiplugin",
+      "description": "Create isolated private AI services, share signed invitations, discover configured relays, and review free service jobs. Paid rentals are not enabled.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.documents",
       "name": "Documents",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "repository": "therexdev/kai-plugin-documents",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-documents/releases/download/v0.1.1/kai-plugin-documents-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-documents/releases/download/v0.2.0/kai-plugin-documents-0.2.0.kaiplugin",
+      "description": "The original local writing workspace with autosave, selection-aware AI edits, streamed suggestions, Apply/Discard/Stop, and native document import/export.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.model-compare",
-      "name": "Model Compare",
-      "version": "0.1.1",
+      "name": "KAI Model Compare",
+      "version": "0.2.0",
       "repository": "therexdev/kai-plugin-model-compare",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-model-compare/releases/download/v0.1.1/kai-plugin-model-compare-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-model-compare/releases/download/v0.2.0/kai-plugin-model-compare-0.2.0.kaiplugin",
+      "description": "The original blind A/B model comparison: prompt presets, local and network models, streaming responses, timings, reveal and saved voting scores.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.code",
-      "name": "Code",
-      "version": "0.1.1",
+      "name": "Koinos Code",
+      "version": "0.2.0",
       "repository": "therexdev/kai-plugin-code",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-code/releases/download/v0.1.1/kai-plugin-code-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-code/releases/download/v0.2.0/kai-plugin-code-0.2.0.kaiplugin",
+      "description": "The complete original coding workspace: projects and conversations, plan-first coding, reviewed file changes and commands, project tools, slash commands, and GitHub.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.tools",
-      "name": "Tools",
-      "version": "0.1.1",
+      "name": "KAI Tools",
+      "version": "0.2.0",
       "repository": "therexdev/kai-plugin-tools",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-tools/releases/download/v0.1.1/kai-plugin-tools-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-tools/releases/download/v0.2.0/kai-plugin-tools-0.2.0.kaiplugin",
+      "description": "The original Tools and Developer Tools workspaces: MCP, email, calendar, saved agent teams, pipelines, playground and benchmarks.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.koinos-node",
-      "name": "Koinos Node",
-      "version": "0.1.1",
+      "name": "KAI Koinos Node",
+      "version": "0.2.0",
       "repository": "therexdev/kai-plugin-koinos-node",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-koinos-node/releases/download/v0.1.1/kai-plugin-koinos-node-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-koinos-node/releases/download/v0.2.0/kai-plugin-koinos-node-0.2.0.kaiplugin",
+      "description": "The complete Koinos Node workspace: wallet, funding, block production, external signing, quick sync, recovery and reward history.",
+      "minCoreVersion": "0.5.0"
     },
     {
       "id": "kai.remote-access",
-      "name": "Remote Access",
-      "version": "0.1.1",
+      "name": "KAI Remote Access",
+      "version": "0.2.0",
       "repository": "therexdev/kai-plugin-remote-access",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-remote-access/releases/download/v0.1.1/kai-plugin-remote-access-0.1.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-remote-access/releases/download/v0.2.0/kai-plugin-remote-access-0.2.0.kaiplugin",
+      "description": "The original Local API workspace with API keys, budgets, usage, privacy controls and optional remote relay access.",
+      "minCoreVersion": "0.5.0"
     }
   ]
 }
