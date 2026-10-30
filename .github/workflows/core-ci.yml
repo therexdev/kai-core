@@ -49,10 +49,10 @@ jobs:
         run: npm run test:desktop
       - name: Verify persistent Apps navigation (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test:apps
+        run: xvfb-run -a npm run test:apps -- --download
       - name: Verify persistent Apps navigation (Windows and macOS)
         if: runner.os != 'Linux'
-        run: npm run test:apps
+        run: npm run test:apps -- --download
       - name: Verify all published plugins (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:plugins -- --download

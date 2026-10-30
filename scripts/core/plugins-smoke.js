@@ -333,7 +333,9 @@ app.whenReady().then(async () => {
   chats.save({ id: "synthetic-legacy-chat", title: "Earlier synthetic chat", messages: [{ role: "user", content: "A preserved synthetic conversation." }] });
   fs.mkdirSync(path.join(dataDir, "docs"));
   fs.writeFileSync(path.join(dataDir, "docs", "synthetic-legacy-doc.json"), JSON.stringify({ id: "synthetic-legacy-doc", title: "Earlier synthetic document", content: "A preserved synthetic document.", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
-  core = await fromCore("core/server").createCore({ dataDir, extensions: false, port: 0, sessionSecret: "synthetic-plugin-smoke-profile-secret", onEvent() {} });
+  // Use the production Core shell. A legacy ../ui fallback can accidentally
+  // serve companion files that a restored feature forgot to mount itself.
+  core = await fromCore("core/server").createCore({ dataDir, extensions: false, uiDirectory: path.join(coreRoot, "ui-core"), port: 0, sessionSecret: "synthetic-plugin-smoke-profile-secret", onEvent() {} });
   await core.start();
   core.gateway.nodeRuntime = new (fromCore("core/lib/node-runtime").NodeRuntime)({ provisioner: null, runtimesDir: path.join(dataDir, "runtimes"), probeSystemNode: () => null });
   core.models.aliases = () => models;

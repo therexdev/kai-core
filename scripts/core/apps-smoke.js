@@ -14,6 +14,19 @@ async function main() {
   const output = process.env.KAI_APPS_SMOKE_OUTPUT || path.join(os.tmpdir(), "kai-apps-smoke");
   const appData = path.join(root, "app-data"), dataDir = path.join(appData, "Koinos AI", "core");
   fs.mkdirSync(dataDir, { recursive: true }); fs.mkdirSync(output, { recursive: true });
+  const assistantRelease = require("../../core/lib/plugins/first-party.json").plugins.find(plugin => plugin.id === "kai.assistant");
+  let assistantPackage = path.resolve(process.env.KAI_PLUGIN_SOURCES || path.join(appRoot, ".."), `kai-plugin-assistant/dist/kai-plugin-assistant-${assistantRelease.version}.kaiplugin`);
+  if (!fs.existsSync(assistantPackage) && process.argv.includes("--download")) {
+    // Fixture preparation happens before Electron or its network-denying test
+    // profile starts. Only the immutable, pinned Assistant release is fetched.
+    const verified = await require("../../core/lib/plugins/download").downloadPackage(assistantRelease.url);
+    assert.equal(verified.manifest.id, assistantRelease.id);
+    assert.equal(verified.manifest.version, assistantRelease.version);
+    assert.equal(verified.fingerprint, assistantRelease.fingerprint);
+    assert.equal(verified.package.publicKey, assistantRelease.publicKey);
+    assistantPackage = path.join(root, "assistant.kaiplugin");
+    fs.writeFileSync(assistantPackage, JSON.stringify(verified.package));
+  }
   fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ network: { privacyMode: "local-only" }, earn: { autoStart: false }, fixture: "apps-smoke" }));
   fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "kai-apps-smoke", version: require("../../package.json").version, main: "desktop.js" }));
   const key = crypto.generateKeyPairSync("ed25519");
@@ -41,6 +54,10 @@ electron.app.setPath('appData',${JSON.stringify(appData)});electron.app.disableH
 ${process.env.KAI_SMOKE_SYNTHETIC_LOCK === "1" ? "electron.app.requestSingleInstanceLock=()=>true; // Fixture only: container blocks Unix sockets." : ""}
 electron.dialog.showErrorBox=(title,message)=>console.error('APPS_STARTUP_ERROR',title,message);
 require(${JSON.stringify(path.join(__dirname, "desktop-fixture.js"))}).install({appRoot:${JSON.stringify(appRoot)}});
+if(process.platform==='linux'&&!process.env.DISPLAY)electron.app.whenReady().then(()=>{
+ const nearest=electron.screen.getDisplayNearestPoint.bind(electron.screen);
+ electron.screen.getDisplayNearestPoint=point=>{const display=nearest(point);return display.workArea.width<=1||display.workArea.height<=1?{...display,workArea:{x:0,y:0,width:1280,height:900}}:display;};
+});
 const managerModule=require(${JSON.stringify(path.join(appRoot, "core/lib/plugins/manager.js"))});
 const FixtureManager=managerModule.PluginManager;
 managerModule.PluginManager=class extends FixtureManager{constructor(...args){super(...args);if(process.env.KAI_APPS_EMPTY==='1')for(const row of this.list())this.change(row.id,'remove');}};
@@ -316,6 +333,54 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
       report.screenshots.push(pluginScreenshot);
       report.checks.push("Original signed Compare app opens as an embedded sidebar page");
     }
+    if (fs.existsSync(assistantPackage)) {
+      await check("Signed Assistant launches the initialized desktop companion from its embedded Apps page", async () => {
+        await install(assistantPackage); await page.locator('[data-app="kai.assistant"]').click();
+        await until(async () => (await state()).records.some(item => item.id === "kai.assistant" && item.visible), "Embedded Assistant did not open");
+        await until(async () => evaluateApp("kai.assistant", "document.getElementById('model-pick')?.options.length > 0"), "Assistant model choices did not load");
+        if (await evaluateApp("kai.assistant", "document.getElementById('language-dialog')?.open === true")) {
+          await evaluateApp("kai.assistant", "document.getElementById('first-language').value='en';document.getElementById('language-continue').click();void 0");
+        }
+        const before = (await state()).records.find(item => item.id === "kai.assistant");
+        assert.equal(before.embedded, true); assert.equal(before.ownerId, (await state()).mainId);
+        const opened = application.waitForEvent("window");
+        await evaluateApp("kai.assistant", "document.getElementById('launch-kai').click();void 0");
+        const mascot = await opened;
+        mascot.on("pageerror", error => errors.push("Desktop companion: " + error.message));
+        await mascot.waitForURL(/\/mascot\.html$/);
+        await mascot.waitForFunction(() => !!window.kaiLiveDiagnostics && !!document.querySelector("#kai-art svg") && [...document.getElementById("model").options].some(option => option.value === "smoke-local"));
+        assert.deepEqual(await mascot.evaluate(() => ({ node: typeof require, process: typeof process, core: typeof window.kaiCore, desktop: typeof window.kaiDesktop?.expand })),
+          { node: "undefined", process: "undefined", core: "undefined", desktop: "function" });
+        const script = await mascot.evaluate(async () => { const response = await fetch("mascot.js"); return { status: response.status, type: response.headers.get("content-type"), loaded: performance.getEntriesByType("resource").some(entry => entry.initiatorType === "script" && new URL(entry.name).pathname === "/mascot.js") }; });
+        assert.equal(script.status, 200); assert.match(script.type, /javascript/); assert.equal(script.loaded, true);
+        await until(async () => !(await state()).visible, "Successful desktop launch did not hide Core to tray");
+        assert.equal(await evaluateApp("kai.assistant", "document.getElementById('kai-launch-error').hidden"), true);
+        await mascot.evaluate(() => document.getElementById("later-pocket").click());
+        await mascot.waitForFunction(() => document.getElementById("pocket-card").hidden);
+        await mascot.evaluate(() => document.getElementById("toggle-chat").click());
+        await mascot.waitForFunction(() => document.body.classList.contains("expanded") && document.getElementById("toggle-chat").getAttribute("aria-expanded") === "true");
+        await mascot.evaluate(() => document.getElementById("question").value = "Preserved desktop draft");
+        const screenshot = path.join(output, "apps-assistant-companion.png");
+        await mascot.screenshot({ path: screenshot, fullPage: false }); report.screenshots.push(screenshot);
+        // Navigation comes from the original native companion bridge and must
+        // restore the existing embedded Assistant, never create a second one.
+        const navigation = await mascot.evaluate(() => window.kaiDesktop.navigate("chat"));
+        assert.equal(navigation.ok, true);
+        await until(async () => (await state()).visible && (await state()).records.some(item => item.id === "kai.assistant" && item.visible), "Companion navigation did not restore embedded Assistant");
+        assert.equal((await state()).records.find(item => item.id === "kai.assistant").wcId, before.wcId);
+        await page.locator('[data-page="chat"]').click();
+        await application.evaluate(() => global.__smokeMainWindow.close());
+        await until(async () => !(await state()).visible, "Core did not return to tray");
+        assert.equal(mascot.isClosed(), false);
+        assert.equal(await mascot.evaluate(() => document.getElementById("question").value), "Preserved desktop draft");
+        await application.evaluate(() => global.__smokeTrayMenu.find(item => item.label === "Open KAI Core").click());
+        await until(async () => (await state()).visible, "Tray did not restore Core after desktop launch");
+        await page.evaluate(() => window.kaiCore.call("plugins.change", { id: "kai.assistant", action: "disable" }));
+        await until(async () => mascot.isClosed(), "Disabling Assistant left its desktop companion alive");
+        assert.equal((await state()).records.some(item => item.id === "kai.assistant"), false);
+        await page.evaluate(() => refresh());
+      });
+    } else report.assistantSkipped = "Signed Assistant package not present; use --download to run the embedded desktop launch regression.";
     await check("Removing the final installed app hides the Apps section", async () => {
       const installed = (await page.evaluate(() => window.kaiCore.call("status"))).plugins;
       for (const row of installed) await page.evaluate(id => window.kaiCore.call("plugins.change", { id, action: "remove" }), row.id);

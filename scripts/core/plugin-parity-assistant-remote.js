@@ -57,10 +57,24 @@ async function assistant(win, h) {
   assert.equal(framed.allowed, false, "A child frame cannot inherit the top-level microphone grant");
   assert.ok(fixture.mediaPermissionRequests.some(item => item.isMainFrame === true && item.requestingUrl === "kai-plugin://kai.assistant/index.html" && item.mediaTypes.includes("audio") && item.allowed === true));
   assert.ok(fixture.mediaPermissionChecks.some(item => item.isMainFrame === true && item.requestingUrl === "kai-plugin://kai.assistant/index.html" && item.mediaType === "audio" && item.allowed === true));
-  await call(win, "assistant.native", { action: "mascot:launch", args: [{ model: "synthetic-a" }] });
+  await fill(win, { "src-pick": "local" });
+  await until(win, "[...document.getElementById('model-pick').options].some(option=>option.value==='synthetic-a')", "Local companion launch model");
+  await fill(win, { "model-pick": "synthetic-a" });
+  await click(win, "#launch-kai");
+  await until(win, "!document.getElementById('launch-kai').disabled", "Assistant launch button completes");
+  assert.equal(await js(win, "document.getElementById('kai-launch-error').hidden"), true, "The real Assistant launcher must succeed");
   const mascot = require("electron").BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === `http://127.0.0.1:${h.core.gateway.port}/mascot.html`);
   assert.ok(mascot, "Original dedicated companion window opens");
+  assert.equal(await js(mascot, "performance.getEntriesByType('resource').some(entry=>entry.initiatorType==='script' && new URL(entry.name).pathname==='/mascot.js')"), true, "Companion HTML must request its runtime script");
+  const runtimeAsset = await js(mascot, "fetch('/mascot.js').then(async response=>({status:response.status,bytes:(await response.arrayBuffer()).byteLength}))");
+  assert.equal(runtimeAsset.status, 200, "Companion runtime must be served with the production Core UI directory");
+  assert.ok(runtimeAsset.bytes > 0, "Companion runtime must not be empty");
   await until(mascot, "!!document.querySelector('#kai-art svg')", "Original companion artwork");
+  await until(mascot, "typeof document.getElementById('mascot-menu-button').onclick==='function' && [...document.getElementById('model').options].some(option=>option.value==='synthetic-a')", "Original companion initializes interactive controls and models");
+  await click(mascot, "#mascot-menu-button");
+  assert.equal(await js(mascot, "document.getElementById('mascot-menu').hidden"), false, "Companion menu responds after launch");
+  await click(mascot, "#mascot-menu-button");
+  assert.equal(await js(mascot, "document.getElementById('mascot-menu').hidden"), true);
   const servedAssets = await js(mascot, `Promise.all(${JSON.stringify([...liveAssets.keys()])}.map(async route=>{const r=await fetch(route);return {route,status:r.status,bytes:(await r.arrayBuffer()).byteLength};}))`);
   for (const asset of servedAssets) { assert.equal(asset.status, 200, asset.route); assert.ok(asset.bytes > 0, asset.route); }
   assert.equal(await js(mascot, "typeof require"), "undefined");
