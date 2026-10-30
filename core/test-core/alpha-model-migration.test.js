@@ -10,7 +10,7 @@ const { inspectAlphaModels, migrateAlphaModels } = require("../lib/alpha-model-m
 const sha = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 const gguf = (value, size = 96) => { const bytes = Buffer.alloc(size, value); bytes.write("GGUF"); return bytes; };
 function fixture(t, { vision = false, payload = gguf(1) } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-alpha-models-"));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kai-alpha-models-")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const sourceDir = path.join(root, "alpha"), coreDir = path.join(root, "foundation");
   fs.mkdirSync(path.join(sourceDir, "models"), { recursive: true });
