@@ -173,9 +173,11 @@ class CreditService {
     if (auth.sessionOnly && this.sessionIdentity !== sessionIdentity) {
       this.sessionStore?.dispose(); this.sessionStore = new (require("./session-free-chat").SessionFreeChatStore)(); this.sessionIdentity = sessionIdentity;
     } else if (!auth.sessionOnly && this.sessionStore) { this.sessionStore.dispose(); this.sessionStore = null; this.sessionIdentity = null; }
+    const providerWallets = () => this.providerWallets(auth);
+    const enforcedProviderWallets = () => auth.deviceFree ? [] : auth.ownershipWallets || [];
     const make = (cfg, dir) => auth.sessionOnly
-      ? new (require("./session-free-chat").SessionFreeChat)({ config: cfg, file: path.join(dir, "chat-session-free.json"), sessionStore: this.sessionStore, access, fetchImpl: this.fetchImpl, progress: this.progress })
-      : new PrepaidChat({ config: cfg, file: path.join(dir, "chat.json"), storage: this.storage, access, fetchImpl: this.fetchImpl, progress: this.progress });
+      ? new (require("./session-free-chat").SessionFreeChat)({ config: cfg, file: path.join(dir, "chat-session-free.json"), sessionStore: this.sessionStore, access, fetchImpl: this.fetchImpl, progress: this.progress, providerWallets, enforcedProviderWallets })
+      : new PrepaidChat({ config: cfg, file: path.join(dir, "chat.json"), storage: this.storage, access, fetchImpl: this.fetchImpl, progress: this.progress, providerWallets, enforcedProviderWallets });
     const flow = make(config, directory), recoverable = [], contexts = [{ config, directory }];
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !/^[a-f0-9]{64}$/.test(entry.name)) continue;
@@ -192,13 +194,14 @@ class CreditService {
     if (!auth.sessionOnly && fs.existsSync(earlierConfig) && fs.statSync(earlierConfig).size <= 16384) {
       const saved = configuration(JSON.parse(fs.readFileSync(earlierConfig, "utf8")));
       if (saved.owner === auth.owner && saved.schedulerUrl === config.schedulerUrl && JSON.stringify(saved.deployment) === JSON.stringify(config.deployment)) {
-        const candidate = new PrepaidChat({ config: saved, file: path.join(earlierRoot, "prepaid-chat-recovery.json"), storage: this.storage, access, fetchImpl: this.fetchImpl, progress: this.progress });
+        const candidate = new PrepaidChat({ config: saved, file: path.join(earlierRoot, "prepaid-chat-recovery.json"), storage: this.storage, access, fetchImpl: this.fetchImpl, progress: this.progress, providerWallets, enforcedProviderWallets });
         const record = candidate.read();
         if (record && ["pending", "answered"].includes(record.state)) recoverable.unshift({ flow: candidate, record });
       }
     }
     return { config, flow, auth, recoverable, directory, contexts };
   }
+  providerWallets(auth) { return [this.account.wallet?.address, auth?.localWallet, ...(auth?.ownershipWallets || [])]; }
   async purchaseState(c, signal) {
     let localPurchase;
     try { localPurchase = await this.purchases.status(c, signal); }
@@ -271,7 +274,7 @@ class CreditService {
       }
       return c.auth?.deviceFree ? { ...result, accessKind: "device-free", paidAccessLocked: Boolean(this.account.wallet?.address || this.account.file && fs.existsSync(this.account.file)) } : result;
     }
-    if (action === "network-overview") return c.flow.call("network", {}, signal);
+    if (action === "network-overview") return c.flow.network(signal);
     if (action === "chat-estimate") return c.flow.estimate(input, signal);
     if (action === "chat-recover") {
       const saved = c.recoverable.at(-1); if (!saved) return { state: "none" };

@@ -11,7 +11,7 @@ function trustedFrame(event, window, origin) {
 
 // A second view of the same running Core. Hiding either window never stops the
 // node, changes the wallet, or creates another model/runtime process.
-function createMascotController({ BrowserWindow, screen, desktopCapturer, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, hasTray = () => true, globalShortcut, describeModel = () => null, pocketVoice: suppliedPocketVoice }) {
+function createMascotController({ BrowserWindow, screen, desktopCapturer, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, getMainWebContents, hasTray = () => true, globalShortcut, describeModel = () => null, pocketVoice: suppliedPocketVoice }) {
   const actions = app && dialog ? require("./desktop-actions").createFolderActions({ app, dialog, shell }) : null;
   const approval = dialog ? require("./tool-approval").createToolApproval({ dialog }) : null;
   const navigation = require("../ui/app-navigation");
@@ -151,7 +151,8 @@ function createMascotController({ BrowserWindow, screen, desktopCapturer, ipcMai
     if (!main || main.isDestroyed()) return { ok: false, error: "The main app window is unavailable." };
     if (main.isMinimized()) main.restore();
     main.show(); main.focus();
-    main.webContents.send("mascot:open-view", navigation.valid(view) ? view : "chat");
+    const contents = getMainWebContents ? getMainWebContents() : main.webContents;
+    if (contents && !contents.isDestroyed?.()) contents.send("mascot:open-view", navigation.valid(view) ? view : "chat");
     return { ok: true, view: navigation.valid(view) ? view : "chat", note: "Main window opened. Disabled feature screens show their Settings switch first." };
   }
   function on(channel, fn) {

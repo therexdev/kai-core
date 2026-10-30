@@ -4,16 +4,73 @@ const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css
 Object.assign(MIME, { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".wav": "audio/wav", ".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".woff": "font/woff", ".woff2": "font/woff2" });
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; worker-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 class PluginHost {
-  constructor({ electron, manager, core, features }) {
-    Object.assign(this, { electron, manager, core, features }); this.windows = new Map(); this.active = 0;
+  constructor({ electron, manager, core, features, getContainerWindow, onActivate }) {
+    Object.assign(this, { electron, manager, core, features, getContainerWindow, onActivate });
+    this.windows = new Map(); this.openings = new Map(); this.active = 0; this.selected = null; this.activation = 0; this.bounds = null;
     electron.ipcMain.handle("kai-plugin:call", (event, method, input) => this.call(event, method, input));
+    const container = getContainerWindow?.();
+    if (container) {
+      this.resize = () => this.applyBounds();
+      container.on("resize", this.resize);
+      container.webContents.on("zoom-changed", this.resize);
+      // A Core reload must never leave an app covering a newly loaded Core page.
+      container.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) this.hide(); });
+    }
   }
-  async open(id) {
+  renderer(id) { return this.windows.get(id)?.webContents; }
+  isVisible(id) { const record = this.windows.get(id); return !!record && !record.window.isDestroyed() && record.window.isVisible() && !record.window.isMinimized() && (!record.view || this.selected === id && record.view.getVisible()); }
+  async open(id, bounds) {
+    if (typeof id !== "string") throw Error("Choose an installed app");
+    const activation = ++this.activation;
+    if (this.getContainerWindow) { this.selected = null; this.hideViews(); }
     await this.features?.closeTasks?.get(id);
-    const existing = this.windows.get(id); if (existing) { existing.window.show(); existing.window.focus(); return; }
-    const { manifest, package: pkg, fingerprint } = this.manager.load(id);
+    // Revalidate even an already-running app before activating it.
+    const verified = this.manager.load(id);
+    if (activation !== this.activation) return { opened: false };
+    if (this.getContainerWindow) {
+      this.hideViews(); this.selected = id;
+      if (bounds) this.setBounds(bounds, id);
+      this.onActivate?.({ page: "app", id, name: verified.manifest.name });
+    }
+    let pending = this.openings.get(id);
+    if (!this.windows.has(id) && !pending) {
+      pending = this.create(id, verified); this.openings.set(id, pending);
+      void pending.finally(() => { if (this.openings.get(id) === pending) this.openings.delete(id); }).catch(() => {});
+    }
+    try { if (pending) await pending; }
+    catch (error) {
+      if (activation === this.activation && this.getContainerWindow) { this.hide(); this.onActivate?.({ page: "plugins", error: error.message }); }
+      throw error;
+    }
+    const record = this.windows.get(id);
+    if (!record || activation !== this.activation) return { opened: false };
+    if (record.view) {
+      this.applyBounds();
+      if (record.window.isMinimized()) record.window.restore();
+      record.window.show(); record.window.focus(); record.webContents.focus();
+    } else { record.window.show(); record.window.focus(); }
+    return { opened: true, id };
+  }
+  setBounds(bounds, id) {
+    if (id && id !== this.selected) return { updated: false };
+    if (!bounds || typeof bounds !== "object" || Array.isArray(bounds) || Object.keys(bounds).some(key => !["x", "y", "width", "height"].includes(key)) ||
+        ["x", "y", "width", "height"].some(key => !Number.isFinite(bounds[key]) || bounds[key] < 0 || bounds[key] > 32768)) throw Error("Invalid app bounds");
+    this.bounds = Object.fromEntries(Object.entries(bounds).map(([key, value]) => [key, Math.round(value)]));
+    this.applyBounds(); return { updated: true };
+  }
+  applyBounds() {
+    const record = this.windows.get(this.selected), window = this.getContainerWindow?.();
+    if (!record?.view || !this.bounds || !window || window.isDestroyed()) return;
+    const [width, height] = window.getContentSize(), scale = window.webContents.getZoomFactor();
+    const x = Math.min(width, Math.round(this.bounds.x * scale)), y = Math.min(height, Math.round(this.bounds.y * scale));
+    const bounds = { x, y, width: Math.max(0, Math.min(width - x, Math.round(this.bounds.width * scale))), height: Math.max(0, Math.min(height - y, Math.round(this.bounds.height * scale))) };
+    record.view.setBounds(bounds); record.view.setVisible(record.ready && bounds.width > 0 && bounds.height > 0);
+  }
+  hideViews() { for (const record of this.windows.values()) if (record.view) record.view.setVisible(false); }
+  hide() { ++this.activation; this.selected = null; this.hideViews(); return { hidden: true }; }
+  async create(id, { manifest, package: pkg, fingerprint }) {
     const official = require("../core/lib/plugins/first-party.json").plugins.some(p => p.id === id && p.fingerprint === fingerprint);
-    if (!official && [...this.windows.values()].filter(record => !record.official).length >= 8) throw Error("Close a third-party plugin window before opening another (limit: 8)");
+    if (!official && [...this.windows.values()].filter(record => !record.official).length >= 8) throw Error("Disable an unused third-party app before opening another (limit: 8)");
     const assistantMedia = official && id === "kai.assistant" && manifest.permissions.includes("assistant.media");
     const csp = official ? CSP.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'") + "; font-src 'self'; media-src 'self' blob:" : CSP;
     const session = this.electron.session.fromPartition(`kai-plugin-${crypto.randomUUID()}`);
@@ -33,21 +90,26 @@ class PluginHost {
       const binary = require("../core/lib/plugins/package").BINARY.test(file);
       return new Response(binary ? Buffer.from(pkg.files[file], "base64") : pkg.files[file], { headers: { "content-type": `${MIME[path.extname(file)] || "text/plain"}${binary ? "" : "; charset=utf-8"}`, "content-security-policy": csp, "x-content-type-options": "nosniff" } });
     });
-    const window = new this.electron.BrowserWindow({ width: 1000, height: 760, title: manifest.name, backgroundColor: "#f4f7fd", show: false,
-      webPreferences: { session, preload: path.join(__dirname, "core-plugin-preload.js"), sandbox: true, nodeIntegration: false, contextIsolation: true, webSecurity: true, webviewTag: false, devTools: false } });
+    const preferences = { session, preload: path.join(__dirname, "core-plugin-preload.js"), sandbox: true, nodeIntegration: false, contextIsolation: true, webSecurity: true, webviewTag: false, devTools: false, backgroundThrottling: false };
+    const container = this.getContainerWindow?.();
+    if (this.getContainerWindow && (!container || container.isDestroyed())) throw Error("Core window is unavailable");
+    const view = container ? new this.electron.WebContentsView({ webPreferences: preferences }) : null;
+    const window = container || new this.electron.BrowserWindow({ width: 1000, height: 760, title: manifest.name, backgroundColor: "#f4f7fd", show: false, webPreferences: preferences });
+    const webContents = view?.webContents || window.webContents;
+    if (view) { view.setBackgroundColor("#f4f7fd"); view.setVisible(false); container.contentView.addChildView(view); }
     // WebRTC UDP is not an HTTP request and cannot be filtered by webRequest.
-    window.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
-    const record = { window, manifest, entry, fingerprint, official, controller: new AbortController(), busy: false, calls: [] };
+    webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
+    const record = { window, view, webContents, manifest, entry, fingerprint, official, controller: new AbortController(), busy: false, calls: [], ready: false };
     this.windows.set(id, record);
     if (assistantMedia) {
       const granted = new Set();
-      session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permission === "media" && wc === window.webContents && [origin, origin + "/"].includes(requestingOrigin) && details?.isMainFrame === true && details.requestingUrl === entry && window.webContents.mainFrame.url === entry && !record.controller.signal.aborted && !!this.manager.state.installed[id]?.enabled && granted.has(details?.mediaType));
+      session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permission === "media" && wc === webContents && [origin, origin + "/"].includes(requestingOrigin) && details?.isMainFrame === true && details.requestingUrl === entry && webContents.mainFrame.url === entry && !record.controller.signal.aborted && !!this.manager.state.installed[id]?.enabled && granted.has(details?.mediaType));
       session.setPermissionRequestHandler(async (wc, permission, callback, details) => {
         const types = details?.mediaTypes || [];
-        if (permission !== "media" || wc !== window.webContents || details?.isMainFrame !== true || details.requestingUrl !== entry || wc.mainFrame.url !== entry || !types.length || types.some(type => !["audio", "video"].includes(type)) || record.controller.signal.aborted || !this.manager.state.installed[id]?.enabled) return callback(false);
+        if (permission !== "media" || wc !== webContents || details?.isMainFrame !== true || details.requestingUrl !== entry || wc.mainFrame.url !== entry || !types.length || types.some(type => !["audio", "video"].includes(type)) || record.controller.signal.aborted || !this.manager.state.installed[id]?.enabled) return callback(false);
         try {
           if (!types.every(type => granted.has(type))) {
-            const answer = await this.electron.dialog.showMessageBox(window, { type: "question", title: "KAI Assistant media access", message: `Allow KAI Assistant to use your ${types.map(type => type === "audio" ? "microphone" : "camera").join(" and ")}?`, detail: "Access is used for the voice or camera feature you start. This permission lasts until this Assistant window closes.", buttons: ["Cancel", "Allow"], defaultId: 0, cancelId: 0 });
+            const answer = await this.electron.dialog.showMessageBox(window, { type: "question", title: "KAI Assistant media access", message: `Allow KAI Assistant to use your ${types.map(type => type === "audio" ? "microphone" : "camera").join(" and ")}?`, detail: "Access is used for the voice or camera feature you start. This permission lasts until KAI quits or Assistant is disabled or updated.", buttons: ["Cancel", "Allow"], defaultId: 0, cancelId: 0 });
             if (answer.response !== 1 || record.controller.signal.aborted || wc.mainFrame.url !== entry || !this.manager.state.installed[id]?.enabled) return callback(false);
             types.forEach(type => granted.add(type));
           }
@@ -55,15 +117,38 @@ class PluginHost {
         } catch { callback(false); }
       });
     }
-    window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    for (const action of ["will-navigate", "will-redirect", "will-attach-webview"]) window.webContents.on(action, event => event.preventDefault());
-    window.once("closed", () => { record.controller.abort(); this.windows.delete(id); void (this.features?.detachWindow?.(id) || this.features?.close(id))?.catch(error => console.warn("[plugin]", error.message)); session.protocol.unhandle("kai-plugin"); void session.clearStorageData().catch(() => {}); });
-    try { await window.loadURL(entry); window.show(); } catch (error) { window.destroy(); throw error; }
+    webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    for (const action of ["will-navigate", "will-redirect", "will-attach-webview"]) webContents.on(action, event => event.preventDefault());
+    const cleanup = () => {
+      if (record.cleaned) return; record.cleaned = true; record.controller.abort();
+      if (this.windows.get(id) === record) this.windows.delete(id);
+      if (view && !window.isDestroyed()) window.contentView.removeChildView(view);
+      if (!record.closingReason) void (this.features?.detachWindow?.(id) || this.features?.close(id))?.catch(error => console.warn("[plugin]", error.message));
+      session.protocol.unhandle("kai-plugin"); void session.clearStorageData().catch(() => {});
+    };
+    record.cleanup = cleanup;
+    if (view) webContents.once("destroyed", cleanup); else window.once("closed", cleanup);
+    webContents.once("render-process-gone", () => {
+      if (record.view) record.view.setVisible(false);
+      if (this.selected === id) { this.hide(); this.onActivate?.({ page: "plugins" }); }
+      this.destroyRecord(record);
+    });
+    try { if (view) await webContents.loadURL(entry); else await window.loadURL(entry); record.ready = true; }
+    catch (error) { this.destroyRecord(record); throw error; }
   }
-  close(id, reason = "disable") { this.windows.get(id)?.window.destroy(); return this.features?.close(id, { reason }) || Promise.resolve(); }
-  closeAll() { return Promise.allSettled([...this.windows.keys()].map(id => this.close(id, "quit"))); }
+  destroyRecord(record) {
+    if (!record || record.cleaned) return;
+    if (record.view) { record.cleanup(); if (!record.webContents.isDestroyed()) record.webContents.close({ waitForBeforeUnload: false }); }
+    else record.window.destroy();
+  }
+  close(id, reason = "disable") {
+    if (this.selected === id) { this.hide(); this.onActivate?.({ page: "plugins" }); }
+    const record = this.windows.get(id); if (record) record.closingReason = reason;
+    this.destroyRecord(record); return this.features?.close(id, { reason }) || Promise.resolve();
+  }
+  closeAll() { this.hide(); return Promise.allSettled([...this.windows.keys()].map(id => this.close(id, "quit"))); }
   async call(event, method, input) {
-    const record = [...this.windows.values()].find(r => r.window.webContents === event.sender);
+    const record = [...this.windows.values()].find(r => r.webContents === event.sender);
     if (!record || event.senderFrame !== event.sender.mainFrame || event.senderFrame.url !== record.entry) throw Error("Plugin caller denied");
     const now = Date.now(); record.calls = record.calls.filter(time => now - time < 1000);
     if (record.calls.length >= 30) throw Error("Plugin request rate exceeded; wait a moment before retrying");

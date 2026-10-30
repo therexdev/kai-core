@@ -81,7 +81,7 @@ function create(ctx) {
         value.body = await prepareRun(value.kind === "team" ? "/core/teams/run" : "/core/agents/run", value.body, signal, true);
       }
       if (!ctx.runPayment) throw Error("Network credit runs are unavailable");
-      return ctx.runPayment(input.action, value, { window: ctx.getPluginWindow?.("kai.tools") || ctx.getWindow(), signal });
+      return ctx.runPayment(input.action, value, { window: ctx.getPluginWindow?.("kai.tools") || ctx.getWindow(), webContents: ctx.getWebContents?.(), isVisible: ctx.isVisible, signal });
     },
     dispose() { closed = true; },
   };

@@ -56,6 +56,7 @@ async function start() {
   protectNavigation(win.webContents, origin, () => {});
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   const manager = new (require("../core/lib/plugins/manager").PluginManager)(dataDir);
+  const appOrder = require("./core-app-order").createAppOrder({ dataDir, getInstalled: () => manager.list() });
   const { RegistryClient, verifyRegistryPackage } = require("../core/lib/plugins/registry");
   const registry = new RegistryClient({ dataDir, coreVersion: require("../package.json").version });
   const firstParty = require("../core/lib/plugins/first-party.json").plugins;
@@ -88,22 +89,24 @@ async function start() {
     const target = require("./core-plugin-desktop").resolveView(view);
     if (target.plugin) {
       await pluginHost.open(target.plugin);
-      if (target.section) pluginHost.windows.get(target.plugin)?.window.webContents.send("kai-plugin:navigate", { section: target.section });
+      if (target.section) pluginHost.renderer(target.plugin)?.send("kai-plugin:navigate", { section: target.section });
       return { opened: true };
     }
-    desktopTray.show(); win.webContents.send("kai-core:open-view", target.page); return { opened: true };
+    pluginHost.hide(); desktopTray.show(); win.webContents.send("kai-core:open-view", target.page); return { opened: true };
   }
   features = new (require("./plugin-services").FeatureServices)({ dataDir, core, electron,
     getWindow: () => win, localInference: (input, signal) => pluginHost.runLocal(input, signal),
     getCoreWindow: () => win,
     getPluginWindow: id => pluginHost?.windows.get(id)?.window,
+    getPluginWebContents: id => pluginHost?.renderer(id),
+    isPluginVisible: id => pluginHost?.isVisible(id) || false,
     loadInstalledPlugin: id => { if (!manager.list().some(row => row.id === id && row.enabled)) return null; return manager.load(id); },
     readCoreWalletSummary: () => coreWallet.call("wallet.summary", {}),
     openPlugin: id => pluginHost.open(id),
     openCoreView, setPrivacyMode,
     withWalletSpend: run => payments.withWalletSpend(run),
     runPayment: (action, input, options) => payments.runForPlugin(action, input, options),
-    desktopCall: require("./core-plugin-desktop").createPluginDesktop({ electron, getCoreWindow: () => win, openPlugin: async (id, section) => { await pluginHost.open(id); if (section) pluginHost.windows.get(id)?.window.webContents.send("kai-plugin:navigate", { section }); }, isClosing: () => shuttingDown,
+    desktopCall: require("./core-plugin-desktop").createPluginDesktop({ electron, getCoreWindow: () => win, hidePlugins: () => pluginHost.hide(), openPlugin: async (id, section) => { await pluginHost.open(id); if (section) pluginHost.renderer(id)?.send("kai-plugin:navigate", { section }); }, isClosing: () => shuttingDown,
       confirm: async (title, detail) => { const result = await dialog.showMessageBox(win, { type: "question", title, message: title, detail, buttons: ["Cancel", "Open"], defaultId: 0, cancelId: 0 }); return result.response === 1 && !shuttingDown; } }),
     onDisposeError: async id => {
       const name = firstParty.find(plugin => plugin.id === id)?.name || "Plugin";
@@ -117,7 +120,8 @@ async function start() {
       return result.response === 1 && !shuttingDown;
     }
   });
-  pluginHost = new (require("./core-plugin-host").PluginHost)({ electron, manager, core, features });
+  pluginHost = new (require("./core-plugin-host").PluginHost)({ electron, manager, core, features, getContainerWindow: () => win,
+    onActivate: view => { if (!shuttingDown && !win.isDestroyed()) win.webContents.send("kai-core:open-view", view); } });
   payments = require("./koin-test-ipc").registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, isTest: false });
   coreChat = new (require("./core-chat").CoreChat)({ core });
   coreWallet = require("./core-wallet").createCoreWallet({ dataDir, core, electron, getWindow: () => win, isClosing: () => shuttingDown, withSpend: run => payments.withWalletSpend(run) });
@@ -132,7 +136,7 @@ async function start() {
         const installed = manager.list().map(plugin => ({ ...plugin, backgroundError: features.backgroundErrors?.get(plugin.id) || null })), entries = catalog();
         return { version: app.getVersion(), desktop: { trayAvailable: desktopTray.available }, profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
           models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null,
-          plugins: installed, catalog: entries, registry: registry.status(), pluginUpdates: require("../core/lib/plugins/updates").pluginUpdates(installed, entries), catalogCheck: catalogMonitor.status() };
+          plugins: installed, pluginsOrder: appOrder.read(), catalog: entries, registry: registry.status(), pluginUpdates: require("../core/lib/plugins/updates").pluginUpdates(installed, entries), catalogCheck: catalogMonitor.status() };
       }
       case "plugins.registry.refresh": {
         await catalogMonitor.refresh(); return registry.status();
@@ -171,7 +175,10 @@ async function start() {
           void features.startInstalledBackground(manager, m.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed;
         } finally { installBusy = false; pluginDownload = null; }
       }
-      case "plugins.open": return pluginHost.open(input.id);
+      case "plugins.open": return pluginHost.open(input?.id, input?.bounds);
+      case "plugins.hide": return pluginHost.hide();
+      case "plugins.bounds": { const { id, ...bounds } = input || {}; return pluginHost.setBounds(bounds, id); }
+      case "plugins.order": return { ids: appOrder.save(input?.ids) };
       case "plugins.change": { await pluginHost.close(input.id, input.action); const installed = manager.change(input.id, input.action);
         if (["enable", "rollback"].includes(input.action)) void features.startInstalledBackground(manager, input.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed; }
       case "privacy": {

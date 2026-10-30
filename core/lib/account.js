@@ -328,7 +328,7 @@ class AccountService {
     // With several linked wallets, use only the wallet explicitly loaded on
     // this device. No arbitrary first-wallet selection or balance transfer.
     const wallet = value.account.wallets.length === 1 ? value.account.wallets[0].address : value.account.wallets.find(w => w.address === localWallet)?.address;
-    const auth = { sessionToken: token, accountId, localWallet, owner: wallet || "account-" + crypto.createHash("sha256").update("verified-account:" + accountId).digest("hex"), schedulerUrl: pinned,
+    const auth = { sessionToken: token, accountId, localWallet, ownershipWallets: value.account.wallets.map(w => w.address), owner: wallet || "account-" + crypto.createHash("sha256").update("verified-account:" + accountId).digest("hex"), schedulerUrl: pinned,
       ...(saved?.sessionOnly ? { sessionOnly: true } : {}), ...(saved?.scope ? { scope: saved.scope } : {}) };
     this.assertCreditAuthorization(auth, pinned); return auth;
   }

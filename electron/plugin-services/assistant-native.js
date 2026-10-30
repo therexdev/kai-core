@@ -5,8 +5,8 @@ const { registerCompanionIPC } = require("../companion-hub");
 const { createMascotController } = require("../mascot");
 const ENTRY = "kai-plugin://kai.assistant/index.html";
 const ACTIONS = new Set(["providers:status", "providers:save", "providers:remove", "providers:refresh", "providers:chat", "providers:cancel", "companion:manage", "companion:context", "companion:tools", "companion:tool", "companion:activity", "companion:session", "companion:cancel", "mascot:launch", "language:get", "language:save"]);
-function trusted(event, window, entry) {
-  return !!window && !window.isDestroyed() && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame && event.senderFrame.url === entry;
+function trusted(event, window, entry, contents = window?.webContents) {
+  return !!window && !window.isDestroyed() && !!contents && !contents.isDestroyed?.() && event.sender === contents && event.senderFrame === contents.mainFrame && event.senderFrame.url === entry;
 }
 function installMascotMediaConsent({ window, origin, isActive, dialog }) {
   const granted = new Set(), entry = origin + "/mascot.html";
@@ -27,10 +27,11 @@ function create(ctx) {
   let providers, providerIPC, companionIPC, mascot, hub, starting, originalCanUse, installedCanUse, voicePolicy, disposed = false;
   const handles = new Map(), assets = new Map(), listeners = new Map();
   const getMainWindow = () => ctx.getPluginWindow ? ctx.getPluginWindow("kai.assistant") || null : ctx.getWindow();
+  const getMainWebContents = () => disposed ? null : ctx.getWebContents ? ctx.getWebContents() : ctx.getPluginWebContents ? ctx.getPluginWebContents("kai.assistant") : getMainWindow()?.webContents;
   const getMascotWindow = () => mascot?.getWindow();
   const getTrustedWindow = (event, { management = false } = {}) => {
     const main = getMainWindow();
-    if (trusted(event, main, ENTRY)) return main;
+    if (trusted(event, main, ENTRY, getMainWebContents())) return main;
     const floating = getMascotWindow();
     if (!management && trusted(event, floating, origin + "/mascot.html")) return floating;
     return null;
@@ -39,7 +40,8 @@ function create(ctx) {
   // this exact signed plugin entry and its dedicated mascot are accepted.
   const reopen = async event => {
     if (!trusted(event, getMascotWindow(), origin + "/mascot.html")) throw Error("Untrusted companion window");
-    if (!getMainWindow() || getMainWindow().isDestroyed()) await ctx.openPlugin("kai.assistant");
+    // Selecting an already-running app also restores its embedded page.
+    await ctx.openPlugin("kai.assistant");
   };
   const ipc = {
     handle(channel, handler) {
@@ -89,9 +91,9 @@ function create(ctx) {
     voicePolicy = require("./assistant-voice-policy").createVoiceDownloadPolicy({ isLocalOnly: () => ctx.core.gateway.network.status().privacyMode === "local-only", services: [pocketVoice, ctx.core.gateway.voice, ctx.core.gateway.speech] });
     providers = new DesktopProviders({ dataDir: ctx.dataDir, safeStorage: ctx.electron.safeStorage, privacyMode: () => ctx.core.gateway.network.status().privacyMode });
     mountAssets();
-    mascot = createMascotController({ ...ctx.electron, BrowserWindow: NativeMascotWindow, ipcMain: ipc, prefs: preferences, origin, getMainWindow,
+    mascot = createMascotController({ ...ctx.electron, BrowserWindow: NativeMascotWindow, ipcMain: ipc, prefs: preferences, origin, getMainWindow, getMainWebContents,
       hasTray: () => true, describeModel, pocketVoice });
-    providerIPC = registerProviderIPC({ ipcMain: ipc, service: providers, origin, getMainWindow, getMascotWindow, getTrustedWindow });
+    providerIPC = registerProviderIPC({ ipcMain: ipc, service: providers, origin, getMainWindow, getMainWebContents, getMascotWindow, getTrustedWindow });
     const resolveHub = () => {
       if (hub) return hub;
       hub = ctx.getLegacyHub("assistant");
@@ -116,7 +118,7 @@ function create(ctx) {
     function saveLanguage(value) {
       if (!require("../../ui/i18n").languages.some(l => l.code === value)) throw Error("Unsupported language");
       preferences.get("interfaceLanguage"); preferences.set("interfaceLanguage", value);
-      for (const window of [getMainWindow(), getMascotWindow()]) if (window && !window.isDestroyed()) window.webContents.send("shell:language-changed", language());
+      for (const contents of [getMainWebContents(), getMascotWindow()?.webContents]) if (contents && !contents.isDestroyed?.()) contents.send("shell:language-changed", language());
       return language();
     }
     handles.set("language:get", () => language()); handles.set("language:save", (_event, value) => saveLanguage(value));
@@ -127,11 +129,11 @@ function create(ctx) {
       signal?.throwIfAborted();
       if (!input || typeof input !== "object" || !ACTIONS.has(input.action) || !Array.isArray(input.args) || input.args.length > 5 || Object.keys(input).some(k => !["action", "args"].includes(k))) throw Error("Unsupported Assistant native action");
       await start(); signal?.throwIfAborted(); if (disposed) throw Error("Assistant is closing");
-      const window = getMainWindow();
-      if (!window || window.isDestroyed() || window.webContents.mainFrame.url !== ENTRY) throw Error("Assistant window is unavailable");
+      const window = getMainWindow(), contents = getMainWebContents();
+      if (!window || window.isDestroyed() || !contents || contents.isDestroyed?.() || contents.mainFrame.url !== ENTRY) throw Error("Assistant window is unavailable");
       if (input.action === "mascot:launch") return mascot.launch(input.args[0] || {});
       const handler = handles.get(input.action); if (!handler) throw Error("Assistant action is unavailable");
-      const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
+      const event = { sender: contents, senderFrame: contents.mainFrame };
       return handler(event, ...input.args);
     },
     async privacyChanged(mode) { if (mode === "local-only") { providers?.cancel(); await voicePolicy?.pause(); } },

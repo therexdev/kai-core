@@ -1,7 +1,7 @@
 "use strict";
 const $ = id => document.getElementById(id), bridge = window.kaiCore;
-let snapshot, page = "chat", refreshing = false, priceGeneration = 0, creditState, knownPrivacy, knownWalletAddress, purchaseInfoKey, purchaseInfoGeneration = 0, walletSecretGeneration = 0, cancelledPurchases = new Set();
-const pageTitles = { chat: "Chat", models: "Models", plugins: "Plugins", wallet: "Wallet", credits: "Credits and Usage", "buy-credits": "Buy credits", earning: "Earn KOIN", network: "Network", settings: "Settings" };
+let snapshot, page = "chat", activeAppId = null, refreshing = false, priceGeneration = 0, creditState, knownPrivacy, knownWalletAddress, purchaseInfoKey, purchaseInfoGeneration = 0, walletSecretGeneration = 0, cancelledPurchases = new Set();
+const pageTitles = { chat: "Chat", app: "App", models: "Models", plugins: "Plugins", wallet: "Wallet", credits: "Credits and Usage", "buy-credits": "Buy credits", earning: "Earn KOIN", network: "Network", settings: "Settings" };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const makeNotice = (container, message, close, focusTarget) => window.KaiCoreNotice.create({ container: $(container), message: $(message), close: $(close), focusTarget });
 const globalNotice = makeNotice("notice", "notice-message", "notice-close", () => page === "wallet" ? $("password") : document.querySelector('[data-page][aria-current="page"]'));
@@ -17,27 +17,57 @@ function notify(message, error = false, { background = false } = {}) {
   globalNotice.show(String(message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""), { error, force: !background });
 }
 async function action(button, fn) { globalNotice.clear(); if (button) button.disabled = true; try { return await fn(); } catch (e) { notify(e.message, true); } finally { if (button) button.disabled = false; await refresh(); } }
+const apps = window.KaiCoreApps?.create({ document, bridge, open: plugin => { void openApp(plugin); }, manage: plugin => {
+  showPage("plugins"); notify(`${window.KaiPluginPresentation.get(plugin.id, plugin).name} is disabled. Choose Enable in Your installed plugins to use it.`);
+}, notify });
+function appBounds() {
+  const rect = $("app-content")?.getBoundingClientRect?.();
+  return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
+}
+function syncAppBounds() {
+  if (page !== "app" || !activeAppId) return;
+  const bounds = appBounds();
+  if (bounds?.width > 0 && bounds?.height > 0) void bridge.call("plugins.bounds", { id: activeAppId, ...bounds }).catch(() => {});
+}
+if (typeof ResizeObserver === "function") new ResizeObserver(syncAppBounds).observe($("app-content"));
+window.addEventListener("resize", syncAppBounds);
+async function openApp(plugin) {
+  if (!plugin?.enabled) return;
+  globalNotice.clear();
+  showPage("app", { id: plugin.id, name: window.KaiPluginPresentation.get(plugin.id, plugin).name });
+  try { await bridge.call("plugins.open", { id: plugin.id, bounds: appBounds() }); }
+  catch (error) {
+    if (page === "app" && activeAppId === plugin.id) { showPage("plugins"); notify(error.message, true); }
+  } finally { await refresh(); }
+}
 async function api(route, body) { const r = await fetch(route, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const j = await r.json(); if (!r.ok) throw Error(j.error?.message || j.error || "Request failed"); return j; }
 function hideBackup() { walletSecretGeneration++; text("wallet-backup", ""); $("wallet-backup").hidden = true; $("hide-backup").hidden = true; window.KaiCoreWallet?.clearSecrets(); }
 window.addEventListener("blur", hideBackup);
 document.addEventListener("visibilitychange", () => { if (document.hidden) hideBackup(); });
-function showPage(next) {
+function showPage(next, app) {
   if (!Object.hasOwn(pageTitles, next)) return;
+  if (next === "app" && !app?.id && !activeAppId) return;
   if (next !== "wallet") hideBackup();
   if (page !== next) {
     if (page === "chat") window.KaiCoreChat?.hide();
     if (page === "earning") window.KaiCoreEarning?.leave();
     if (page === "network") window.KaiCoreNetwork?.leave();
     if (page === "wallet") window.KaiCoreWallet?.leave();
+    if (page === "app") void bridge.call("plugins.hide").catch(error => notify(error.message, true));
     priceGeneration++;
   }
   page = next;
+  activeAppId = next === "app" ? app?.id || activeAppId : null;
+  apps?.select(activeAppId);
   document.querySelectorAll("[data-panel]").forEach(n => n.hidden = n.dataset.panel !== next);
   document.querySelectorAll("[data-page]").forEach(n => {
     const selected = n.dataset.page === (next === "buy-credits" ? "credits" : next);
     n.classList.toggle("selected", selected); n.setAttribute("aria-current", selected ? "page" : "false");
   });
-  text("workspace-title", pageTitles[next]);
+  const title = next === "app" ? window.KaiPluginPresentation.get(activeAppId, snapshot?.plugins?.find(plugin => plugin.id === activeAppId) || app).name : pageTitles[next];
+  text("workspace-title", title);
+  if (next === "app") text("app-loading", `Opening ${title}…`);
+  if (next === "app") syncAppBounds();
   if (next === "chat") window.KaiCoreChat?.show();
   if (next === "earning") window.KaiCoreEarning?.enter();
   if (next === "network") window.KaiCoreNetwork?.enter();
@@ -50,7 +80,8 @@ function showPage(next) {
 for (const b of document.querySelectorAll("[data-page],[data-go]")) b.onclick = () => showPage(b.dataset.page || b.dataset.go);
 window.addEventListener("kai-core-navigate", event => showPage(event.detail?.page));
 bridge?.onOpenView?.(target => {
-  showPage(typeof target === "string" ? target : target?.page);
+  showPage(typeof target === "string" ? target : target?.page, typeof target === "object" ? target : undefined);
+  if (target?.error) notify(target.error, true);
   if (target?.section === "website-account") window.KaiCoreAccount?.openWebsite();
   if (target?.section === "credit-account") window.KaiCoreAccount?.openCredit();
 });
@@ -82,6 +113,8 @@ async function refresh() {
     text("download", s.download ? `Downloading · ${Math.round(s.download.pct || 0)}%` : s.runtime.activeAlias ? `Loaded: ${s.runtime.activeAlias}` : "");
     html("models", s.models.map(m => `<article><div class="row"><h2>${esc(m.label || m.alias)}</h2><span class="pill">${esc(m.status)}</span></div><p>${esc(m.alias)}</p><button data-model="${esc(m.alias)}">${m.status === "ready" ? "Load model" : "Download & load"}</button></article>`).join(""));
     renderInstalledPlugins();
+    apps?.update(s);
+    if (activeAppId && !s.plugins.some(plugin => plugin.id === activeAppId && plugin.enabled)) showPage("plugins");
     window.KaiCoreChat?.update(s);
     renderCatalog();
     if (noticeSource === "refresh") globalNotice.clear();
@@ -150,7 +183,7 @@ bridge?.onPluginCatalogChange?.(() => { void refresh(); });
 if ($("plugin-search")) $("plugin-search").oninput = renderCatalog;
 if ($("refresh-registry")) $("refresh-registry").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("plugins.registry.refresh"); notify(`Catalog ${r.version} verified · ${r.count} plugins available.`); });
 $("models").onclick = e => { const b = e.target.closest("[data-model]"); if (b) void action(b, () => { notices["model-message"].clear(); return api("/core/models/ensure", { alias: b.dataset.model }); }); };
-$("plugins").onclick = e => { const update = e.target.closest("[data-install-plugin]"); if (update) { if (!update.disabled) void action(update, () => bridge.call("plugins.install", { id: update.dataset.installPlugin })); return; } const b = e.target.closest("[data-plugin]"); if (!b) return; void action(b, () => bridge.call(b.dataset.operation === "open" ? "plugins.open" : "plugins.change", { id: b.dataset.plugin, action: b.dataset.operation })); };
+$("plugins").onclick = e => { const update = e.target.closest("[data-install-plugin]"); if (update) { if (!update.disabled) void action(update, () => bridge.call("plugins.install", { id: update.dataset.installPlugin })); return; } const b = e.target.closest("[data-plugin]"); if (!b) return; if (b.dataset.operation === "open") { void openApp(snapshot.plugins.find(plugin => plugin.id === b.dataset.plugin)); return; } void action(b, () => bridge.call("plugins.change", { id: b.dataset.plugin, action: b.dataset.operation })); };
 if ($("plugin-catalog")) $("plugin-catalog").onclick = e => { const b = e.target.closest("[data-install-plugin]"); if (b && !b.disabled) void action(b, () => bridge.call("plugins.install", { id: b.dataset.installPlugin })); };
 $("install-file").onclick = e => action(e.currentTarget, () => bridge.call("plugins.install"));
 $("install-url").onsubmit = e => { e.preventDefault(); void action(e.submitter, () => bridge.call("plugins.install", { url: $("plugin-url").value })); };

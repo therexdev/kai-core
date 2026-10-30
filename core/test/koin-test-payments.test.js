@@ -49,7 +49,7 @@ test("Payment IPC rejects other documents and keeps historical custody disabled 
   await assert.rejects(handler(event, "import"), /access denied/);
   await assert.rejects(handler(event, "purchase-info"), /access denied/);
   w.webContents.mainFrame.url = "http://127.0.0.1:9000/"; testBuild.dispose();
-  await assert.rejects(handler(event, "purchase-info"), /open app/);
+  await assert.rejects(handler(event, "purchase-info"), /Credit service is closing/);
 });
 test("Test manifests reject mainnet, changed chain identity, arbitrary fields and imprecise amounts", t => {
   const f = setup(t), c = structuredClone(f.config); c.mode = "test-deployment";

@@ -1,6 +1,6 @@
 # KAI Core
 
-KAI Core is the plugin-based successor to Koinos AI. The **Core 0.5.1 / first-party plugins 0.2.x** source restores the original feature workspaces and engines in separately installed windows. It replaces the reduced 0.1.1 plugin interfaces.
+KAI Core is the plugin-based successor to Koinos AI. The **Core 0.6.0 / first-party plugins 0.2.x** source restores the original feature workspaces and engines as separately installed apps inside Core. It replaces the reduced 0.1.1 plugin interfaces.
 
 The reference is `therexdev/kaiapp` Test commit [`34d17faa0526213b8fc0ac7a65aa7f2c186c6547`](https://github.com/therexdev/kaiapp/commit/34d17faa0526213b8fc0ac7a65aa7f2c186c6547). This repository starts from that source snapshot; earlier Git history remains in `kaiapp`. Source version numbers and passing development tests do not establish that a corresponding installer has been published or verified on every platform.
 
@@ -10,7 +10,11 @@ Core keeps the familiar pearl/cobalt shell, simple local/network text chat, mode
 
 The full Assistant, Brain, Connections, Workflows, Agent Network, Documents, Model Compare, Code, Tools, Koinos Node and Remote Access experiences live in plugins. Their original screens call reviewed native adapters to the original engines. This includes advanced Assistant modes and desktop companion, scheduled workflows, connected actions, coding commands, tool servers, the full Node wallet/funding/producer controls and the original authenticated remote API. See the [parity matrix and retained limitations](docs/core/PLUGIN_PARITY.md).
 
-Closing the main window hides Core in the tray when a tray is available. **Quit KAI Core** drains native work and releases the shared profile. Background-capable plugins retain their configured services when their windows close; disable/remove stops the feature. Node deliberately preserves the original Docker behavior on Core quit: use **Stop node** to stop containers, or disable/remove the plugin. If a tray cannot be created, closing Core quits normally.
+Installed plugins appear under **Apps** in the sidebar. Use the hamburger handle to drag them into your preferred order; focused handles also support Arrow Up/Down and Home/End. The order is saved across restarts, and Apps is hidden when nothing is installed. Disabled plugins remain listed with a management shortcut. Opening an app loads its isolated page inside Core. Switching pages preserves its state and running work.
+
+Closing the main window hides Core in the tray when a tray is available. **Quit KAI Core** drains native work and releases the shared profile. Opened app pages and configured background services remain alive while Core is open or in the tray; disable/remove stops the feature. App pages load on demand, while enabled background services resume their previously configured behavior at startup. Node deliberately preserves the original Docker behavior on Core quit: use **Stop node** to stop containers, or disable/remove the plugin. If a tray cannot be created, closing Core quits normally.
+
+Network model choices use current provider readiness with the local wallet and verified account ownership excluded. A model served only by your computer/account is available through **Local model**, not offered as a prepaid network choice. A linked wallet/account can still use the same model from another provider. Independent free access must connect the wallet before using a network model that this computer is also serving. Provider availability is checked again before submission.
 
 ## Existing data
 
@@ -41,7 +45,7 @@ npm run test:compat
 
 The desktop intentionally uses the existing KAI profile. Use the supplied temporary-profile fixtures for unattended testing; do not start a headless server against a real profile. Core's direct server entry is disabled in this build.
 
-`npm run test:plugins` exercises the eleven original plugin workspaces in the actual Electron host with synthetic services. `npm run test:desktop` covers the Core shell, and `npm run test:plugin-sandbox` covers the renderer boundary. Feature-specific tests cover saved-data preservation, approvals, streaming, cancellation, background lifetimes and Node signing/broadcast guards. Native fixtures use generated profiles and controlled transports; they do not spend real funds or publish user services. See [verification scope](docs/core/PLUGIN_PARITY.md#verification-scope).
+`npm run test:plugins` exercises the eleven original plugin workspaces in the actual Electron host with synthetic services. `npm run test:apps` covers persistent embedded navigation, drag order, tray continuation and teardown; `npm run test:desktop` covers the Core shell, and `npm run test:plugin-sandbox` covers the renderer boundary. Feature-specific tests cover saved-data preservation, approvals, streaming, cancellation, background lifetimes and Node signing/broadcast guards. Native fixtures use generated profiles and controlled transports; they do not spend real funds or publish user services. See [verification scope](docs/core/PLUGIN_PARITY.md#verification-scope).
 
 `npm run test:native-profile` is the separate executable/profile-continuity check. Windows/macOS/Linux packaging, real OS keychains, microphone/camera/voice devices, live relays and real provider integrations need their own native verification. A Linux headless synthetic smoke is not evidence that those work on a user's machine.
 

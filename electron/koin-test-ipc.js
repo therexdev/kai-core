@@ -48,7 +48,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (!disposed && progress && trustedMainDocument({ sender: window?.webContents, senderFrame: window?.webContents.mainFrame }, window, origin))
         window.webContents.send("koin:purchase-progress", progress);
     },
-    progress: value => { const window = pluginPaymentContext.getStore()?.window || getMainWindow(); if (window && !window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
+    progress: value => { const caller = pluginPaymentContext.getStore(), window = caller?.window || getMainWindow(), contents = caller?.webContents || window?.webContents; if (window && !window.isDestroyed() && contents && !contents.isDestroyed?.()) contents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   let creditBusy = false, purchaseSync = null;
   const creditProvider = new (require("./credit-provider").CreditProvider)({ service: creditService, core, dialog });
   const creditRunExecutor = new (require("./credit-run-executor").CreditRunExecutor)({ service: creditService, core });
@@ -78,20 +78,22 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   };
   const getSession = async () => { const pair = await sessionPair(); if (!pair) throw Error("Reserve a Test session and wait for irreversible confirmation first"); return pair.run; };
   const flow = window => {
-    const config = readConfig(configFile), prepaid = isPrepaid(config.deployment);
+    const config = readConfig(configFile), prepaid = isPrepaid(config.deployment), contents = pluginPaymentContext.getStore()?.webContents || window.webContents;
     const Type = prepaid ? require("./koin-prepaid-chat").PrepaidChat : ChatFlow;
     return new Type({ file: path.join(root, prepaid ? "prepaid-chat-recovery.json" : "chat-recovery.json"), storage: core.account.safeStorage,
-      payments: open(), session: sessionPair, config, access,
-      progress: value => { if (!window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
+      payments: open(), session: sessionPair, config, access, providerWallets: () => [core.account.wallet?.address],
+      progress: value => { if (!window.isDestroyed() && !contents.isDestroyed?.()) contents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   };
   const withChatSignal = async (window, run, payment = false, provider = false) => {
     const controller = new AbortController(); activeRequests.add(controller); if (payment) paymentRequests.add(controller); const stop = () => controller.abort();
-    requestOwners.set(controller, window);
+    const caller = pluginPaymentContext.getStore(), contents = caller?.webContents || window.webContents;
+    requestOwners.set(controller, contents);
+    const stopEvents = caller && !payment && !provider ? ["closed"] : ["hide", "minimize", "closed"];
     const navigation = (_event, _url, _inPlace, mainFrame) => { if (mainFrame) stop(); };
-    for (const event of ["hide", "minimize", "closed"]) window.on(event, stop);
-    window.webContents.on("did-start-navigation", navigation); window.webContents.on("render-process-gone", stop);
+    for (const event of stopEvents) window.on(event, stop);
+    contents.on("did-start-navigation", navigation); contents.on("render-process-gone", stop); contents.on("destroyed", stop);
     const release = core.gateway.network.trackShadowRequest(controller);
-    const callerSignal = pluginPaymentContext.getStore()?.signal;
+    const callerSignal = caller?.signal;
     const signal = AbortSignal.any([controller.signal, ...(callerSignal ? [callerSignal] : []), AbortSignal.timeout(600000)]);
     try { return await run(signal); }
     catch (error) {
@@ -103,15 +105,16 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         : "Network chat stopped. Your saved payment and any pending request are preserved. Keep the app open and send the same message again to continue");
       throw error;
     }
-    finally { release(); for (const event of ["hide", "minimize", "closed"]) window.removeListener(event, stop);
-      window.webContents.removeListener("did-start-navigation", navigation); window.webContents.removeListener("render-process-gone", stop); activeRequests.delete(controller); paymentRequests.delete(controller); requestOwners.delete(controller); }
+    finally { release(); for (const event of stopEvents) window.removeListener(event, stop);
+      contents.removeListener("did-start-navigation", navigation); contents.removeListener("render-process-gone", stop); contents.removeListener("destroyed", stop); activeRequests.delete(controller); paymentRequests.delete(controller); requestOwners.delete(controller); }
   };
   const inFlight = new Set();
   const handlePayment = async (event, action, input) => {
     if (disposed) throw Error("Credit service is closing");
     const pluginCaller = pluginPaymentContext.getStore();
     const window = pluginCaller?.window || getMainWindow();
-    if (pluginCaller ? window?.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== pluginCaller.entry : !trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
+    const contents = pluginCaller?.webContents || window?.webContents;
+    if (pluginCaller ? !window || window.isDestroyed() || !contents || contents.isDestroyed?.() || event.sender !== contents || event.senderFrame !== contents.mainFrame || event.senderFrame.url !== pluginCaller.entry : !trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (action === "network-overview") {
       if (input !== undefined || disposed) throw Error("Network overview takes no arguments and requires an open app");
       // An activated credit network owns its model/qualification/receipt view.
@@ -120,7 +123,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (!isTest) return { network: await core.gateway.network.overview(AbortSignal.timeout(10000)) };
       if ([usdRoot, prepaidRoot].includes(root) && fs.existsSync(configFile)) {
         const config = readConfig(configFile);
-        if (isPrepaid(config.deployment)) { open(); access.authorize(config.schedulerUrl); return flow(window).call("network"); }
+        if (isPrepaid(config.deployment)) { open(); access.authorize(config.schedulerUrl); return flow(window).network(); }
       }
       // Custody-only and fresh profiles can still inspect the public network
       // without opening a payment journal or waiting for credit activation.
@@ -215,7 +218,8 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (["credit-status", "chat-estimate"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
       if (["chat-completion", "chat-recover", "chat-ack", "run-open", "run-chat", "run-execute"].includes(action)) {
         if (disposed || creditBusy) throw Error("Finish or stop the current chat first");
-        if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible desktop window to chat");
+        const continuation = pluginCaller && ["run-chat", "run-execute", "chat-ack"].includes(action);
+        if (!continuation && (!window.isVisible() || window.isMinimized() || pluginCaller?.isVisible && !pluginCaller.isVisible())) throw Error("Return to this app to start a network chat or credit run");
         creditBusy = true;
         try { return await withChatSignal(window, async signal => action === "run-execute"
           ? creditRunExecutor.execute(await creditService.context(signal), input, signal) : creditService.run(action, input, signal)); }
@@ -498,17 +502,17 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   return {
     // Called only by verified Assistant and Tools brokers, never registered as a new
     // renderer IPC surface. Uses the existing account, journals and busy gates.
-    runForPlugin(action, input, { window, signal } = {}) {
-      const entry = window && !window.isDestroyed() ? window.webContents.mainFrame.url : "";
+    runForPlugin(action, input, { window, webContents = window?.webContents, isVisible, signal } = {}) {
+      const entry = window && !window.isDestroyed() && webContents && !webContents.isDestroyed?.() ? webContents.mainFrame.url : "";
       const allowed = new Set(entry === "kai-plugin://kai.assistant/index.html" ? ["credit-status", "chat-info", "chat-completion", "chat-ack", "chat-recover", "stop", "run-open", "run-chat", "run-execute", "run-input", "run-list", "run-status", "run-stop"] : entry === "kai-plugin://kai.tools/index.html" ? ["chat-info", "stop", "run-open", "run-execute", "run-input", "run-list", "run-status", "run-stop"] : []);
       if (!allowed.has(action)) return Promise.reject(Error("Plugin payment action denied"));
       signal?.throwIfAborted();
       if (action === "stop") {
-        for (const [controller, owner] of requestOwners) if (owner === window) controller.abort();
+        for (const [controller, owner] of requestOwners) if (owner === webContents) controller.abort();
         return Promise.resolve({ state: "stopped" });
       }
-      const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
-      const pending = pluginPaymentContext.run({ window, signal, entry: event.senderFrame.url }, () => handlePayment(event, action, input));
+      const event = { sender: webContents, senderFrame: webContents.mainFrame };
+      const pending = pluginPaymentContext.run({ window, webContents, isVisible, signal, entry: event.senderFrame.url }, () => handlePayment(event, action, input));
       inFlight.add(pending);
       return pending.finally(() => inFlight.delete(pending));
     },

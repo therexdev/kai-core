@@ -17,7 +17,7 @@ const PREFERENCE_KEYS = Object.freeze({
   "kai.assistant": ["kai-chat-mode", "kai-chat-source", "kai-chat-model-openai", "kai-chat-model-anthropic", "kai-web-search", "kai-credit-model", "kai-credit-paid-first", "kai-interface-language"],
   "kai.code": ["kai-code-tools", "kai-code-dir", "kai-interface-language"],
 });
-function createPluginDesktop({ electron, getCoreWindow, openPlugin, confirm, isClosing }) {
+function createPluginDesktop({ electron, getCoreWindow, openPlugin, hidePlugins, confirm, isClosing }) {
   return async (record, method, input) => {
     const signal = record.controller.signal;
     const active = () => { signal.throwIfAborted(); if (isClosing() || record.window.isDestroyed()) throw Error("Plugin is closing"); };
@@ -28,7 +28,7 @@ function createPluginDesktop({ electron, getCoreWindow, openPlugin, confirm, isC
       const target = resolveView(input.view, input.section);
       if (target.plugin) return openPlugin(target.plugin, target.section);
       const window = getCoreWindow(); if (!window || window.isDestroyed()) throw Error("Core window is unavailable");
-      window.show(); window.focus(); window.webContents.send("kai-core:open-view", target.section ? { page: target.page, section: target.section } : target.page);
+      hidePlugins?.(); window.show(); window.focus(); window.webContents.send("kai-core:open-view", target.section ? { page: target.page, section: target.section } : target.page);
       return { opened: true };
     }
     if (method === "desktop.openExternal") {

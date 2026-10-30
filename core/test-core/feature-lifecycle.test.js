@@ -58,6 +58,8 @@ test("closed services cannot reopen native dialogs or shared storage through ret
   await f.broker.call(f.record(), "fixture.run", {}); await f.broker.close("kai.fixture");
   await assert.rejects(context.confirm("Late", "Late"), /closing/);
   assert.throws(() => context.getWindow(), /closing/); assert.throws(() => context.getCompanionStore(), /closing/); assert.equal(confirmations, 0);
+  assert.throws(() => context.getWebContents(), /closing/);
+  assert.throws(() => context.isVisible(), /closing/);
 });
 test("service-owned inference is cancelled even when its caller omits a signal", async () => {
   const started = deferred(); let signal;
@@ -75,4 +77,22 @@ test("closing a persistent plugin window retains its service, while explicit dis
   await f.broker.detachWindow('kai.fixture');assert.equal(disposals,0);
   current={id:2};assert.equal(await f.broker.call(f.record(),'fixture.run',{}),2);assert.equal(instances,1);
   await f.broker.close('kai.fixture');assert.equal(disposals,1);await f.broker.dispose();
+});
+
+test("embedded native services retain the actual dialog owner and address only their current app renderer", async () => {
+  const coreContents = { id: "core" }, owner = { webContents: coreContents }, original = { id: "plugin-1" };
+  let contents = original, context, instances = 0, visible = true;
+  const f = fixture(ctx => { context = ctx; instances++; return { keepAliveOnWindowClose: true, call() { return { owner: ctx.getWindow(), contents: ctx.getWebContents() }; } }; }, {
+    getCoreWindow: () => owner, getPluginWindow: () => owner, getPluginWebContents: () => contents, isPluginVisible: () => visible,
+  });
+  assert.deepEqual(await f.broker.call(f.record(), "fixture.run", {}), { owner, contents: original });
+  assert.equal(context.isVisible(), true);
+  visible = false; assert.equal(context.isVisible(), false, "a visible Core owner does not make a background app visible");
+  await f.broker.detachWindow("kai.fixture");
+  contents = null;
+  assert.equal(context.getWebContents(), null, "an absent app must never fall back to Core's renderer");
+  contents = { id: "plugin-2" };
+  assert.deepEqual(await f.broker.call(f.record(), "fixture.run", {}), { owner, contents });
+  assert.equal(instances, 1);
+  await f.broker.dispose();
 });

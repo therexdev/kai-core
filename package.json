@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "description": "KAI Core desktop: shared models and identity with isolated optional plugins",
   "license": "MIT",
@@ -23,7 +23,8 @@
     "dist": "electron-builder --publish never",
     "plugin:pack": "node scripts/core/pack-plugin.js",
     "test:desktop": "node scripts/core/desktop-smoke.js",
-    "test:plugins": "electron scripts/core/plugins-smoke.js"
+    "test:plugins": "electron scripts/core/plugins-smoke.js",
+    "test:apps": "node scripts/core/apps-smoke.js"
   },
   "bin": {
     "koinos-code": "cli/koinos-code.js"

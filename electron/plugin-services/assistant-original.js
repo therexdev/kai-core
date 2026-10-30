@@ -118,7 +118,7 @@ function create(ctx, files) {
       if (method === "assistant.payment") {
         if (!PAYMENT_ACTIONS.has(input.action)) throw Error("This payment action is unavailable to Assistant");
         if (!ctx.runPayment) throw Error("Network chat is unavailable");
-        return ctx.runPayment(input.action, input.input, { window: ctx.getWindow(), signal });
+        return ctx.runPayment(input.action, input.input, { window: ctx.getWindow(), webContents: ctx.getWebContents?.(), isVisible: ctx.isVisible, signal });
       }
       if (method === "assistant.navigate") { if (typeof input.view !== "string") throw Error("Choose a destination"); return ctx.openCoreView(input.view); }
       if (method === "assistant.copyText") { if (typeof input.text !== "string" || input.text.length > 800000 || Object.keys(input).some(key => key !== "text")) throw Error("Invalid text to copy"); ctx.electron.clipboard.writeText(input.text); return { copied: true }; }

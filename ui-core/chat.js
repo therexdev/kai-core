@@ -40,11 +40,11 @@
 
   function createChatController({ bridge, onChange = () => {}, now = Date.now, refreshCredits = () => {} }) {
     const state = { source: "local", models: [], selected: { local: "", network: "" }, turns: { local: [], network: [] }, draft: { local: "", network: "" }, info: null, privacyMode: "local-only", busy: false, status: "", error: false, checking: false };
-    let active = null, infoPromise = null, generation = 0, disposed = false;
+    let active = null, infoPromise = null, generation = 0, disposed = false, networkSelectionRequired = false;
     const emit = () => { if (!disposed) onChange(state); };
     const allowedNetwork = () => state.privacyMode !== "local-only";
     const fresh = () => state.info && !state.info.blocked && (state.info.modelAvailabilityUntil === undefined || Number.isSafeInteger(state.info.modelAvailabilityUntil) && state.info.modelAvailabilityUntil > now());
-    function models() { return state.source === "local" ? state.models.map(m => ({ id: m.alias, label: m.label || m.alias, available: true })) : (state.info?.models || []).map(m => ({ ...m, id: modelId(m.model), label: m.label || m.model, available: m.available === true && !!fresh() })); }
+    function models() { return state.source === "local" ? state.models.map(m => ({ id: m.alias, label: m.label || m.alias, available: true })) : (state.info?.models || []).filter(m => m.unavailableReason !== "self-only").map(m => ({ ...m, id: modelId(m.model), label: m.label || m.model, available: m.available === true && !!fresh() })); }
     function update(snapshot) {
       state.models = (snapshot?.models || []).filter(m => m.status === "ready");
       const mode = snapshot?.network?.privacyMode || "local-only";
@@ -65,7 +65,12 @@
             if (generation !== token.generation) return null;
             if (!info || typeof info.enabled !== "boolean" || info.models !== undefined && !Array.isArray(info.models)) throw Error("Network chat is unavailable. Check Network or try Refresh models.");
             state.info = info;
-            if (!state.selected.network) state.selected.network = modelId(info.models?.find(m => m.available)?.model || info.models?.[0]?.model);
+            if (!active && info.models?.some(m => modelId(m.model) === state.selected.network && m.unavailableReason === "self-only")) {
+              state.selected.network = ""; networkSelectionRequired = true;
+              state.status = "That model is only shared by your computer or account. Choose another network model or Local model."; state.error = false;
+            }
+            if (!state.selected.network && !networkSelectionRequired)
+              state.selected.network = modelId(info.models?.find(m => m.available && m.unavailableReason !== "self-only")?.model || info.models?.find(m => m.unavailableReason !== "self-only")?.model);
             return info;
           } catch (error) { if (generation !== token.generation) return null; state.info = { ...state.info, blocked: cleanError(error), enabled: false }; return state.info; }
           finally { if (infoPromise === token) { state.checking = false; infoPromise = null; emit(); } }
@@ -80,7 +85,7 @@
       if (source === "network") await refreshNetwork();
       return true;
     }
-    function setModel(model) { if (!active) { state.selected[state.source] = state.source === "network" ? modelId(model) : model; emit(); } }
+    function setModel(model) { if (!active) { state.selected[state.source] = state.source === "network" ? modelId(model) : model; if (state.source === "network") networkSelectionRequired = false; emit(); } }
     function setDraft(text) { state.draft[state.source] = String(text); }
     function networkReady() {
       if (!allowedNetwork()) throw Error("Local-Only is on. Change Privacy in Settings to use network models.");
@@ -139,6 +144,10 @@
         } else {
           await refreshNetwork(); checkStopped(operation); networkReady();
           const model = state.selected.network;
+          if (state.info.models?.some(m => modelId(m.model) === model && m.unavailableReason === "self-only") || !model && state.info.models?.some(m => m.unavailableReason === "self-only"))
+            throw Error("This model is only being shared by your own computer or account. Choose Local model, or wait for another network provider.");
+          if (state.info.models?.some(m => modelId(m.model) === model && m.unavailableReason === "wallet-connection-required"))
+            throw Error("Connect your wallet to network credits before using a network model that this computer also shares, or choose Local model.");
           if (!state.info.models?.some(m => modelId(m.model) === model && m.available === true)) throw Error("This network model is unavailable. Choose an available model.");
           const input = { model: `koinos-network:${model}`, messages, stream: true, ...priority() };
           operation.started = true; state.status = "Waiting for the network model…"; emit();
@@ -223,6 +232,7 @@
       if (signature !== optionsSignature) {
         signature = optionsSignature; $("chat-model").replaceChildren();
         if (!models.length) { const option = document.createElement("option"); option.value = ""; option.textContent = network ? "No network models available" : "No local models installed"; $("chat-model").append(option); }
+        else if (network && !state.selected.network) { const option = document.createElement("option"); option.value = ""; option.textContent = "Choose a network model"; option.disabled = true; $("chat-model").append(option); }
         for (const model of models) { const option = document.createElement("option"); option.value = model.id; option.textContent = model.label + (model.available ? "" : " · unavailable"); option.disabled = !model.available; $("chat-model").append(option); }
         $("chat-model").value = state.selected[state.source];
       }
@@ -238,7 +248,7 @@
       $("chat-model-detail").textContent = !network ? (picked ? "Runs locally on your computer." : "Install or import a model in Models to start chatting.")
         : state.privacyMode === "local-only" ? "Local-Only is on. Open Settings to allow network chat."
         : state.checking ? "Checking network models…"
-        : state.info?.blocked || (state.info?.enabled !== true ? "Network chat is unavailable. Check Network to connect."
+        : state.info?.blocked || (picked?.unavailableReason === "wallet-connection-required" ? "Connect your wallet to network credits to use other providers while this computer shares the same model, or choose Local model." : !models.some(m => m.available) && state.info?.models?.some(m => m.unavailableReason === "self-only") ? "Your own shared models are excluded from network chat. Choose Local model to use them, or wait for another provider." : state.info?.enabled !== true ? "Network chat is unavailable. Check Network to connect."
         : `${state.info.freeOnlySession ? "Uses free credits only." : "Uses eligible free credits first, then purchased credits."}${state.info.maxRequestCredits ? ` Up to ${state.info.maxRequestCredits} credits per message.` : ""}${picked?.inputCreditsPerMillion !== undefined ? ` ${picked.inputCreditsPerMillion} input / ${picked.outputCreditsPerMillion} output credits per million tokens.` : ""}`);
       const turns = state.turns[source], serialized = JSON.stringify(turns);
       if (messagesSignature !== serialized) {

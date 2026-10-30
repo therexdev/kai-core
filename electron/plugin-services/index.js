@@ -26,7 +26,7 @@ class FeatureServices {
     // Re-verify installation and grants on every call, including background runs.
     const verified = this.ctx.loadInstalledPlugin?.(id);
     if (!verified) throw Error(`Install and enable ${id} to use this action`);
-    const record = { ...verified, controller: { signal: signal || new AbortController().signal }, window: this.ctx.getPluginWindow?.(id) || this.ctx.getCoreWindow?.() || this.ctx.getWindow?.() };
+    const record = { ...verified, controller: { signal: signal || new AbortController().signal }, window: this.ctx.getPluginWindow?.(id) || this.ctx.getCoreWindow?.() || this.ctx.getWindow?.(), webContents: this.ctx.getPluginWebContents?.(id) };
     return this.call(record, method, input);
   }
   permission(method) {
@@ -71,6 +71,10 @@ class FeatureServices {
         },
         getCompanionStore: () => { active(); return this.getCompanionStore(); },
         getWindow: () => { active(); return this.ctx.getPluginWindow?.(id) || this.ctx.getCoreWindow?.() || record.window; },
+        // The native owner is Core for embedded apps, while plugin events and
+        // caller checks must still address only that app's isolated renderer.
+        getWebContents: () => { active(); return this.ctx.getPluginWebContents ? this.ctx.getPluginWebContents(id) : this.ctx.getPluginWindow?.(id)?.webContents || record.webContents || record.window?.webContents; },
+        isVisible: () => { active(); if (this.ctx.isPluginVisible) return this.ctx.isPluginVisible(id); const window = this.ctx.getPluginWindow?.(id) || this.ctx.getCoreWindow?.() || record.window; return !!window && !window.isDestroyed?.() && (!window.isVisible || window.isVisible()) && !window.isMinimized?.(); },
         getLegacyHub: feature => { active(); return this.getLegacyRuntime().getHub(feature); },
         legacyEnsure: feature => { active(); return this.getLegacyRuntime().ensure(feature); },
         legacyManage: (feature, action, input, signal) => { active(); return this.getLegacyRuntime().manage(feature, action, input, signal, { window: this.ctx.getPluginWindow?.(id) || this.ctx.getCoreWindow?.() || record.window }); },

@@ -28,6 +28,8 @@ class CreditRuns {
     if (c.auth?.sessionOnly) throw Error("Temporary network access supports free chat only. Reconnect with secure storage for advanced runs");
     P.digest(callId);
     return new PrepaidChat({ config: c.config, file: path.join(this.directory(c, run.id), callId + ".json"), storage: this.service.storage,
+      providerWallets: this.service.providerWallets ? () => this.service.providerWallets(c.auth) : undefined,
+      enforcedProviderWallets: () => c.auth?.deviceFree ? [] : c.auth?.ownershipWallets || [],
       access: { authorize: (pin, signal) => { signal?.throwIfAborted(); this.service.account.assertCreditAuthorization(c.auth, pin); return c.auth; } },
       fetchImpl: this.service.fetchImpl, progress: value => this.service.progress(typeof value === "object" ? { ...value, runId: run.id, callId } : value) });
   }
@@ -70,14 +72,14 @@ class CreditRuns {
         const saved = await flow.call("result", { requestId: record.id }, signal);
         if (saved.completion) {
           const input = JSON.parse(this.service.storage.decryptString(Buffer.from(record.input, "base64")));
-          const answer = flow.verify(saved.completion, flow.input(input, record), record.id);
+          const answer = flow.verify(saved.completion, flow.input(input, record), record.id, flow.recoveryProviders(record));
           record = { ...record, state: "answered", answer: this.service.storage.encryptString(JSON.stringify(answer)).toString("base64") }; flow.save(record);
         }
       }
       if (record?.state === "answered") {
         const answer = JSON.parse(this.service.storage.decryptString(Buffer.from(record.answer, "base64")));
         const input = JSON.parse(this.service.storage.decryptString(Buffer.from(record.input, "base64")));
-        const checked = flow.verify(answer, flow.input(input, record), record.id);
+        const checked = flow.verify(answer, flow.input(input, record), record.id, flow.recoveryProviders(record));
         steps.push({ callId, id: checked.id, text: checked.choices[0].message.content, credits: checked.koin.receipt.usage.amount });
       }
     }

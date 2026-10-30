@@ -20,20 +20,20 @@ The reference is `therexdev/kaiapp` Test commit [`34d17faa0526213b8fc0ac7a65aa7f
 
 The original full workflow node library includes agents and selected read tools, connected actions, public HTTP, bounded JavaScript, Brain operations, branches/switches/merges, parsing/deduplication, loops/sub-workflows, approvals and saved chat output. Graph validation, execution limits, privacy checks and uncertain-action recovery remain in the original engine.
 
-Core itself retains simple chat, model/runtime management, the original wallet presentation, credits/purchases/usage, Earn KAI/KOIN Drop information, network/privacy controls and account linking. Installing a feature does not duplicate the wallet, model files or encrypted account identity. Other feature screens open their separately installed plugin windows; an absent plugin must be installed before that editor can open.
+Core itself retains simple chat, model/runtime management, the original wallet presentation, credits/purchases/usage, Earn KAI/KOIN Drop information, network/privacy controls and account linking. Installing a feature does not duplicate the wallet, model files or encrypted account identity. Other feature screens open their separately installed app pages under **Apps**; an absent plugin must be installed before that editor can open.
 
 ## Background and privacy
 
-| Feature/lifetime | Window close | Core startup with verified enabled package | Disable/remove or Core quit |
+| Feature/lifetime | Switch page / close Core to tray | Core startup with verified enabled package | Disable/remove or Core quit |
 | --- | --- | --- | --- |
-| Assistant | Keeps its native service; window-bound requests/media permissions end | Initializes original preferences/services/assets; no invented saved mascot autolaunch or unsolicited media request | Stops native companion/service work and drains pending requests |
+| Assistant | Keeps the app renderer, active requests and its native service | Initializes original preferences/services/assets; no invented saved mascot autolaunch or unsolicited media request | Stops native companion/service work and drains pending requests |
 | Brain / Connections | Keeps original feature service | Resumes original configured awareness, source/sync and connection behavior | Releases feature timers/requests; original encrypted data remains |
 | Workflows | Schedules and running automation belong to the feature | Starts original enabled schedules/events and migrates legacy task intent through guarded stores | Stops feature execution/scheduling; retains workflows and receipts |
 | Agent Network | Configured acceptance/service stays active | Resumes prior enabled service settings | Stops hosting/polling; preserves services/jobs |
 | Tools | Configured tool services stay active | Original approved auto-connect flags may start configured servers | Disconnects/stops feature services; preserves configuration |
 | Node | Supervisor, configured rewards and approved funding flows stay active | Reads original saved supervisor/return/funding intent with full Node permissions | Disable/remove stops managed containers and drains work; Core quit drains work and preserves original Docker continuity |
 | Remote Access | Enabled relay remains active | Resumes only saved enabled access with original API keys and permitted privacy | Stops relay and active sessions; preserves key records/identity |
-| Code / Documents / Compare | Cancels foreground work and pending approvals | No automatic foreground edit, document generation or comparison | Cancels/releases requests and preserves saved work |
+| Code / Documents / Compare | Retains the renderer, foreground work and pending approvals | No automatic foreground edit, document generation or comparison | Cancels/releases requests and preserves saved work |
 
 Local-Only governs AI privacy and blocks prohibited AI/tool traffic and remote activation. Koinos Node networking, configured mining/funding and explicit blockchain wallet actions are independent, exactly as described by the original Local API screen and gateway. They remain available without changing AI privacy; switching AI mode does not stop an opted-in Node or erase wallet balances/history. Original explicitly reviewed local-safe tool behavior remains subject to the tool policy. Returning online resumes only behavior authorized by existing feature settings; no plugin creates new grants or paid work simply because its window opens.
 
@@ -45,7 +45,7 @@ Original layout and controls do not imply original renderer privileges. Plugin J
 - Clipboard, file pickers, external links and sensitive filesystem/process actions use native reviewed paths.
 - Wallet private-key backup is displayed/copied natively; keys are never returned to plugin JavaScript.
 - Original password, transaction, connected-action and agent step approvals remain. Native review binds financial actions to the actual identity/network/payload or stored draft summary.
-- Foreground cancellation and background service authorization are distinct. A closed window cannot authorize a later signature, but configured background services obtain fresh service lifetimes.
+- Hiding an app is distinct from destroying it. App requests continue across sidebar navigation and tray use. Actual teardown revokes its renderer lifetime; configured background services obtain their own service lifetimes. Native approval still binds each sensitive operation to its identity and arguments.
 - Dismissible notices and saved-data/concurrency guards prevent stuck messages and silent overwrites without removing original features.
 
 ## Retained original limitations
@@ -64,7 +64,7 @@ Original layout and controls do not imply original renderer privileges. Plugin J
 
 Development verification has exercised the original renderers inside the real Electron plugin host using generated signed fixture packages and temporary profiles. Source-stage native runs have covered all eleven workspaces; feature runs also cover Brain/Connections, account linking, Code/Documents, Node navigation/background startup and reviewed cancellation. Focused tests cover original engines, store preservation, exact approval binding, streams, provider/relay isolation and Node signing/submission lifetimes. No real user wallets, payments, production relays or user files are required by those fixtures.
 
-The final source and Linux `app.asar` runs passed all eleven actual publisher-signed packages: Workflows and Agent Network 0.2.1; the other plugins 0.2.0. Each run made 23 synthetic model calls with zero renderer errors, external-service calls or process attempts. Coverage includes visible original rails/panes, preserved paused legacy tasks/history, background startup/window-close behavior, Developer Tools teams/pipelines/benchmark, Remote localization and feature switches, Node under unchanged AI Local-Only, and native media consent. The packaged run also served all six original VAD/ORT browser assets from the built archive/extraResources. Core passed 476 tests and 47 compatibility tests, with 10 existing integration skips. The complete desktop fixture passed with a synthetic monitor, tray and profile; its container-only singleton stub does not prove OS locking. The signed catalog and all eleven published assets passed online digest verification. Native installer/platform CI and real external-service/keychain checks remain distinct from these synthetic results.
+The 0.5.1 source and Linux `app.asar` runs passed all eleven actual publisher-signed packages: Workflows and Agent Network 0.2.1; the other plugins 0.2.0. Each run made 23 synthetic model calls with zero renderer errors, external-service calls or process attempts. Coverage includes visible original rails/panes, preserved paused legacy tasks/history, background startup/window-close behavior, Developer Tools teams/pipelines/benchmark, Remote localization and feature switches, Node under unchanged AI Local-Only, and native media consent. The packaged run also served all six original VAD/ORT browser assets from the built archive/extraResources. Core passed 476 tests and 47 compatibility tests, with 10 existing integration skips. The complete desktop fixture passed with a synthetic monitor, tray and profile; its container-only singleton stub does not prove OS locking. The signed catalog and all eleven published assets passed online digest verification. Native installer/platform CI and real external-service/keychain checks remain distinct from these synthetic results.
 
 Useful entry points:
 

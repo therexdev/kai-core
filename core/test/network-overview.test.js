@@ -108,7 +108,8 @@ test("activated USD overview uses its exact authenticated service and never mask
     model: "paid-model", maxOutput: 32, maxRcPerTransaction: "1", maxRcPerDay: "2", limits: { amount: "10", perJob: "10", maxJobs: 10, durationMs: 60000 } };
   let publicReads = 0, paidReads = 0, signedIn = true, offline = false;
   const network = { observedAt: Date.now(), validUntil: Date.now() + 15000, state: "available", readyProviders: 1, waitingRequests: 0, completedToday: 7,
-    models: [{ id: "paid-model", providers: 1, available: true, freeEligible: true }], providers: [], activity: [] };
+    models: [{ id: "paid-model", providers: 1, available: true, freeEligible: true }],
+    providers: [{ id: "abcdef123456", model: "paid-model", ready: true, state: "ready", models: [{ model: "paid-model", ready: true, state: "online", validUntil: Date.now() + 15000 }] }], activity: [] };
   t.mock.method(global, "fetch", async (url, options) => {
     paidReads++; assert.equal(url, config.schedulerUrl + "/koin/prepaid/network");
     assert.equal(options.method, "POST"); assert.equal(options.redirect, "error");
@@ -128,7 +129,9 @@ test("activated USD overview uses its exact authenticated service and never mask
   } finally { require.cache[manifestPath].exports = original; }
   t.after(() => registration?.dispose());
   const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
-  assert.deepEqual((await handle(event, "network-overview")).network, network);
+  const observed = (await handle(event, "network-overview")).network;
+  assert.deepEqual(observed.models, [{ ...network.models[0], selectable: true, totalProviders: 1 }]);
+  assert.deepEqual(observed.providers, [{ ...network.providers[0], self: false }]);
   offline = true; await assert.rejects(handle(event, "network-overview"), /Paid network is offline/);
   signedIn = false; await assert.rejects(handle(event, "network-overview"), /Sign in to the paid network/);
   assert.equal(paidReads, 2); assert.equal(publicReads, 0);

@@ -95,7 +95,7 @@ class DesktopProviders {
   }
 }
 
-function registerProviderIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow, getTrustedWindow }) {
+function registerProviderIPC({ ipcMain, service, origin, getMainWindow, getMainWebContents, getMascotWindow, getTrustedWindow }) {
   const handles = [], jobs = new Map();
   function allowed(event, settings = false) {
     if (getTrustedWindow) return !!getTrustedWindow(event, { management: settings });
@@ -105,7 +105,10 @@ function registerProviderIPC({ ipcMain, service, origin, getMainWindow, getMasco
     return check(getMainWindow(), "/") || (!settings && check(getMascotWindow(), "/mascot.html"));
   }
   function changed() {
-    for (const w of [getMainWindow(), getMascotWindow()]) if (w && !w.isDestroyed()) w.webContents.send("providers:changed");
+    const main = getMainWindow(), mascot = getMascotWindow();
+    const mainContents = getMainWebContents ? getMainWebContents() : main?.webContents;
+    for (const contents of [main && !main.isDestroyed() ? mainContents : null, mascot && !mascot.isDestroyed() ? mascot.webContents : null])
+      if (contents && !contents.isDestroyed?.()) contents.send("providers:changed");
   }
   function handle(channel, settings, fn) {
     handles.push(channel); ipcMain.handle(channel, async (event, ...args) => {
