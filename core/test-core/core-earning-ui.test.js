@@ -1,0 +1,131 @@
+"use strict";
+const test = require("node:test"), assert = require("node:assert/strict");
+const { createController, providerPresentation, validateRewards, rewardMarkup } = require("../../ui-core/earning");
+const summaryApi = require("../../ui/reward-summary");
+const start = 1800000000000;
+const models = ["small", "large"].map(id => ({ id, label: id + " model", installed: true, compatible: true }));
+const info = (extra = {}) => ({ state: "ready", enabled: false, running: false, deviceAuthorized: true, walletReady: true,
+  selection: { mode: "all", models: [] }, models, modelAvailability: models, offeredModels: ["small", "large"], ...extra });
+const rewards = (extra = {}) => ({ walletAddress: "fixture-wallet", scope: "a".repeat(64), observedAt: start, payouts: [], ...extra });
+const online = (extra = {}) => ({ state: "online", label: "ONLINE", model: "small", detail: "Confirmed by network", validUntil: start + 15000,
+  models: [{ state: "online", label: "ONLINE", model: "small", detail: "Confirmed by network", validUntil: start + 15000 }], ...extra });
+const flush = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
+function fixture(initial = info()) {
+  let now = start, next = 0, currentInfo = initial, currentStatus = online(), currentRewards = rewards(), actionHandler;
+  const calls = [], paints = [], timers = new Map(), navigations = [];
+  const controller = createController({ summaryApi, now: () => now, render: (state, presentation) => paints.push({ state: structuredClone(state), presentation }),
+    setTimer(fn, delay) { const id = ++next; timers.set(id, { fn, at: now + delay }); return id; }, clearTimer(id) { timers.delete(id); },
+    navigate: page => navigations.push(page),
+    async credit(action, input) {
+      calls.push({ action, input }); let value;
+      if (action === "provider-public-info") value = currentInfo;
+      else if (action === "provider-public-status") value = currentStatus;
+      else if (action === "provider-public-earnings") value = currentRewards;
+      else return actionHandler?.(action, input) || { state: "ok" };
+      if (typeof value === "function") value = await value(); if (value instanceof Error) throw value; return structuredClone(value);
+    }
+  });
+  return { controller, calls, paints, timers, navigations, latest: () => paints.at(-1),
+    setInfo(value) { currentInfo = value; }, setStatus(value) { currentStatus = value; }, setRewards(value) { currentRewards = value; }, setAction(fn) { actionHandler = fn; },
+    async enter() { controller.enter(); await flush(); },
+    async advance(ms) { now += ms; for (const [id, timer] of [...timers].sort((a, b) => a[1].at - b[1].at)) if (timer.at <= now && timers.delete(id)) timer.fn(); await flush(); }
+  };
+}
+
+test("enter checks setup and reward history without starting earning; leaving never stops earning", async () => {
+  const f = fixture(); assert.equal(f.calls.length, 0); await f.enter();
+  assert.deepEqual(f.calls.map(c => c.action).sort(), ["provider-public-earnings", "provider-public-info"]);
+  assert.equal(f.latest().presentation.status.label, "OFFLINE"); assert.equal(f.latest().presentation.on, false);
+  f.controller.leave(); assert.equal(f.timers.size, 0); assert.ok(!f.calls.some(c => c.action === "provider-public-stop"));
+});
+
+test("online evidence expires during a delayed refresh and no model remains falsely ready", async () => {
+  const f = fixture(info({ enabled: true, running: true })); await f.enter();
+  assert.equal(f.latest().presentation.ready, 1); assert.equal(f.latest().presentation.status.label, "ONLINE");
+  let release; f.setInfo(() => new Promise(resolve => { release = resolve; }));
+  await f.advance(10000); await f.advance(5000);
+  assert.equal(f.latest().presentation.ready, 0); assert.equal(f.latest().presentation.status.label, "CONNECTION UNCONFIRMED");
+  assert.equal(f.latest().presentation.action, "stop"); assert.equal(f.latest().presentation.disabled, false);
+  release(info({ enabled: true, running: true })); await flush();
+  assert.equal(f.latest().presentation.ready, 0); f.controller.leave();
+});
+
+test("an online status without expiring evidence cannot claim readiness", () => {
+  const state = { info: info({ enabled: true, running: true }), status: online({ validUntil: undefined, models: [{ state: "online", model: "small" }] }), stale: false, busy: false };
+  const view = providerPresentation(state, start); assert.equal(view.ready, 0); assert.notEqual(view.status.label, "ONLINE");
+});
+
+test("background reads preserve an unapplied individual model selection", async () => {
+  const f = fixture(); await f.enter(); f.controller.editSelection("large", false);
+  assert.deepEqual(f.controller.getState().draft, { mode: "selected", models: ["small"] });
+  await f.controller.refresh(); assert.deepEqual(f.controller.getState().draft, { mode: "selected", models: ["small"] });
+  assert.ok(!f.calls.some(c => c.action === "provider-public-models"));
+  f.controller.resetSelection(); assert.deepEqual(f.controller.getState().draft, { mode: "all", models: [] }); f.controller.leave();
+});
+
+test("Apply uses the native model-selection action and accepts the saved selection", async () => {
+  const f = fixture(); await f.enter(); f.controller.editSelection("large", false);
+  f.setAction((action, selection) => { assert.equal(action, "provider-public-models"); f.setInfo(info({ selection })); return { state: "models-selected", selection }; });
+  await f.controller.applySelection(); assert.deepEqual(f.calls.find(c => c.action === "provider-public-models").input, { mode: "selected", models: ["small"] });
+  assert.deepEqual(f.controller.getState().draft, { mode: "selected", models: ["small"] });
+  f.controller.editSelection(null, false); await f.controller.applySelection();
+  assert.equal(f.calls.filter(c => c.action === "provider-public-models").length, 1); f.controller.leave();
+});
+
+test("Stop remains available during startup and discards its later result", async () => {
+  const f = fixture(); await f.enter(); let finishStart;
+  f.setAction(action => { if (action === "provider-public-start") return new Promise(resolve => { finishStart = resolve; }); return { state: "offline" }; });
+  const pendingStart = f.controller.toggle(); await flush();
+  assert.equal(f.latest().presentation.status.label, "STARTING"); assert.equal(f.latest().presentation.on, true); assert.equal(f.latest().presentation.disabled, false);
+  await f.controller.toggle(); assert.equal(f.latest().presentation.status.label, "OFFLINE");
+  finishStart({ state: "online" }); await pendingStart; assert.equal(f.latest().presentation.status.label, "OFFLINE");
+  assert.deepEqual(f.calls.filter(c => /provider-public-(start|stop)$/.test(c.action)).map(c => c.action), ["provider-public-start", "provider-public-stop"]); f.controller.leave();
+});
+
+test("wallet setup navigates to Wallet without attempting authorization", async () => {
+  const f = fixture(info({ state: "wallet-required", walletReady: false, deviceAuthorized: false, canAuthorize: true })); await f.enter();
+  assert.equal(f.latest().presentation.toggleLabel, "Set up earning"); await f.controller.toggle();
+  assert.deepEqual(f.navigations, ["wallet"]); assert.ok(!f.calls.some(c => /authorize|start/.test(c.action))); f.controller.leave();
+});
+
+test("device authorization uses native approval before start, and cancellation never starts sharing", async () => {
+  const initial = info({ state: "authorization-required", deviceAuthorized: false, canAuthorize: true, secureStorage: { available: false } });
+  const f = fixture(initial); await f.enter(); f.setAction(() => ({ state: "cancelled" })); await f.controller.toggle();
+  assert.deepEqual(f.calls.find(c => c.action === "provider-public-authorize").input, { sessionOnly: true });
+  assert.ok(!f.calls.some(c => c.action === "provider-public-start")); assert.match(f.controller.getState().notice, /not changed/);
+  f.setAction(action => { if (action === "provider-public-authorize") return { state: "authorized" }; f.setInfo(info({ enabled: true, running: true })); return { state: "online" }; });
+  await f.controller.toggle(); assert.equal(f.calls.filter(c => c.action === "provider-public-start").length, 1);
+  assert.equal(f.latest().presentation.status.label, "ONLINE"); f.controller.leave();
+});
+
+test("read failure removes readiness but preserves a working Stop control", async () => {
+  const f = fixture(info({ enabled: true, running: true })); await f.enter(); f.setInfo(Error("Connection unavailable")); await f.controller.refresh();
+  assert.equal(f.latest().presentation.ready, 0); assert.equal(f.latest().presentation.status.label, "CONNECTION UNCONFIRMED");
+  assert.equal(f.latest().presentation.on, true); assert.equal(f.latest().presentation.disabled, false); f.controller.leave();
+});
+
+test("leaving or changing identity discards late provider and reward reads", async () => {
+  const f = fixture(); let providerResolve, rewardResolve;
+  f.setInfo(() => new Promise(resolve => { providerResolve = resolve; })); f.setRewards(() => new Promise(resolve => { rewardResolve = resolve; }));
+  await f.enter(); f.controller.leave(); f.controller.reset();
+  providerResolve(info({ enabled: true, running: true })); rewardResolve(rewards()); await flush();
+  assert.equal(f.controller.getState().info, null); assert.equal(f.controller.getState().rewards, null); assert.equal(f.timers.size, 0);
+});
+
+test("reward history retains verified rows on failure and invalidates them on identity change", async () => {
+  const f = fixture(); f.setRewards(rewards({ payouts: [{ epoch: "20000", state: "paid", availability: "120000000", work: "30000000" }] })); await f.enter();
+  assert.match(rewardMarkup(f.controller.getState().rewards), /1\.50000000 KOIN/);
+  f.setRewards(Error("Network unavailable")); await f.controller.refresh();
+  assert.equal(f.controller.getState().rewards.payouts.length, 1); assert.equal(f.controller.getState().rewardError, "Network unavailable");
+  f.controller.leave(); f.controller.reset(); assert.equal(f.controller.getState().rewards, null);
+});
+
+test("reward validation rejects malformed, duplicate, stale and overflowing amounts", () => {
+  const row = { epoch: "20000", state: "paid", availability: "100", work: "200" };
+  for (const value of [rewards({ observedAt: start - 30001 }), rewards({ payouts: [row, row] }), rewards({ payouts: [{ ...row, work: "<img>" }] }),
+    rewards({ payouts: [{ ...row, work: "18446744073709551615" }] }), rewards({ payouts: [{ ...row, state: "constructor" }] })]) {
+    assert.throws(() => validateRewards(value, start, summaryApi));
+  }
+  const valid = validateRewards(rewards({ payouts: [row], summary: { unverified: true } }), start, summaryApi);
+  assert.equal(valid.summary, null); assert.equal(valid.payouts.length, 1);
+});

@@ -29,7 +29,15 @@ Local-Only stops both services and pending catalog/package downloads.
 The legacy source is retained for extraction and compatibility tests. Optional
 speech/mail dependencies are devDependencies rather than installed
 production dependencies. The old UI is not served by the new desktop. Only the
-shared credit presentation script is mapped as an explicit static asset.
+shared credit presentation and reward-summary scripts are mapped as explicit static assets.
+
+Built-in simple chat uses a trusted native local adapter with bounded text input,
+private desktop routing and cancellation. It cannot silently fall back to paid
+network inference. Network chat uses the existing native credit service and its
+verified delivery/recovery protocol. Local and network transcripts are separate
+and last only for the app session; resuming a saved network request is explicit.
+The UI has separate Wallet, Your Credits, and Buy credits screens, with balances
+and history sourced from the verified credit state and native payment journal.
 
 The data/profile contract is distinct from the installer/update contract. Core
 must be able to reuse encrypted identity and installed files without targeting an

@@ -1,6 +1,7 @@
 "use strict";
 const $ = id => document.getElementById(id), bridge = window.kaiCore;
-let snapshot, page = "overview", refreshing = false, providerRunning = false, providerBusy = false, priceGeneration = 0;
+let snapshot, page = "chat", refreshing = false, priceGeneration = 0, creditState, knownPrivacy, purchaseInfoKey, purchaseInfoGeneration = 0, cancelledPurchases = new Set();
+const pageTitles = { chat: "Chat", models: "Models", plugins: "Plugins", wallet: "Wallet", credits: "Credits and Usage", "buy-credits": "Buy credits", earning: "Earn KOIN", network: "Network", settings: "Settings" };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const text = (id, value) => { if ($(id).textContent !== String(value ?? "")) $(id).textContent = value ?? ""; };
 function notify(message, error = false) { $("notice").textContent = String(message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""); $("notice").hidden = false; $("notice").classList.toggle("error", error); }
@@ -9,40 +10,64 @@ async function api(route, body) { const r = await fetch(route, body === undefine
 function hideBackup() { text("wallet-backup", ""); $("wallet-backup").hidden = true; $("hide-backup").hidden = true; }
 window.addEventListener("blur", hideBackup);
 document.addEventListener("visibilitychange", () => { if (document.hidden) hideBackup(); });
-function showPage(next) { if (next !== "wallet") hideBackup(); page = next; document.querySelectorAll("[data-panel]").forEach(n => n.hidden = n.dataset.panel !== next); document.querySelectorAll("[data-page]").forEach(n => { n.classList.toggle("selected", n.dataset.page === next); n.setAttribute("aria-current", n.dataset.page === next ? "page" : "false"); }); if (next === "earning") { void provider(); void rewards(); } if (next === "wallet") void price(); }
+function showPage(next) {
+  if (!Object.hasOwn(pageTitles, next)) return;
+  if (next !== "wallet") hideBackup();
+  if (page !== next) {
+    if (page === "chat") window.KaiCoreChat?.hide();
+    if (page === "earning") window.KaiCoreEarning?.leave();
+    if (page === "network") window.KaiCoreNetwork?.leave();
+    priceGeneration++;
+  }
+  page = next;
+  document.querySelectorAll("[data-panel]").forEach(n => n.hidden = n.dataset.panel !== next);
+  document.querySelectorAll("[data-page]").forEach(n => {
+    const selected = n.dataset.page === (next === "buy-credits" ? "credits" : next);
+    n.classList.toggle("selected", selected); n.setAttribute("aria-current", selected ? "page" : "false");
+  });
+  text("workspace-title", pageTitles[next]);
+  if (next === "chat") window.KaiCoreChat?.show();
+  if (next === "earning") window.KaiCoreEarning?.enter();
+  if (next === "network") window.KaiCoreNetwork?.enter();
+  if (next === "credits") { renderCredits(); void refreshCreditActivity(); }
+  if (next === "buy-credits") void price();
+}
 for (const b of document.querySelectorAll("[data-page],[data-go]")) b.onclick = () => showPage(b.dataset.page || b.dataset.go);
+window.addEventListener("kai-core-navigate", event => showPage(event.detail?.page));
 function html(id, value) { if ($(id).innerHTML !== value) $(id).innerHTML = value; }
 async function refresh() {
   if (!bridge || refreshing || document.hidden) return; refreshing = true;
   try {
-    snapshot = await bridge.call("status"); const s = snapshot, ready = s.models.filter(m => m.status === "ready");
-    text("version", `v${s.version}`); text("model-count", ready.length); text("plugin-count", s.plugins.length);
-    const address = s.wallet.address; text("wallet-short", address ? `${address.slice(0,5)}…${address.slice(-4)}` : "Not set up");
+    snapshot = await bridge.call("status"); const s = snapshot;
+    applyPrivacy(s.network.privacyMode);
+    text("version", `v${s.version}`);
+    const address = s.wallet.address;
     text("wallet-state", address ? s.wallet.unlocked ? "Unlocked on this computer" : "Saved wallet · locked" : "Create or restore your wallet");
     text("wallet-address", address || "No wallet created"); text("wallet-detail", s.wallet.unlocked ? "Wallet unlocked. Plugins never receive its private key." : "Unlock to authorize wallet actions.");
     $("create-wallet").hidden = s.wallet.exists; $("restore-wallet").hidden = s.wallet.exists; $("unlock-button").hidden = !s.wallet.exists || s.wallet.unlocked; $("lock-wallet").hidden = !s.wallet.unlocked;
-    text("profile-title", s.profile.mode === "existing" ? "Your existing workspace is connected" : "Your new workspace is ready");
-    text("profile-detail", s.profile.mode === "existing" ? "Your wallet and installed models are read from the same profile. Nothing needs to be moved." : "Models and settings will be saved in your KAI profile.");
-    html("preserved", Object.entries(s.profile.preserved).filter(([, v]) => v).map(([k]) => `<span class="pill">${esc({wallet:"Wallet",chats:"Chat history",workflowsAndBrain:"Workflows & Brain",agentNetwork:"Agent services",node:"Node data"}[k])} preserved</span>`).join(""));
-    text("profile-path", s.profile.dataDir); text("backup-path", s.profile.backup || "New profile — no previous configuration to back up");
     if (document.activeElement !== $("privacy")) $("privacy").value = s.network.privacyMode;
     text("model-message", s.ensure?.state === "error" ? s.ensure.error || "The model could not be loaded. Try another model or retry."
       : s.importError || (s.importing ? `Importing model · ${Math.round(s.importing.pct || 0)}%`
       : s.ensure?.state === "working" ? `Preparing ${s.ensure.alias}…` : ""));
     text("download", s.download ? `Downloading · ${Math.round(s.download.pct || 0)}%` : s.runtime.activeAlias ? `Loaded: ${s.runtime.activeAlias}` : "");
     html("models", s.models.map(m => `<article><div class="row"><h2>${esc(m.label || m.alias)}</h2><span class="pill">${esc(m.status)}</span></div><p>${esc(m.alias)}</p><button data-model="${esc(m.alias)}">${m.status === "ready" ? "Load model" : "Download & load"}</button></article>`).join(""));
-    html("plugins", s.plugins.length ? s.plugins.map(p => `<article><div class="row"><h2>${esc(p.name)}</h2><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span></div><p>Version ${esc(p.version)}</p><p class="muted">${esc(p.permissions.join(" · ") || "No capabilities requested")}</p><div class="actions">${p.enabled ? `<button data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></article>`).join("") : "<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a signed package to add your first capability.</p></article>");
+    html("plugins", s.plugins.length ? s.plugins.map(p => {
+      const display = window.KaiPluginPresentation.get(p.id, p);
+      return `<article class="plugin-card"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted">Version ${esc(p.version)}</p><div class="actions">${p.enabled ? `<button data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></article>`;
+    }).join("") : "<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a plugin below to add the tools you need.</p></article>");
+    window.KaiCoreChat?.update(s);
     renderCatalog();
   } catch (e) { notify(e.message, true); } finally { refreshing = false; }
 }
 function renderCatalog() {
   if (!snapshot || !$("plugin-catalog")) return;
   const s = snapshot, query = ($("plugin-search")?.value || "").trim().toLowerCase();
-  const rows = (s.catalog || []).filter(p => `${p.name} ${p.description || ""} ${p.id}`.toLowerCase().includes(query));
+  const rows = (s.catalog || []).filter(p => { const display = window.KaiPluginPresentation.get(p.id, p); return `${display.name} ${display.description} ${p.id}`.toLowerCase().includes(query); });
   html("plugin-catalog", rows.length ? rows.map(p => {
+    const display = window.KaiPluginPresentation.get(p.id, p);
     const installed = s.plugins.some(x => x.id === p.id && x.version === p.version), blocked = p.compatible === false;
     const older = s.plugins.some(x => x.id === p.id);
-    return `<article><div class="row"><h2>${esc(p.name)}</h2><span class="pill">${p.official ? "KAI" : "Community"}</span></div><p>${esc(p.description || p.repository || "")}</p><p class="muted">Version ${esc(p.version)}${p.minCoreVersion ? ` · Core ${esc(p.minCoreVersion)}+` : ""}</p>${blocked ? `<p>${esc(p.compatibilityReason || "Update Core to use this plugin.")}</p>` : ""}<button data-install-plugin="${esc(p.id)}" ${installed || blocked ? "disabled" : ""}>${installed ? "Installed" : blocked ? "Requires newer Core" : older ? "Review update" : "Install"}</button></article>`;
+    return `<article class="plugin-card"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><span class="pill">${p.official ? "KAI" : "Community"}</span></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted">Version ${esc(p.version)}${p.minCoreVersion ? ` · Core ${esc(p.minCoreVersion)}+` : ""}</p>${blocked ? `<p>${esc(p.compatibilityReason || "Update Core to use this plugin.")}</p>` : ""}<button data-install-plugin="${esc(p.id)}" ${installed || blocked ? "disabled" : ""}>${installed ? "Installed" : blocked ? "Requires newer Core" : older ? "Review update" : "Install"}</button></article>`;
   }).join("") : "<p>No plugins match your search.</p>");
   const r = s.registry;
   text("registry-status", r?.available && !r.expired ? `Signed catalog ${r.version} · ${r.count} plugins. Refresh to check for new releases.` : r?.present ? `Catalog unavailable: ${r.error || "Refresh the catalog to continue."} You can still open installed plugins or install a signed package directly.` : r?.error ? `Catalog refresh failed: ${r.error}. Showing bundled KAI releases.` : "Showing bundled KAI releases. Refresh to load the signed public catalog.");
@@ -54,7 +79,16 @@ $("plugins").onclick = e => { const b = e.target.closest("[data-plugin]"); if (!
 if ($("plugin-catalog")) $("plugin-catalog").onclick = e => { const b = e.target.closest("[data-install-plugin]"); if (b) void action(b, () => bridge.call("plugins.install", { id: b.dataset.installPlugin })); };
 $("install-file").onclick = e => action(e.currentTarget, () => bridge.call("plugins.install"));
 $("install-url").onsubmit = e => { e.preventDefault(); void action(e.submitter, () => bridge.call("plugins.install", { url: $("plugin-url").value })); };
-$("privacy").onchange = e => action(e.currentTarget, async () => { await bridge.call("privacy", { mode: e.target.value }); window.KaiCredits.clear(); await window.KaiCredits.refresh(); });
+function applyPrivacy(mode) {
+  if (mode === knownPrivacy) return;
+  knownPrivacy = mode; priceGeneration++; purchaseInfoGeneration++; cancelledPurchases.clear();
+  window.dispatchEvent(new CustomEvent("kai-core-privacy-changed", { detail: { mode } }));
+  if (mode === "local-only") text("price", "Choose an online mode in Settings to buy credits.");
+}
+$("privacy").onchange = e => action(e.currentTarget, async () => {
+  const mode = e.target.value; await bridge.call("privacy", { mode }); applyPrivacy(mode);
+  window.KaiCredits.clear(); await window.KaiCredits.refresh();
+});
 $("unlock-wallet").onsubmit = e => { e.preventDefault(); void action(e.submitter, async () => { try { await bridge.call("wallet.unlock", { password: $("password").value }); } finally { $("password").value = ""; } }); };
 async function createWallet(restore) { try { const r = await bridge.call(restore ? "wallet.restore" : "wallet.create", { password: $("password").value, ...(restore ? { wif: $("restore-wif").value } : {}) }); if (r.wif) { text("wallet-backup", `Save this backup key privately:\n${r.wif}`); $("wallet-backup").hidden = false; $("hide-backup").hidden = false; } notify("Wallet ready."); } finally { $("password").value = ""; $("restore-wif").value = ""; } }
 $("create-wallet").onclick = e => action(e.currentTarget, () => createWallet(false));
@@ -65,7 +99,7 @@ $("connect-wallet").onclick = e => action(e.currentTarget, async () => { await b
 $("import-model").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("models.import"); if (r) await api("/core/models/import", { path: r.file }); });
 $("cancel-download").onclick = e => action(e.currentTarget, () => api("/core/models/download/cancel", {}));
 let priceBusy = false;
-async function price() { if (!bridge || priceBusy || page !== "wallet" || snapshot?.network.privacyMode === "local-only") return; priceBusy = true; const generation = ++priceGeneration, usd = $("usd").value; try { const r = await bridge.credit("purchase-estimate", { usd }); if (generation === priceGeneration) text("price", `Estimated payment: ${r.estimate.koin} KOIN · ${r.estimate.credits} credits`); } catch (e) { if (generation === priceGeneration) text("price", e.message); } finally { priceBusy = false; } }
+async function price() { if (!bridge || priceBusy || page !== "buy-credits" || snapshot?.network.privacyMode === "local-only") return; priceBusy = true; const generation = ++priceGeneration, usd = $("usd").value; try { const r = await bridge.credit("purchase-estimate", { usd }); if (generation === priceGeneration) text("price", `Estimated payment: ${r.estimate.koin} KOIN · ${r.estimate.credits} credits`); } catch (e) { if (generation === priceGeneration) text("price", e.message); } finally { priceBusy = false; } }
 $("usd").oninput = () => { priceGeneration++; text("price", "The exact KOIN payment will be shown before approval."); };
 $("buy-credits").onsubmit = e => { e.preventDefault(); const usd = $("usd").value; void action(e.submitter, async () => {
   text("purchase-state", "Preparing purchase…");
@@ -89,28 +123,50 @@ $("purchase-retry").onclick = e => action(e.currentTarget, async () => {
   try { const r = await bridge.credit("credit-purchase-retry"); text("purchase-state", r.detail || r.state); await window.KaiCredits.refresh(); }
   catch (error) { text("purchase-state", error.message); throw error; }
 });
-async function provider() { if (providerBusy || page !== "earning") return; providerBusy = true; try { const [info, state] = await Promise.all([bridge.credit("provider-public-info"), bridge.credit("provider-public-status")]); providerRunning = info.running || info.enabled; $("earning-toggle").setAttribute("aria-checked", String(Boolean(providerRunning))); text("earning-toggle", providerRunning ? "ON" : "OFF"); text("provider-label", state.label || state.state || "OFFLINE"); text("provider-detail", state.detail || info.detail || ""); text("provider-models", (info.offeredModels || []).join(" · ")); $("authorize-earning").hidden = !info.canAuthorize; } catch (e) { text("provider-detail", e.message); } finally { providerBusy = false; } }
-let rewardsBusy = false, lastRewards = null;
-const koin = atoms => { const value = BigInt(atoms), fraction = String(value % 100000000n).padStart(8, "0").replace(/0+$/, ""); return (value / 100000000n).toLocaleString() + (fraction ? "." + fraction : ""); };
-async function rewards() {
-  if (rewardsBusy || page !== "earning") return; rewardsBusy = true;
-  try {
-    const value = await bridge.credit("provider-public-earnings");
-    const rows = [...(value.summary?.pending || []), ...value.payouts].sort((a, b) => Number(b.epoch) - Number(a.epoch));
-    let markup = value.summary?.current?.availability != null ? `<p>Today's availability estimate: <strong>${esc(koin(value.summary.current.availability))} KOIN</strong></p>` : "";
-    markup += rows.length ? rows.slice(0, 12).map(r => `<div class="row"><span>${esc(new Date(Number(r.epoch) * 86400000).toLocaleDateString())} · ${esc(r.state.replaceAll("_", " "))}</span><strong>${esc(koin((BigInt(r.availability) + BigInt(r.work)).toString()))} KOIN</strong></div>`).join("") : "<p>No reward allocations have been reported yet.</p>";
-    lastRewards = value; html("rewards", markup); text("reward-status", `Checked ${new Date(value.observedAt).toLocaleTimeString()}`);
-  } catch (error) {
-    if (!lastRewards) html("rewards", "<p>Reward history is currently unavailable.</p>");
-    text("reward-status", `${lastRewards ? "Showing the last verified reward history. " : ""}${error.message}`);
-  } finally { rewardsBusy = false; }
-}
-$("earning-toggle").onclick = e => action(e.currentTarget, async () => { await bridge.credit(providerRunning ? "provider-public-stop" : "provider-public-start"); await provider(); });
-$("authorize-earning").onclick = e => action(e.currentTarget, async () => { await bridge.credit("provider-public-authorize"); await provider(); });
-$("download-provider").onclick = e => action(e.currentTarget, async () => { await bridge.credit("provider-public-download"); await provider(); });
 $("check-updates").onclick = e => action(e.currentTarget, async () => text("update-state", (await bridge.call("updates.check")).message));
-window.KaiCredits.subscribe(state => { const p = window.KaiCreditPresentation(state); text("credits", p.total); text("credit-breakdown", p.breakdown); text("credit-detail", p.status || p.detail); });
-if (!bridge) notify("Open KAI Core desktop to use this workspace.", true); else void refresh();
-setInterval(() => { if (!document.hidden) { void refresh(); if (page === "earning") void provider(); } }, 5000);
+async function refreshCreditActivity() {
+  await window.KaiCredits.refresh();
+  if (!bridge || !window.KaiCreditPresentation(creditState || {}).usd || knownPrivacy === "local-only") return;
+  const key = creditState.snapshot.key, generation = ++purchaseInfoGeneration;
+  try {
+    const info = await bridge.credit("purchase-info");
+    if (generation !== purchaseInfoGeneration || key !== creditState?.snapshot?.key) return;
+    cancelledPurchases = new Set((Array.isArray(info?.cancelledPurchases) ? info.cancelledPurchases : []).map(p => p?.txId).filter(id => typeof id === "string"));
+    renderCredits();
+  } catch { /* The verified server activity remains available if local payment history cannot be read. */ }
+}
+// Activity amounts use the same integer credit units as the verified balance.
+function creditAmount(value) {
+  if (typeof value !== "string" || !/^(0|[1-9]\d{0,19})$/.test(value) || BigInt(value) > (1n << 64n) - 1n) return null;
+  const n = BigInt(value), fraction = String(n % 100000n).padStart(5, "0").replace(/0+$/, "");
+  return (n / 100000n).toLocaleString() + (fraction ? "." + fraction : "");
+}
+function renderCredits() {
+  if (!creditState) return;
+  const p = window.KaiCreditPresentation(creditState), s = creditState.snapshot;
+  text("credits", p.total); text("credit-breakdown", p.breakdown); text("credit-detail", [p.status, p.detail].filter(Boolean).join(" "));
+  if (!p.usd) {
+    html("credit-activity", `<p class="muted">${esc(s ? "Activity for USD credits will appear here when connected." : creditState.status === "loading" ? "Loading your credit activity…" : "Credit activity is unavailable. Try refreshing your credits.")}</p>`);
+    text("credit-activity-status", ""); return;
+  }
+  const filter = $("credit-filter").value || "all";
+  const when = value => { const stamp = Number(value); return Number.isFinite(stamp) && stamp > 0 && Number.isFinite(new Date(stamp).getTime()) ? stamp : 0; };
+  const rows = [
+    ...(Array.isArray(s.usage) ? s.usage : []).slice(0, 500).filter(u => u && typeof u === "object").map(u => ({ kind: "usage", title: `Chat${u.model ? " · " + String(u.model).slice(0, 120) : ""}`, at: when(u.at), status: "Delivered", amount: creditAmount(u.credits), prefix: "−" })),
+    ...(Array.isArray(s.purchases) ? s.purchases : []).slice(0, 500).filter(u => u && typeof u === "object").map(u => {
+      const confirmed = u.state === "confirmed", cancelled = !confirmed && (u.state === "cancelled" || cancelledPurchases.has(u.id));
+      return { kind: "purchase", title: "Purchased credits", at: when(u.confirmedAt || u.createdAt), status: confirmed ? "Added to balance" : cancelled ? "Cancelled · no purchase" : String(u.state || "Pending").replaceAll("_", " ").slice(0, 100), amount: confirmed ? creditAmount(u.credits ?? u.amount) : cancelled ? "0" : "Pending", prefix: confirmed ? "+" : "" };
+    }),
+  ].filter(r => filter === "all" || r.kind === filter).sort((a, b) => b.at - a.at);
+  html("credit-activity", rows.length ? `<div class="table-scroll"><table class="activity-table"><thead><tr><th scope="col">Activity</th><th scope="col">When</th><th scope="col">Status</th><th scope="col">Credits</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.title)}</td><td>${esc(r.at ? new Date(r.at).toLocaleString() : "—")}</td><td>${esc(r.status)}</td><td>${r.amount === null ? "Unavailable" : esc(r.prefix + r.amount)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">${filter === "usage" ? "Your network chat usage will appear here." : filter === "purchase" ? "Your credit purchases will appear here." : "Your purchases and network chat usage will appear here."}</p>`);
+  text("credit-activity-status", p.stale ? "Showing your last verified activity. Refresh when your connection is available." : `Checked ${new Date(s.receivedAt).toLocaleString()}`);
+}
+$("credit-filter").onchange = renderCredits;
+window.KaiCredits.subscribe(state => {
+  const key = state.snapshot?.key;
+  if (!state.snapshot || purchaseInfoKey !== key) { purchaseInfoGeneration++; cancelledPurchases.clear(); purchaseInfoKey = key; }
+  creditState = state; renderCredits();
+});
+if (!bridge) notify("Open KAI Core desktop to use this workspace.", true); else void refresh().then(() => { if (page === "chat") showPage("chat"); });
+setInterval(() => { if (!document.hidden) { void refresh(); renderCredits(); } }, 5000);
 setInterval(() => { if (!document.hidden) void price(); }, 30000);
-setInterval(() => { if (!document.hidden && page === "earning") void rewards(); }, 15000);

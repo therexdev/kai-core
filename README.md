@@ -6,7 +6,13 @@ Alpha/Test release pipelines, starting from `kaiapp` Test commit
 
 ## What runs now
 
-- Electron desktop with Overview, Models, Plugins, Wallet & credits, Earn KOIN and Settings.
+- Familiar pearl/cobalt desktop with Chat, Models, Plugins, Wallet, Credits and Usage,
+  Earn KOIN, and the original bottom-left Settings and Network navigation.
+- Simple built-in text chat with separate local/network conversations. Local chat
+  cannot fall back to the network; network chat uses the existing verified credit
+  service and delivery recovery. Advanced tools remain optional plugins.
+- Your Credits shows available balance, purchases and usage; Buy credits opens a
+  separate purchase screen with the existing native quote approval.
 - Existing local models/runtime manager and OpenAI-compatible local API.
 - Existing wallet/address, encrypted credential identity, credits and provider services.
 - The same user profile and model paths. Alpha, Test and Core use one Electron lock:
@@ -42,7 +48,7 @@ native upgrade verification are required before replacing the old app publicly.
 
 ## Install the feature plugins
 
-Core 0.3.0 includes direct install cards for eleven signed first-party plugins in
+Core 0.4.0 includes direct install cards for eleven signed first-party plugins in
 **Plugins**. Choose **Refresh catalog** to fetch the signed public
 [plugin registry](https://github.com/therexdev/kai-plugin-registry). Catalog installs
 verify the exact package digest, publisher, permissions and Core compatibility.
@@ -51,7 +57,7 @@ loading a catalog, an expired or invalid catalog must be refreshed before choosi
 a catalog release; installed plugins and direct package installation still work.
 Every installation asks you to review permissions; nothing installs automatically.
 Local-Only privacy blocks downloads; a downloaded `.kaiplugin` file can be installed
-with **Install package**. Third-party signed packages still use the public API.
+under **Install 3rd Party Plugins** at the bottom of the marketplace. Third-party signed packages still use the public API.
 
 Available repositories: [Assistant](https://github.com/therexdev/kai-plugin-assistant),
 [Brain](https://github.com/therexdev/kai-plugin-brain),
@@ -72,7 +78,9 @@ in the native process. Processes/files/account actions receive additional review
 
 ## Preview scope
 
-These are initial installable feature releases, not full legacy feature parity.
+These are preview feature releases, not full legacy feature parity. Built-in simple
+chat keeps conversations in memory for the current app session; the Assistant plugin
+provides saved conversations. The original data remains in the shared profile.
 Assistant supports saved text conversations; legacy desktop mascot/live microphone
 features are not extracted. Workflows runs the supported local/manual graph subset;
 unsafe legacy flows and saved schedules remain preserved and inactive. Agent Network

@@ -7,9 +7,9 @@ const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 const { channelConfig, configureDesktop, configureUpdater } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, features, payments, updater, report, pluginDownload, shuttingDown = false, installBusy = false;
+let core, win, pluginHost, features, payments, coreChat, updater, report, pluginDownload, shuttingDown = false, installBusy = false;
 const { trustedMainDocument, protectNavigation } = require("./window-security");
-async function stop() { pluginDownload?.abort(); await pluginHost?.closeAll(); await features?.dispose(); await payments?.dispose(); await core?.stop(); }
+async function stop() { pluginDownload?.abort(); await coreChat?.dispose(); await pluginHost?.closeAll(); await features?.dispose(); await payments?.dispose(); await core?.stop(); }
 app.on("before-quit", event => {
   if (!core || shuttingDown) return;
   event.preventDefault(); shuttingDown = true;
@@ -32,8 +32,9 @@ async function start() {
     sessionSecret: require("./wallet-session-secret").machineSecret(dataDir, electron.safeStorage),
     creditAccountOrigin: service.state === "ready" ? new URL(service.config.schedulerUrl).origin : null });
   core.gateway.staticAssets.set("/credit-account.js", path.join(__dirname, "../ui/credit-account.js"));
+  core.gateway.staticAssets.set("/reward-summary.js", path.join(__dirname, "../ui/reward-summary.js"));
   const port = await core.start(), origin = `http://127.0.0.1:${port}`;
-  win = new BrowserWindow({ width: 1200, height: 820, minWidth: 800, minHeight: 600, title: "KAI Core", backgroundColor: "#10141d", autoHideMenuBar: true,
+  win = new BrowserWindow({ width: 1200, height: 820, minWidth: 800, minHeight: 600, title: "KAI Core", backgroundColor: "#f4f7fd", autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, "core-preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   protectNavigation(win.webContents, origin, () => {});
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -64,9 +65,14 @@ async function start() {
   });
   pluginHost = new (require("./core-plugin-host").PluginHost)({ electron, manager, core, features });
   payments = require("./koin-test-ipc").registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, isTest: false });
+  coreChat = new (require("./core-chat").CoreChat)({ core });
+  win.webContents.on("render-process-gone", () => { void coreChat.stop(); });
+  win.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) void coreChat.stop(); });
   ipcMain.handle("kai-core:call", async (event, method, input) => {
     if (!trustedMainDocument(event, win, origin) || shuttingDown) throw Error("Core desktop access denied");
     switch (method) {
+      case "chat.local": return coreChat.send(input);
+      case "chat.stop": return coreChat.stop();
       case "status": return { version: app.getVersion(), profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
         models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null, plugins: manager.list(), catalog: catalog(), registry: registry.status() };
       case "plugins.registry.refresh": {

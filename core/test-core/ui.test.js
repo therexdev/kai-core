@@ -1,10 +1,12 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "../../ui-core/core.js"), "utf8");
+const presentation = () => fs.readFileSync(path.join(__dirname, "../../ui-core/presentation.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "../../ui-core/index.html"), "utf8");
 const flush = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve)); };
 function fixture({ state = {}, credit, call } = {}) {
   const elements = new Map(), windowEvents = new Map(), docEvents = new Map(), calls = [];
+  let creditListener;
   function element(id) {
     return { id, textContent: "", innerHTML: "", value: id === "usd" ? "1" : "", hidden: false, disabled: false, dataset: {}, attrs: {},
       setAttribute(k, v) { this.attrs[k] = v; }, classList: { toggle() {} } };
@@ -17,13 +19,15 @@ function fixture({ state = {}, credit, call } = {}) {
     async credit(method, input) { calls.push({ kind: "credit", method, input }); return credit?.(method, input); },
   };
   const context = vm.createContext({ console, setInterval() { return 1; }, clearInterval() {},
-    window: { kaiCore: bridge, addEventListener(event, fn) { windowEvents.set(event, fn); }, KaiCredits: { subscribe() {}, clear() {}, async refresh() {} }, KaiCreditPresentation() { return {}; } },
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    window: { kaiCore: bridge, dispatchEvent(event) { windowEvents.get(event.type)?.(event); }, addEventListener(event, fn) { windowEvents.set(event, fn); }, KaiCredits: { subscribe(fn) { creditListener = fn; }, clear() {}, async refresh() {} }, KaiCreditPresentation: require("../../ui/credit-account").creditPresentation },
     document: { hidden: false, activeElement: null, getElementById(id) { assert.ok(elements.has(id), `Missing element ${id}`); return elements.get(id); }, querySelectorAll() { return []; }, addEventListener(event, fn) { docEvents.set(event, fn); } },
     async fetch(url, options) { calls.push({ kind: "fetch", url, options }); return { ok: true, async json() { return { ok: true }; } }; },
   });
+  vm.runInContext(presentation(), context, { filename: "presentation.js" });
   vm.runInContext(source, context, { filename: "core.js" });
   const submit = id => { const button = element("submit"); elements.get(id).onsubmit({ preventDefault() {}, submitter: button }); return flush(); };
-  return { context, elements, calls, snapshot, windowEvents, docEvents, submit, $: id => elements.get(id) };
+  return { context, elements, calls, snapshot, windowEvents, docEvents, submit, acceptCredits: state => creditListener(state), $: id => elements.get(id) };
 }
 
 test("existing wallet UI does not create or restore a wallet on startup", async () => {
@@ -73,17 +77,6 @@ test("model import and asynchronous load errors appear in the model view", async
   assert.equal(f.$("model-message").textContent, "Insufficient memory");
 });
 
-test("reward feed displays verified amounts and marks retained results when read fails", async () => {
-  let offline = false;
-  const f = fixture({ credit: async method => {
-    if (method === "provider-public-earnings") { if (offline) throw Error("Connection unavailable"); return { observedAt: 1793318400000, payouts: [{ epoch: "20755", state: "paid", availability: "125000000", work: "75000000" }] }; }
-    return {};
-  } }); await flush(); f.context.showPage("earning"); await flush();
-  assert.match(f.$("rewards").innerHTML, /2 KOIN/); assert.match(f.$("rewards").innerHTML, /paid/);
-  const previous = f.$("rewards").innerHTML; offline = true; await f.context.rewards();
-  assert.equal(f.$("rewards").innerHTML, previous); assert.match(f.$("reward-status").textContent, /last verified/);
-});
-
 test("plugin labels are escaped rather than interpreted as HTML", async () => {
   const f = fixture({ state: { plugins: [{ id: "example.safe", name: '<img src=x onerror="attack()">', enabled: true, version: "1.0.0", permissions: [] }] } });
   await flush(); assert.match(f.$("plugins").innerHTML, /&lt;img/); assert.doesNotMatch(f.$("plugins").innerHTML, /<img/);
@@ -96,4 +89,54 @@ test("catalog displays community compatibility and escapes developer metadata wi
   assert.ok(f.calls.every(call => call.method === "status"));
   f.$("plugin-search").value = "not present"; f.$("plugin-search").oninput();
   assert.match(f.$("plugin-catalog").innerHTML, /No plugins match/);
+});
+
+function creditsState(extra = {}) {
+  return { status: "ready", snapshot: { key: "synthetic-credit-account", product: "prepaid-usd-v1", receivedAt: Date.now(),
+    credits: { unit: "USD-1e-8", available: "125000000", purchased: { available: "100000000" }, free: { available: "25000000", state: "available" } },
+    usage: [{ model: '<img onerror="attack()">', at: Date.now(), credits: "125000" }],
+    purchases: [{ state: "confirmed", confirmedAt: Date.now() - 1000, credits: "100000000" }, { state: "pending", createdAt: Date.now() - 2000, amount: "50000000" }], ...extra } };
+}
+test("Your Credits displays verified balances and escaped usage with separate purchase filtering", async () => {
+  const f = fixture(); await flush(); f.acceptCredits(creditsState());
+  assert.equal(f.$("credits").textContent, "1,250");
+  let markup = f.$("credit-activity").innerHTML;
+  assert.match(markup, /−1.25/); assert.match(markup, /\+1,000/); assert.match(markup, /Pending/);
+  assert.match(markup, /&lt;img/); assert.doesNotMatch(markup, /<img/);
+  f.$("credit-filter").value = "purchase"; f.$("credit-filter").onchange();
+  markup = f.$("credit-activity").innerHTML;
+  assert.doesNotMatch(markup, /Chat/); assert.match(markup, /Purchased credits/);
+  f.$("credit-filter").value = "usage"; f.$("credit-filter").onchange();
+  assert.doesNotMatch(f.$("credit-activity").innerHTML, /Purchased credits/);
+});
+test("retained credit activity is marked stale and invalid amounts never become invented credits", async () => {
+  const f = fixture(); await flush();
+  const state = creditsState({ usage: [{ model: "model", at: Date.now(), credits: "not-a-number" }] });
+  state.status = "unavailable"; state.error = "offline"; f.acceptCredits(state);
+  assert.match(f.$("credit-detail").textContent, /last verified/);
+  assert.match(f.$("credit-activity-status").textContent, /last verified activity/);
+  assert.match(f.$("credit-activity").innerHTML, /Unavailable/);
+  f.acceptCredits({ status: "loading", snapshot: null });
+  assert.doesNotMatch(f.$("credit-activity").innerHTML, /Purchased credits/);
+  assert.equal(f.$("credits").textContent, "…");
+});
+test("Wallet and Your Credits do not request purchase estimates; the purchase screen does", async () => {
+  const f = fixture({ state: { network: { privacyMode: "network" } }, credit: async method => method === "purchase-estimate" ? { estimate: { koin: "1", credits: "1000" } } : {} });
+  await flush(); f.context.showPage("wallet"); f.context.showPage("credits"); await flush();
+  assert.ok(!f.calls.some(c => c.method === "purchase-estimate"));
+  f.context.showPage("buy-credits"); await flush();
+  assert.equal(f.$("workspace-title").textContent, "Buy credits");
+  assert.equal(f.calls.filter(c => c.method === "purchase-estimate").length, 1);
+});
+
+test("cancelled saved payments are shown without erasing confirmed server purchases", async () => {
+  const f = fixture({ state: { network: { privacyMode: "network" } }, credit: async method => method === "purchase-info" ? { cancelledPurchases: [{ txId: "cancelled-id" }, { txId: "confirmed-id" }] } : {} });
+  await flush(); f.acceptCredits(creditsState({ purchases: [
+    { id: "cancelled-id", state: "pending", amount: "100000000" },
+    { id: "confirmed-id", state: "confirmed", credits: "100000000" },
+  ] }));
+  f.context.showPage("credits"); await flush();
+  assert.match(f.$("credit-activity").innerHTML, /Cancelled · no purchase/);
+  assert.match(f.$("credit-activity").innerHTML, /Added to balance/);
+  assert.match(f.$("credit-activity").innerHTML, /\+1,000/);
 });

@@ -1,11 +1,86 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'"><title>KAI Core</title><link rel="stylesheet" href="core.css"></head>
-<body><aside><div class="brand">KAI<span>CORE</span></div><p class="tagline">Your intelligence. Your control.</p><nav aria-label="Main navigation"><button data-page="overview" class="selected">Overview</button><button data-page="models">Models</button><button data-page="plugins">Plugins</button><button data-page="wallet">Wallet &amp; credits</button><button data-page="earning">Earn KOIN</button><button data-page="settings">Settings</button></nav><div class="sidebar-foot"><span class="dot"></span> Local core <small id="version"></small></div></aside>
-<main><div id="notice" role="status" hidden></div>
-<section data-panel="overview"><div class="eyebrow">YOUR WORKSPACE</div><h1>A familiar foundation.<br>A new way to build.</h1><p class="lead">Run models, share capacity, and add the tools you need.</p><div class="stats"><article><span>Installed models</span><strong id="model-count">—</strong><small>Ready on this computer</small></article><article><span>Your wallet</span><strong id="wallet-short">—</strong><small id="wallet-state">Checking saved wallet</small></article><article><span>Installed plugins</span><strong id="plugin-count">0</strong><small>Capabilities you choose</small></article></div><article class="wide"><div class="eyebrow">CONTINUE WHERE YOU LEFT OFF</div><h2 id="profile-title">Checking your existing workspace</h2><p id="profile-detail"></p><div id="preserved" class="pills"></div><p class="muted">Workflows, Brain, Agent Network and other saved feature data stay in place. Install their compatible plugins to continue using them.</p></article><div class="two"><article><h2>Make this your KAI</h2><p>Install a signed plugin package from a developer you trust. Each plugin runs with only its approved capabilities.</p><button class="primary" data-go="plugins">Explore plugins →</button></article><article><h2>Put your models to work</h2><p>Your existing model files are reused. No duplicate downloads or model moves are required.</p><button data-go="models">Open model library →</button></article></div></section>
-<section data-panel="models" hidden><div class="eyebrow">LOCAL INTELLIGENCE</div><h1>Your model library</h1><p class="lead">Installed models stay in their existing location.</p><div class="actions"><button id="import-model">Import GGUF</button><button id="cancel-download">Cancel download</button><span id="download" role="status"></span></div><p id="model-message" role="status"></p><div id="models" class="cards"></div></section>
-<section data-panel="plugins" hidden><div class="eyebrow">BUILD YOUR WORKSPACE</div><h1>Plugins</h1><p class="lead">Choose the capabilities you need and review each plugin’s permissions.</p><article><div class="actions"><button class="primary" id="install-file">Install package</button><form id="install-url"><label class="sr-only" for="plugin-url">Plugin package URL</label><input id="plugin-url" type="url" placeholder="https://…/plugin.kaiplugin" required><button>Install from URL</button></form></div><p class="muted">Install an official plugin below, or a signed third-party package from a file or direct HTTPS URL. Each installation asks you to review its permissions.</p></article><h2>Your installed plugins</h2><div id="plugins" class="cards"></div><div class="row"><h2>Plugin catalog</h2><button id="refresh-registry">Refresh catalog</button></div><p id="registry-status" class="muted" role="status">Bundled KAI plugins are available without refreshing.</p><label class="sr-only" for="plugin-search">Search plugins</label><input id="plugin-search" type="search" placeholder="Search plugins by name or purpose"><div id="plugin-catalog" class="cards"></div><article><h2>Your saved agents and workflows</h2><p>Workflows builds reusable agents and flows. Agent Network manages service listings and jobs separately. Existing definitions remain in your profile; paid rentals require a configured compatible network deployment.</p></article></section>
-<section data-panel="wallet" hidden><div class="eyebrow">YOUR EXISTING IDENTITY</div><h1>Wallet &amp; credits</h1><p class="lead">The same wallet address and network account.</p><div class="two"><article><h2>Wallet</h2><code id="wallet-address">No wallet created</code><p id="wallet-detail"></p><form id="unlock-wallet"><label for="password">Wallet password</label><input id="password" type="password" autocomplete="current-password" minlength="8" required><div class="actions"><button class="primary" id="unlock-button">Unlock wallet</button><button type="button" id="create-wallet">Create wallet</button><button type="button" id="lock-wallet">Lock</button></div></form><details id="restore-wallet"><summary>Restore an existing wallet</summary><label for="restore-wif">Wallet backup key</label><input id="restore-wif" type="password" autocomplete="off"><button id="restore-button">Restore with password above</button></details><pre id="wallet-backup" hidden></pre><button id="hide-backup" hidden>Hide backup key</button></article><article><h2>AI credits</h2><strong class="balance" id="credits">—</strong><p id="credit-breakdown"></p><p id="credit-detail" class="muted"></p><button id="connect-wallet">Connect wallet</button><hr><form id="buy-credits"><label for="usd">Purchase amount (USD)</label><input id="usd" type="number" min="0.01" step="0.01" value="1" required><p id="price">Your exact KOIN payment will be reviewed before approval.</p><button class="primary">Buy credits</button></form><p id="purchase-state" role="status"></p><button id="purchase-retry">Recover pending purchase</button></article></div></section>
-<section data-panel="earning" hidden><div class="eyebrow">CONTRIBUTE TO THE NETWORK</div><h1>Share AI. Earn KOIN.</h1><p class="lead">Use this computer’s spare capacity with the existing KAI network.</p><article><div class="row"><h2>Share AI capacity</h2><button id="earning-toggle" role="switch" aria-checked="false">OFF</button></div><h2 id="provider-label">OFFLINE</h2><p id="provider-detail">Sharing is off.</p><div class="actions"><button id="authorize-earning">Authorize this device</button><button id="download-provider">Prepare provider model</button></div><p id="provider-models" class="muted"></p></article><article><h2>Reward activity</h2><div id="rewards">Open this page to check current rewards.</div><p id="reward-status" class="muted" role="status"></p></article></section>
-<section data-panel="settings" hidden><div class="eyebrow">CORE CONTROLS</div><h1>Settings</h1><article><h2>AI privacy</h2><label for="privacy">Where AI can run</label><select id="privacy"><option value="local-only">Local only</option><option value="local-first">Local first</option><option value="network">Network</option></select><p class="muted">Plugin inference in this release always stays local. Network credits and earning use the existing network controls.</p></article><article><h2>Storage &amp; continuity</h2><p>Only one KAI application can use this profile at a time. Fully quit Alpha or Test before opening Core.</p><label>Profile location</label><code id="profile-path"></code><label>Configuration backup</label><code id="backup-path"></code><p class="muted">Models, chats and node databases are retained in place. The configuration backup does not copy large model or node files.</p></article><article><h2>Application updates</h2><p>KAI Core uses its own releases. It does not update Alpha or Test.</p><button id="check-updates">Check for updates</button><p id="update-state"></p></article></section>
-</main><script src="credit-account.js"></script><script src="core.js"></script></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <title>KAI Core</title>
+  <link rel="stylesheet" href="core.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="brand">
+      <img class="brand-mark" src="assets/brand-mark.svg" width="35" height="38" alt="">
+      <div><div class="brand-name">Koinos<span>AI</span></div><div class="brand-tagline">THINK · BUILD · GROW</div></div>
+    </div>
+    <nav id="nav" aria-label="Main navigation">
+      <button class="nav-item selected" data-page="chat" aria-label="Chat with KAI" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v12H9l-4 4Z"/></svg><span>Chat with KAI</span></button>
+      <button class="nav-item" data-page="models" aria-label="Model library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg><span>Model library</span></button>
+      <button class="nav-item" data-page="plugins" aria-label="Plugins"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v3a2 2 0 1 0 4 0V4h6v6h-3a2 2 0 1 0 0 4h3v6h-6v-3a2 2 0 1 0-4 0v3H4v-6h3a2 2 0 1 0 0-4H4Z"/></svg><span>Plugins</span></button>
+      <div class="nav-divider" role="separator"></div>
+      <button class="nav-item" data-page="wallet" aria-label="Wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5l13-2v4M4 7h16v14H4ZM16 12h4v5h-4Z"/></svg><span>Wallet</span></button>
+      <button class="nav-item" data-page="credits" aria-label="Credits and Usage"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="10" cy="5" rx="6" ry="3"/><path d="M4 5v5c0 4 12 4 12 0V5M4 10v5c0 2 4 3 7 3M16 12h5v9h-9v-6M16 16v2"/></svg><span>Credits and Usage</span></button>
+      <button class="nav-item" data-page="earning" aria-label="Earn KOIN"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V13h4v7M10 20V8h4v12M16 20V3h4v17"/></svg><span>Earn KOIN</span></button>
+    </nav>
+    <div class="sidebar-status"><span class="dot"></span><span>KAI Core</span></div>
+    <div class="rail-icons" aria-label="App controls">
+      <button class="rail-icon" data-page="settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3-.6 2.3-2 .9-2.1-.7-2 3.5L4 10.7v2.6L2.3 15l2 3.5 2.1-.7 2 .9L9 21h4l.6-2.3 2-.9 2.1.7 2-3.5-1.7-1.7v-2.6L19.7 9l-2-3.5-2.1.7-2-.9L13 3Z"/></svg><span>Settings</span></button>
+      <button class="rail-icon" data-page="network" aria-label="Network" title="Network"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><circle cx="4.8" cy="18" r="2.2"/><circle cx="19.2" cy="18" r="2.2"/><path d="M12 6.7v4.8M12 11.5 6.3 16.3M12 11.5l5.7 4.8"/></svg><span>Network</span></button>
+    </div>
+    <footer class="sidebar-foot"><span id="version"></span></footer>
+  </aside>
+  <main id="main">
+    <header class="workspace-header"><h1 id="workspace-title">Chat with KAI</h1><span class="workspace-badge">CORE</span></header>
+    <div id="notice" role="status" hidden></div>
+    <div class="workspace-content">
+      <section data-panel="chat" class="chat-page" aria-label="Chat with KAI"><div id="chat-content"></div></section>
+      <section data-panel="models" class="page" hidden>
+        <div class="page-head"><div><h1>Your model library</h1><p>Choose the models you want to use on this computer.</p></div><button id="import-model">Import GGUF</button></div>
+        <div class="actions model-progress"><span id="download" role="status"></span><button id="cancel-download">Cancel download</button></div>
+        <p id="model-message" role="status"></p><div id="models" class="cards"></div>
+      </section>
+      <section data-panel="plugins" class="page" hidden>
+        <div class="page-head"><div><h1>Plugins</h1><p>Add the capabilities you want in your workspace.</p></div></div>
+        <h2 class="section-heading">Your installed plugins</h2><div id="plugins" class="cards plugin-cards"></div>
+        <div class="marketplace-head"><h2>Marketplace</h2><button id="refresh-registry">Refresh catalog</button></div>
+        <p id="registry-status" class="catalog-note" role="status"></p>
+        <label class="sr-only" for="plugin-search">Search plugins</label><input id="plugin-search" type="search" placeholder="Search plugins by name or purpose">
+        <div id="plugin-catalog" class="cards plugin-cards"></div>
+        <details id="third-party-install" class="third-party-install">
+          <summary><span>Install 3rd Party Plugins</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary>
+          <div class="third-party-content">
+            <p>Install a signed package from a developer you trust. You’ll review its publisher and permissions before installation.</p>
+            <div class="actions"><button id="install-file">Install package</button><form id="install-url"><label class="sr-only" for="plugin-url">Plugin package URL</label><input id="plugin-url" type="url" placeholder="https://…/plugin.kaiplugin" required><button class="primary">Install from URL</button></form></div>
+          </div>
+        </details>
+      </section>
+      <section data-panel="wallet" class="page" hidden>
+        <div class="page-head"><div><h1>Your wallet</h1><p id="wallet-state">Checking your saved wallet.</p></div></div>
+        <article class="wallet-card">
+          <h2>Wallet address</h2><code id="wallet-address">No wallet created</code><p id="wallet-detail"></p>
+          <form id="unlock-wallet"><label for="password">Wallet password</label><input id="password" type="password" autocomplete="current-password" minlength="8" required><div class="actions"><button class="primary" id="unlock-button">Unlock wallet</button><button type="button" id="create-wallet">Create wallet</button><button type="button" id="lock-wallet">Lock</button></div></form>
+          <details id="restore-wallet" class="subtle-details"><summary>Restore an existing wallet</summary><label for="restore-wif">Wallet backup key</label><input id="restore-wif" type="password" autocomplete="off"><button id="restore-button">Restore with password above</button></details>
+          <pre id="wallet-backup" hidden></pre><button id="hide-backup" hidden>Hide backup key</button>
+        </article>
+      </section>
+      <section data-panel="credits" class="page" hidden>
+        <div class="page-head"><div><h1>Your Credits</h1><p>Your balance and network usage in one place.</p></div><button class="primary" data-go="buy-credits">Buy credits</button></div>
+        <article class="credit-summary"><p class="eyebrow">Available to use</p><div class="balance"><strong id="credits">—</strong> <small>credits</small></div><p id="credit-breakdown"></p><p id="credit-detail" class="muted" role="status"></p></article>
+        <article class="credit-history"><div class="row"><h2>Activity</h2><label class="sr-only" for="credit-filter">Filter credit activity</label><select id="credit-filter"><option value="all">All activity</option><option value="usage">Usage</option><option value="purchase">Purchases</option></select></div><div id="credit-activity"><p class="muted">Your credit activity will appear here.</p></div><p id="credit-activity-status" class="muted" role="status"></p></article>
+      </section>
+      <section data-panel="buy-credits" class="page" hidden>
+        <div class="page-head"><div><h1>Buy credits</h1><p>Add credits to use models on the Koinos network.</p></div><button data-go="credits">Your Credits</button></div>
+        <article class="purchase-card"><h2>Choose an amount</h2><form id="buy-credits"><label for="usd">Purchase amount (USD)</label><div class="amount-input"><span>$</span><input id="usd" type="number" min="0.01" step="0.01" value="1" required></div><p id="price">Your KOIN payment will be shown before approval.</p><button class="primary">Buy credits</button></form><p id="purchase-state" role="status"></p><div class="purchase-help"><button id="connect-wallet" class="text-button">Connect wallet</button><button id="purchase-retry" class="text-button">Recover pending purchase</button></div></article>
+      </section>
+      <section data-panel="earning" class="page" hidden><div id="earning-content"></div></section>
+      <section data-panel="network" class="page" hidden><div id="network-content"></div></section>
+      <section data-panel="settings" class="page" hidden>
+        <div class="page-head"><div><h1>Settings</h1><p>Make this workspace your own.</p></div></div>
+        <article><h2>AI privacy</h2><label for="privacy">Where AI can run</label><select id="privacy"><option value="local-only">Local only</option><option value="local-first">Local first</option><option value="network">Network</option></select><p class="muted">Choose Local only to keep chat on this computer. Choose an online mode to use network models and credits.</p></article>
+        <article><h2>Application updates</h2><p>Keep KAI Core up to date.</p><button id="check-updates">Check for updates</button><p id="update-state" role="status"></p></article>
+      </section>
+    </div>
+  </main>
+  <script src="credit-account.js"></script><script src="presentation.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="core.js"></script>
+</body>
+</html>
