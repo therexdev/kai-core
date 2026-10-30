@@ -78,7 +78,8 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "KAI-Core-Setup-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [
@@ -119,7 +120,10 @@
         "releaseType": "draft"
       }
     ],
-    "artifactName": "KAI-Core-${version}-${os}-${arch}.${ext}"
+    "artifactName": "KAI-Core-${version}-${os}-${arch}.${ext}",
+    "portable": {
+      "artifactName": "KAI-Core-Portable-${version}-${arch}.${ext}"
+    }
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",
