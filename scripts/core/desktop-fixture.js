@@ -167,6 +167,14 @@ function install({ appRoot }) {
       return options.Menu.buildFromTemplate(template);
     } } });
   };
+  // Reconciliation/provider timers bypass IPC. Keep scheduling and teardown
+  // real, but never enroll this synthetic profile or provider for credits.
+  const { CreditService } = require(path.join(appRoot, "electron/credit-service.js")), creditRun = CreditService.prototype.run;
+  CreditService.prototype.run = async function(action, ...args) {
+    if (action === "purchase-sync") return { state: "none" };
+    return creditRun.call(this, action, ...args);
+  };
+  require(path.join(appRoot, "electron/credit-provider.js")).CreditProvider.prototype.tick = async () => {};
   const paymentModule = require(path.join(appRoot, "electron/koin-test-ipc.js")), registerPayments = paymentModule.registerTestPaymentIPC;
   paymentModule.registerTestPaymentIPC = (...args) => {
     const payments = registerPayments(...args), dispose = payments.dispose.bind(payments), isProviding = payments.isProviding?.bind(payments);
