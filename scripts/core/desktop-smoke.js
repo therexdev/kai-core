@@ -97,9 +97,33 @@ require(${JSON.stringify(path.join(appRoot, "electron/core-main.js"))});
     await capture("plugins");
     await details.locator("summary").click(); assert.equal(await page.locator("#install-url").isVisible(), true);
     await page.locator("#plugin-url").fill("https://example.invalid/synthetic.kaiplugin");
-    await page.locator("#install-url button").scrollIntoViewIfNeeded();
-    const installPosition = await page.locator("#install-url button").boundingBox();
-    assert.ok(installPosition && installPosition.y >= 0 && installPosition.y + installPosition.height <= 820, "expanded installation form must scroll into view");
+    const installButton = page.locator("#install-url button");
+    await installButton.scrollIntoViewIfNeeded();
+    await installButton.click({ trial: true }); // Check actionability without submitting the form.
+    const installVisibility = await installButton.evaluate(button => {
+      const rectangle = node => { const r = node.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
+      const viewport = { width: innerWidth, height: innerHeight, devicePixelRatio };
+      const clip = { left: 0, top: 0, right: viewport.width, bottom: viewport.height }, ancestors = [];
+      for (let node = button.parentElement; node; node = node.parentElement) {
+        const style = getComputedStyle(node), clipsX = /^(auto|scroll|hidden|clip)$/.test(style.overflowX), clipsY = /^(auto|scroll|hidden|clip)$/.test(style.overflowY);
+        if (!clipsX && !clipsY) continue;
+        const r = rectangle(node), bounds = { left: r.left + node.clientLeft, top: r.top + node.clientTop, right: r.left + node.clientLeft + node.clientWidth, bottom: r.top + node.clientTop + node.clientHeight };
+        if (clipsX) { clip.left = Math.max(clip.left, bounds.left); clip.right = Math.min(clip.right, bounds.right); }
+        if (clipsY) { clip.top = Math.max(clip.top, bounds.top); clip.bottom = Math.min(clip.bottom, bounds.bottom); }
+        ancestors.push({ element: node.id || node.dataset.panel || node.className || node.tagName, bounds, scrollTop: node.scrollTop });
+      }
+      const bounds = rectangle(button), inset = Math.min(2, bounds.width / 4, bounds.height / 4);
+      const centerX = (bounds.left + bounds.right) / 2, centerY = (bounds.top + bounds.bottom) / 2;
+      // Sample the straight edges, avoiding non-interactive rounded corners.
+      const points = [[centerX, bounds.top + inset], [centerX, bounds.bottom - inset], [bounds.left + inset, centerY], [bounds.right - inset, centerY], [centerX, centerY]];
+      const receivesPointer = points.every(([x, y]) => { const target = document.elementFromPoint(x, y); return target === button || button.contains(target); });
+      return { viewport, button: bounds, clip, ancestors, receivesPointer };
+    });
+    const { button: installPosition, clip: installClip } = installVisibility, pixelTolerance = 1;
+    assert.ok(installPosition.width > 0 && installPosition.height > 0 && installVisibility.receivesPointer &&
+      installPosition.left >= installClip.left - pixelTolerance && installPosition.top >= installClip.top - pixelTolerance &&
+      installPosition.right <= installClip.right + pixelTolerance && installPosition.bottom <= installClip.bottom + pixelTolerance,
+    `expanded installation form must scroll into view: ${JSON.stringify(installVisibility)}`);
     await page.locator('[data-panel="plugins"]').evaluate(node => { node.scrollTop = node.scrollHeight; });
     await capture("third-party-install"); await page.locator("#plugin-url").fill(""); await details.locator("summary").click();
     const refreshBlocked = await page.evaluate(() => window.kaiCore.call("plugins.registry.refresh").then(() => false, error => /Local-Only/i.test(error.message)));
