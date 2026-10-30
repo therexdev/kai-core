@@ -24,8 +24,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
-      KAI_SMOKE_PACKAGES_DIR: ${{ runner.temp }}/kai-smoke-packages
-      KAI_FOUNDATION_APPS_OUTPUT: ${{ runner.temp }}/kai-smoke-report
+      KAI_SMOKE_PACKAGES_DIR: ${{ github.workspace }}/.smoke/packages
+      KAI_FOUNDATION_APPS_OUTPUT: ${{ github.workspace }}/.smoke/report
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -55,7 +55,7 @@ jobs:
         with:
           name: foundation-released-apps-${{ runner.os }}
           path: |
-            ${{ runner.temp }}/kai-smoke-report/
-            ${{ runner.temp }}/kai-smoke-packages/download-report.json
+            ${{ github.workspace }}/.smoke/report/
+            ${{ github.workspace }}/.smoke/packages/download-report.json
           if-no-files-found: warn
           retention-days: 14

@@ -15,7 +15,7 @@ This is a new architecture and a new profile. It does not import old documents, 
 | Network policy, protected account requests and secure-storage primitives | Documents, coding, comparisons, developer tools and MCP |
 | Common service-management screens and simple model chat | Koinos Node's node/wallet/funding and Remote Access's keys/gateway/relay |
 
-Core does not include these optional feature engines. The build generates an explicit production file list and fails if an optional engine re-enters that dependency graph. Installing a plugin supplies its engine; removing it removes the feature's executable installation. Retained plugin data is separate from versioned code.
+Core does not include these optional feature engines. The build generates an explicit production file list and fails if an optional engine re-enters that dependency graph. Installing a plugin supplies its engine; removing it stops the feature and removes it from Apps. Versioned package files and saved data remain in the profile. Plugin data is separate from versioned code.
 
 ## Runtime and trust
 
