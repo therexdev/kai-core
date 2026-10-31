@@ -16,6 +16,8 @@ Version 0.7.7 and earlier need one manual installation of the updater-enabled ve
 
 ### Raspberry Pi and Linux installation
 
+For the shareable step-by-step instructions, see [Install and update KAI Core on Raspberry Pi](docs/RASPBERRY_PI.md).
+
 Download **Install-KAI-Core-Pi.sh** from the [latest release](https://github.com/therexdev/kai-core/releases/latest), quit Core, then run `bash ~/Downloads/Install-KAI-Core-Pi.sh` from your normal desktop account, without sudo. It selects ARM64 for 64-bit Raspberry Pi OS or x64 for desktop Linux, verifies the release's size and SHA-256 checksum, and creates desktop/menu icons. The launcher uses a fixed `~/Applications/KAI-Core/KAI-Core.AppImage` path and FUSE-free extraction. On Pi it retains `--password-store=gnome-libsecret` for protected keyring storage on labwc/Wayland. Existing profiles and Alpha installations are untouched; migration remains an explicit Settings action.
 
 Linux versions before 0.7.14 need this one manual installation. From 0.7.14, Settings checks automatically by default; choose **Download update**, then **Restart and install**. Updates stop in Local-Only mode. They never run `sudo`, install system packages or disable Electron's sandbox. An installation in a system-owned/unwritable folder keeps the manual-download option. On Linux the download is authenticated through the official GitHub release/API over HTTPS and its exact size/SHA-256 digest; it does not carry an independent publisher code signature. Windows retains its timestamped Authenticode policy.
