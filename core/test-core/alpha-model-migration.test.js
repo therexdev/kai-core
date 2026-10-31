@@ -341,13 +341,15 @@ test("opt-in moves owned models without requiring duplicate disk space and leave
 
 test("cross-volume fallback verifies and removes each copied original before processing the next", async t => {
   const f=fixture(t),first=f.alphaModel("first.gguf",gguf(4)),second=f.alphaModel("second.gguf",gguf(5));
-  const originalStats=[first,second].map(file=>fs.statSync(file)),link=fs.linkSync,unlink=fs.unlinkSync,seen=[],attempted=[];
+  // NTFS file IDs can exceed Number.MAX_SAFE_INTEGER; exact IDs are needed
+  // to prove the fallback copied rather than hard-linked the source files.
+  const originalStats=[first,second].map(file=>fs.statSync(file,{bigint:true})),link=fs.linkSync,unlink=fs.unlinkSync,seen=[],attempted=[];
   t.mock.method(fs,"linkSync",(from,to)=>{if(path.dirname(from)===path.join(f.sourceDir,"models")){for(const previous of attempted)assert.equal(fs.existsSync(previous),false,"remove each verified original before starting another");attempted.push(from);throw Object.assign(Error("different device"),{code:"EXDEV"});}return link(from,to);});
   t.mock.method(fs,"statfsSync",()=>({bavail:96,bsize:1}));
   t.mock.method(fs,"unlinkSync",file=>{if([first,second].includes(file)){const bytes=fs.readFileSync(file),target=owned(f,bytes),record=f.state.get("customModels").find(entry=>entry.path===target);assert.ok(record,"register metadata before deleting source");assert.deepEqual(fs.readFileSync(target),bytes);seen.push(file);}return unlink(file);});
   const result=await migrateAlphaModels({...f,deleteOldModels:true});
   assert.equal(result.failed,0);assert.equal(result.cleanupFailed,0);assert.equal(result.deleted,2);assert.equal(result.moved,0);assert.equal(result.reclaimedBytes,192);assert.deepEqual(new Set(seen),new Set([first,second]));assert.deepEqual(seen,attempted);
-  assert.notEqual(fs.statSync(owned(f,gguf(4))).ino,originalStats[0].ino);assert.notEqual(fs.statSync(owned(f,gguf(5))).ino,originalStats[1].ino);noTemporaryCopies(f);
+  assert.notEqual(fs.statSync(owned(f,gguf(4)),{bigint:true}).ino,originalStats[0].ino);assert.notEqual(fs.statSync(owned(f,gguf(5)),{bigint:true}).ino,originalStats[1].ino);noTemporaryCopies(f);
 });
 
 test("opt-in cleanup removes verified prior copies but preserves external imported originals", async t => {
