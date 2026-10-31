@@ -7,6 +7,12 @@ on:
       - core/test-core/windows-release-signing.test.js
       - .github/workflows/core-release-078-recovery.yml
       - .github/workflows/core-build.yml
+      # App-smoke tooling has its own CI; test-only changes do not replace
+      # already-published installers for the same application version.
+      - scripts/foundation/apps-smoke.js
+      - scripts/foundation/apps-publishers.json
+      - scripts/foundation/inspector-observation.js
+      - core/test-core/inspector-observation.test.js
   workflow_dispatch:
 permissions:
   contents: read

@@ -4,6 +4,7 @@
 // No live account/model/chain/OAuth operation is used.
 const fs=require("node:fs"),path=require("node:path"),os=require("node:os"),crypto=require("node:crypto"),assert=require("node:assert/strict");
 const {_electron:electron}=require("playwright-core");
+const {waitForInspectorObservation}=require("./inspector-observation");
 const appRoot=path.resolve(process.env.KAI_SMOKE_SOURCE_ROOT||path.join(__dirname,"../.."));
 // Electron can load app.asar directly. Preparation uses the source verifier and
 // profile code; every launched Core module comes from runtimeRoot when supplied.
@@ -84,7 +85,7 @@ async function main(){
   });
   for(const plugin of report.plugins)await check(plugin.id+" opens its actual UI and native service",async()=>{
    await page.locator(`[data-app="${plugin.id}"]`).click();
-   await until(()=>application.evaluate((_electron,id)=>{const r=global.__foundationHost.windows.get(id);return!!r?.ready&&global.__foundationHost.selected===id;},plugin.id),"App did not become ready: "+plugin.id,60000);
+   await waitForInspectorObservation(()=>application.evaluate((_electron,id)=>{const r=global.__foundationHost.windows.get(id);return!!r?.ready&&global.__foundationHost.selected===id;},plugin.id),{message:"App did not become ready: "+plugin.id,timeoutMs:60000});
    const result=await appEval(plugin.id,`Promise.resolve(window.kai.call(${JSON.stringify(plugin.method)},${JSON.stringify(plugin.input)})).then(result=>({ok:true,result}),error=>({ok:false,error:String(error.message||error)}))`);
    assert.equal(result.ok,true,result.error);if(result.result?.status)assert.ok(result.result.status<400,JSON.stringify(result.result));plugin.status=result.result;
    const ui=await appEval(plugin.id,`({title:document.title,text:document.body.innerText.slice(0,6000),node:typeof require,core:typeof window.kaiCore,bridge:typeof window.kai?.call})`);

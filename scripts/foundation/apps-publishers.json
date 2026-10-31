@@ -24,17 +24,17 @@
     },
     {
       "id": "kai.documents",
-      "version": "0.3.0",
-      "file": "kai-plugin-documents-0.3.0.kaiplugin",
+      "version": "0.3.1",
+      "file": "kai-plugin-documents-0.3.1.kaiplugin",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
-      "url": "https://github.com/therexdev/kai-plugin-documents/releases/download/v0.3.0/kai-plugin-documents-0.3.0.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-documents/releases/download/v0.3.1/kai-plugin-documents-0.3.1.kaiplugin"
     },
     {
       "id": "kai.model-compare",
-      "version": "0.3.0",
-      "file": "kai-plugin-model-compare-0.3.0.kaiplugin",
+      "version": "0.3.1",
+      "file": "kai-plugin-model-compare-0.3.1.kaiplugin",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
-      "url": "https://github.com/therexdev/kai-plugin-model-compare/releases/download/v0.3.0/kai-plugin-model-compare-0.3.0.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-model-compare/releases/download/v0.3.1/kai-plugin-model-compare-0.3.1.kaiplugin"
     },
     {
       "id": "kai.code",
@@ -73,10 +73,10 @@
     },
     {
       "id": "kai.assistant",
-      "version": "0.3.1",
-      "file": "kai-plugin-assistant-0.3.1.kaiplugin",
+      "version": "0.3.3",
+      "file": "kai-plugin-assistant-0.3.3.kaiplugin",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
-      "url": "https://github.com/therexdev/kai-plugin-assistant/releases/download/v0.3.1/kai-plugin-assistant-0.3.1.kaiplugin"
+      "url": "https://github.com/therexdev/kai-plugin-assistant/releases/download/v0.3.3/kai-plugin-assistant-0.3.3.kaiplugin"
     }
   ]
 }
