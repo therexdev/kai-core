@@ -22,9 +22,22 @@ function tariffs(value, expected) {
   if (P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", ...entries])) !== expected) throw Error("Network model prices differ from the approved policy");
   return entries;
 }
+function approvedTariffs(value, config, hash) {
+  const extra = require("../core/lib/koin-network/catalog-extension").validate(config.catalogExtension,config.policyHash);
+  if (hash === undefined) { // Saved recovery tariffs predate catalog negotiation.
+    try { return tariffs(value,config.policyHash); } catch (error) { if (!extra) throw error; }
+    hash = extra.policyHash;
+  }
+  if (hash === config.policyHash) return tariffs(value,hash);
+  if (!extra || hash !== extra.policyHash) throw Error("Unapproved model catalog commitment");
+  const full = tariffs(value,hash), base = full.filter(t => !extra.models.includes(t.model));
+  if (full.length !== base.length + extra.models.length) throw Error("Incomplete additive catalog");
+  tariffs(base,config.policyHash); // Every existing price and pin must be unchanged.
+  return full;
+}
 function catalog(value, config, now = Date.now()) {
-  if (!value || value.schema !== 1 || value.policyHash !== config.policyHash) throw Error("Approved network model catalog unavailable");
-  const approved = tariffs(value.tariffs, config.policyHash);
+  if (!value || value.schema !== 1) throw Error("Approved network model catalog unavailable");
+  const approved = approvedTariffs(value.tariffs, config, value.policyHash);
   P.integer(value.asOf); P.integer(value.validUntil);
   if (value.asOf > now + 5000 || value.validUntil <= now || value.validUntil <= value.asOf || value.validUntil > value.asOf + 15000) throw Error("Network model availability is out of date. Refresh and try again");
   if (!Array.isArray(value.models) || value.models.length !== approved.length) throw Error("Incomplete network model availability");
@@ -36,9 +49,9 @@ function catalog(value, config, now = Date.now()) {
     rows.set(row.model, row);
   }
   const credits = require("../core/lib/koin-network/purchase-quote").credits;
-  return { schema: 1, policyHash: config.policyHash, asOf: value.asOf, validUntil: value.validUntil, tariffs: approved,
+  return { schema: 1, policyHash: value.policyHash, asOf: value.asOf, validUntil: value.validUntil, tariffs: approved,
     models: approved.map(t => ({ model: t.model, label: labels[t.model]?.label || t.model, available: rows.get(t.model).available,
       providers: rows.get(t.model).providers, inputCreditsPerMillion: credits(t.inputAtomsPerMillion), outputCreditsPerMillion: credits(t.outputAtomsPerMillion),
       maxOutput: Math.min(config.maxOutput, t.maxOutputTokens), version: t.version })) };
 }
-module.exports = { tariffs, catalog };
+module.exports = { tariffs, approvedTariffs, catalog };

@@ -39,6 +39,13 @@
       "perJob": "1000000",
       "maxJobs": 10,
       "durationMs": 3600000
+    },
+    "catalogExtension": {
+      "schema": 1,
+      "policyHash": "a5fb8224fa391c538270f68fcc4d682fce0741a2cb90fd0885041bbc80def0de",
+      "models": [
+        "lfm3-1.7b"
+      ]
     }
   }
 }

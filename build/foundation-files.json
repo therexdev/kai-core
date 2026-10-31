@@ -11,6 +11,7 @@
     "core/lib/jail.js",
     "core/lib/keys.js",
     "core/lib/keystore.js",
+    "core/lib/koin-network/catalog-extension.js",
     "core/lib/koin-network/chain.js",
     "core/lib/koin-network/credit-model-prices.json",
     "core/lib/koin-network/credit-service.json",

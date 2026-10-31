@@ -1,7 +1,7 @@
 "use strict";
 const { isUsd } = require("../core/lib/koin-network/product");
 const { credits, dollars } = require("../core/lib/koin-network/purchase-quote");
-const { tariffs } = require("./credit-models");
+const { approvedTariffs } = require("./credit-models");
 const labels = require("../core/models/catalog.json").aliases;
 const bundled = require("../core/lib/koin-network/credit-model-prices.json");
 
@@ -11,10 +11,10 @@ const bundled = require("../core/lib/koin-network/credit-model-prices.json");
 // not authorize spending or claim that any model currently has a provider.
 function configuredModelPricing(config, value, now = Date.now()) {
   if (!isUsd(config?.deployment)) throw Error("Model credit prices require the USD credit service");
-  if (value?.schema !== 1 || value.product !== "prepaid-usd-v1" || value.policyHash !== config.policyHash) throw Error("Configured model prices do not match the approved network policy");
-  const approved = tariffs(value.tariffs, config.policyHash);
+  if (value?.schema !== 1 || value.product !== "prepaid-usd-v1") throw Error("Configured model prices do not match the approved network policy");
+  const approved = approvedTariffs(value.tariffs, config, value.policyHash);
   if (!Number.isSafeInteger(now) || now < 0) throw Error("Model pricing verification time is invalid");
-  return { schema: 1, product: "prepaid-usd-v1", policyHash: config.policyHash,
+  return { schema: 1, product: "prepaid-usd-v1", policyHash: value.policyHash,
     observedAt: now, availabilityValidUntil: null,
     models: approved.map(t => ({ model: t.model, label: labels[t.model]?.label || t.model,
       inputCreditsPerMillion: credits(t.inputAtomsPerMillion), outputCreditsPerMillion: credits(t.outputAtomsPerMillion),

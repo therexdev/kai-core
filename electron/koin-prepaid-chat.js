@@ -20,7 +20,7 @@ class PrepaidChat extends ChatFlow {
     const selectedOwner = a.owner || this.config.owner;
     const route = action === "chat" ? "/consume/chat/completions" : "/koin/prepaid/" + action;
     const response = await this.fetch(this.config.schedulerUrl + route, { method: "POST", redirect: "error", signal,
-      headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken,
+      headers: { "content-type": "application/json", ...(action === "models" ? require("../core/lib/koin-network/catalog-extension").headers(this.config) : {}) }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken,
         ...(isUsd(this.product) ? { creditWallet: /^account-[a-f0-9]{64}$/.test(selectedOwner) ? null : selectedOwner } : {}) }) });
     if (response.status === 401 || response.status === 403) {
       // Retire only this rejected free-session bearer. The stable installation
@@ -61,7 +61,7 @@ class PrepaidChat extends ChatFlow {
     return value;
   }
   input(value, record) {
-    if (record?.tariffs) this.approvedTariffs = Models.tariffs(record.tariffs, this.config.policyHash);
+    if (record?.tariffs) this.approvedTariffs = Models.approvedTariffs(record.tariffs, this.config);
     return request(value, this.config, this.approvedTariffs);
   }
   async models(signal) {
@@ -112,8 +112,9 @@ class PrepaidChat extends ChatFlow {
     return checked;
   }
   verify(result, input, id, excludedProviders = this.excludedProviders()) {
+    const jobTarget = require("../core/lib/koin-network/catalog-extension").target(this.target,this.config.catalogExtension,input.model);
     const k = result?.koin, q = k?.quote, r = k?.receipt, output = result?.choices?.[0]?.message?.content;
-    if (result?.id !== id || k?.product !== this.product || JSON.stringify(k.target) !== JSON.stringify(this.target) ||
+    if (result?.id !== id || k?.product !== this.product || JSON.stringify(k.target) !== JSON.stringify(jobTarget) ||
         !["ready", "charged", "streaming"].includes(k.state) || r?.product !== this.product || r.job !== id || r.owner !== this.config.owner || r.provider === this.config.owner || excludedProviders.includes(r.provider) ||
         k.session !== P.hash("prepaid-account:" + this.config.owner) || r.quoteHash !== q?.hash || r.outputHash !== P.hash(output || "") ||
         k.receiptHash !== P.hash(JSON.stringify(r))) throw Error("The network answer could not be verified. Retry this message to recover its saved answer.");
@@ -121,12 +122,12 @@ class PrepaidChat extends ChatFlow {
     const approved = this.approvedTariffs?.find(t => t.model === input.model);
     const tariffMatches = approved ? JSON.stringify(approved) === JSON.stringify(q.tariff)
       : q.tariff.version === this.config.version && P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", q.tariff])) === this.target.policyHash;
-    if (q.domain !== this.target.domain || q.policyHash !== this.target.policyHash || q.tariff.model !== input.model ||
+    if (q.domain !== this.target.domain || q.policyHash !== jobTarget.policyHash || q.tariff.model !== input.model ||
         !tariffMatches || q.requestHash !== P.hash(JSON.stringify(input.messages)) || q.maxOutput !== input.maxOutput ||
         r.usage.inputTokens !== q.inputTokens || !Number.isSafeInteger(r.usage.outputTokens) || r.usage.outputTokens < 1 || r.usage.outputTokens > q.maxOutput ||
         r.usage.amount !== price(q.tariff, r.usage.inputTokens, r.usage.outputTokens) || BigInt(r.usage.amount) > BigInt(q.maxCharge)) throw Error("The answer differs from the approved credit price");
     const job = { id, session: k.session, attempt: r.attempt, quote: q };
-    const proofHash = r.sequence === undefined ? fundedResultHash(this.target, job, output) : require("../core/lib/koin-network/funded-protocol").fundedChunkHash(this.target, job, output, r.sequence);
+    const proofHash = r.sequence === undefined ? fundedResultHash(jobTarget, job, output) : require("../core/lib/koin-network/funded-protocol").fundedChunkHash(jobTarget, job, output, r.sequence);
     if (typeof r.signature === "string" && r.signature.startsWith("pd1.")) {
       require("../core/lib/koin-network/provider-device-protocol").verifyAction(r.signature, r.sequence === undefined ? "result" : "chunk", proofHash,
         { schedulerUrl: this.config.schedulerUrl, target: this.target, wallet: r.provider, now: this.clock(), historical: true, completedAt: r.completedAt });
@@ -134,7 +135,7 @@ class PrepaidChat extends ChatFlow {
     return { id, object: "chat.completion", model: "koinos-network", servedModel: input.model,
       choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: k.state === "streaming" ? null : "stop" }],
       usage: { prompt_tokens: r.usage.inputTokens, completion_tokens: r.usage.outputTokens, total_tokens: r.usage.inputTokens + r.usage.outputTokens }, costUsd: isUsd(this.product) ? Number(r.usage.amount) / 1e8 : 0,
-      koin: { product: this.product, state: k.state, target: this.target, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
+      koin: { product: this.product, state: k.state, target: jobTarget, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
   }
   async status(signal) { return this.call("status", {}, signal); }
   async requireCreditPriority(signal) {
