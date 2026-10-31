@@ -112,6 +112,8 @@ The package permission vocabulary includes some descriptive permissions such as 
 
 Use an explicit installed local alias with `api.models.chat({model, messages, max_tokens})` for local work. No network fallback is implicit. For streaming local responses, use `api.models.request({...input, stream: true})` and consume/cancel its body.
 
+Local model metadata includes its catalog `blurb` and expected weights `sizeBytes`. Core 0.7.5 adds `downloadSizeBytes` for the full expected weights/projector bundle and `diskBytes` for current local files, including partial downloads. `diskBytes: 0` means no files are present; `null` means the size is unknown. Imported models are measured at their existing referenced file, without copying it. These sizes are file lengths, displayed as decimal GB in Core, and do not establish model verification or readiness.
+
 Network aliases use the `koinos-network` prefix. Native `models.request/chat` routes them through the shared reviewed credit service and currently returns a completed JSON response, even if `stream: true` was supplied. This requires both `inference.network` and `wallet.authorize`. A plugin must have its trusted UI available for an attended credit operation; do not start paid work invisibly from a startup timer.
 
 The supported `wallet.authorize` actions are `credit-status`, `chat-info`, `chat-estimate`, `chat-completion`, `chat-ack`, `chat-recover`, `stop`, `run-open`, `run-chat`, `run-list`, `run-status` and `run-stop`. Preserve each service response and error rather than substituting a successful placeholder. `authorize` is not an arbitrary transaction signer, token-transfer API or key-export API. Opening a plugin UI does not authorize payment.

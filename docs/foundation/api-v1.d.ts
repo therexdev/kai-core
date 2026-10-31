@@ -34,6 +34,14 @@ export interface ModelAlias {
   alias: string;
   label?: string;
   status: string;
+  blurb?: string;
+  /** Expected weights-file size, excluding any vision projector. */
+  sizeBytes?: number | null;
+  /** Core 0.7.5+: expected weights plus projector; null when unknown. */
+  downloadSizeBytes?: number | null;
+  /** Core 0.7.5+: current local file bytes, including partial/projector files.
+   * Zero means no files present; null means size could not be determined. */
+  diskBytes?: number | null;
   [key: string]: unknown;
 }
 export interface ChatMessage { role: "system" | "user" | "assistant"; content: string; }

@@ -6,6 +6,22 @@ const path = require("path");
 
 const { downloadFile } = require("./download");
 
+// Display metadata only: count current model files without reading their contents.
+// Missing files consume no space; inaccessible files have an unknown size.
+function modelDiskBytes(files) {
+  let bytes = 0;
+  for (const file of new Set(files)) {
+    try {
+      const stat = fs.statSync(file);
+      if (!stat.isFile()) return null;
+      bytes += stat.size;
+    } catch (error) {
+      if (!["ENOENT", "ENOTDIR"].includes(error.code)) return null;
+    }
+  }
+  return bytes;
+}
+
 /*
  * Model manager (spec §6/§27): capability aliases over versioned, immutable,
  * hash-verified model packages. Consumers see "Koinos Fast", never a
@@ -122,12 +138,19 @@ class ModelManager {
     const catalog = Object.entries(this.catalog.aliases).map(([alias, a]) => {
       const q = this.quarantineOf(a.package);
       const pkg = this.catalog.packages[a.package] || {};
+      const artifacts = [pkg, ...(pkg.mmproj?.filename ? [pkg.mmproj] : [])];
+      const files = artifacts.flatMap(artifact => typeof artifact.filename === "string"
+        ? [path.join(this.modelsDir, artifact.filename), path.join(this.modelsDir, artifact.filename + ".part")] : []);
+      const downloadSizeBytes = artifacts.every(artifact => Number.isSafeInteger(artifact.sizeBytes) && artifact.sizeBytes > 0)
+        ? artifacts.reduce((total, artifact) => total + artifact.sizeBytes, 0) : null;
       return {
         alias,
         label: a.label,
         blurb: a.blurb || "",
         package: a.package,
         sizeBytes: pkg.sizeBytes ?? null,
+        downloadSizeBytes,
+        diskBytes: files.length ? modelDiskBytes(files) : null,
         license: pkg.license ?? null,
         minRamGb: a.minRamGb ?? null,
         status: q ? "quarantined" : this.packageStatus(a.package).status,
@@ -146,6 +169,8 @@ class ModelManager {
         blurb: `Imported from your files · ${(c.sizeBytes / 1e9).toFixed(1)} GB`,
         package: `custom:${c.sha256}`,
         sizeBytes: c.sizeBytes,
+        downloadSizeBytes: Number.isSafeInteger(c.sizeBytes) && c.sizeBytes > 0 ? c.sizeBytes : null,
+        diskBytes: modelDiskBytes([c.path]),
         license: null,
         minRamGb: c.minRamGb,
         custom: true,

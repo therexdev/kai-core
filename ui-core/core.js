@@ -87,6 +87,27 @@ bridge?.onOpenView?.(target => {
   if (target?.section === "credit-account") window.KaiCoreAccount?.openCredit();
 });
 function html(id, value) { if ($(id).innerHTML !== value) $(id).innerHTML = value; }
+function modelDescription(model) {
+  // Catalog blurbs already contain size; keep their useful model/RAM guidance
+  // while the footer shows the current, separately labelled file size.
+  return String(model.blurb || "").replace(/\s*·\s*\d+(?:\.\d+)?\s*GB\s*$/i, "").trim();
+}
+function modelSizeLabel(model) {
+  const known = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  const gb = bytes => bytes > 0 && bytes < 10000000 ? "<0.01 GB" : `${Number((bytes / 1e9).toFixed(bytes < 1e9 ? 2 : 1))} GB`;
+  const actual = known(model.diskBytes) ? model.diskBytes : null;
+  const total = known(model.downloadSizeBytes) && model.downloadSizeBytes > 0 ? model.downloadSizeBytes : null;
+  const expected = total ?? (!Object.hasOwn(model, "downloadSizeBytes") && known(model.sizeBytes) && model.sizeBytes > 0 ? model.sizeBytes : null);
+  if (model.status === "ready") return actual !== null ? `${gb(actual)} on disk` : expected !== null ? `${gb(expected)} model size` : "Size unavailable";
+  if (actual !== null && actual > 0) return total !== null ? `${gb(actual)} on disk · ${gb(total)} total` : `${gb(actual)} on disk`;
+  return expected !== null ? `${gb(expected)} ${model.custom || total === null ? "model size" : "download"}` : "Size unavailable";
+}
+function renderModels(models) {
+  html("models", models.map(model => {
+    const description = modelDescription(model);
+    return `<article class="model-card"><div class="model-card-heading"><h2>${esc(model.label || model.alias)}</h2><span class="pill">${esc(model.status)}</span></div>${description ? `<p class="model-description">${esc(description)}</p>` : ""}<div class="model-card-footer"><span class="model-size">${esc(modelSizeLabel(model))}</span><button data-model="${esc(model.alias)}">${model.status === "ready" ? "Load model" : "Download & load"}</button></div></article>`;
+  }).join(""));
+}
 document.addEventListener("kai-alpha-migration-complete", () => { void refresh(); });
 async function refresh() {
   if (!bridge || refreshing || document.hidden) return; refreshing = true;
@@ -114,7 +135,7 @@ async function refresh() {
       : s.ensure?.state === "error" ? s.ensure.error || "The model could not be loaded. Try another model or retry."
       : s.importError || "", { error: modelError, dismissible: !modelBusy });
     text("download", s.download ? `Downloading · ${Math.round(s.download.pct || 0)}%` : s.runtime.activeAlias ? `Loaded: ${s.runtime.activeAlias}` : "");
-    html("models", s.models.map(m => `<article><div class="row"><h2>${esc(m.label || m.alias)}</h2><span class="pill">${esc(m.status)}</span></div><p>${esc(m.alias)}</p><button data-model="${esc(m.alias)}">${m.status === "ready" ? "Load model" : "Download & load"}</button></article>`).join(""));
+    renderModels(s.models);
     renderInstalledPlugins();
     apps?.update(s);
     if (activeAppId && !s.plugins.some(plugin => plugin.id === activeAppId && plugin.enabled)) showPage("plugins");

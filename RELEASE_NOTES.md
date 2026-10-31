@@ -1,9 +1,7 @@
-# KAI Core Beta 0.7.4
+# KAI Core Beta 0.7.5
 
-This is the official KAI Core Beta release. The desktop app, shortcuts, tray and downloads use the KAI Core Beta name. Existing Core installations continue using the same app identity and saved-data locations; no new profile, wallet, model folder or plugin-data folder is created by this name change.
+Model library cards now show a short description and model size in GB. Installed models show their current size on disk; models not yet installed show the expected download size. Vision projector files and partial downloads are included in local disk usage, and imported models are measured at their existing file location. Unknown sizes are labelled rather than displayed as zero.
 
-Installed plugins and marketplace cards have a more readable responsive layout, with room for titles and complete descriptions, clear status badges, and consistent action placement. Catalog-listed plugins show their GitHub repository owner and a small accessible GitHub link. Links open through Core's reviewed external-browser flow. Installed attribution requires the same plugin ID and publisher fingerprint; unlisted packages do not receive a guessed developer identity.
+The model cards have tighter spacing and smaller controls while keeping two columns, including at the minimum supported window width. Descriptions remain readable and wrap as needed. Existing download, import and load actions are unchanged.
 
-Native plugin installation now describes access as KAI's existing operating-system permissions. Native code can access files and application data available to KAI, run programs and connect to the network. Declared KAI API capabilities do not sandbox native code, and installing a plugin does not automatically grant administrator access. Sandboxed plugins retain their separate restricted-access explanation. These changes clarify the existing runtime rather than changing its authority.
-
-This is a Core update; the current plugin releases remain compatible. Wallets, models, installed plugins and their saved-data locations stay unchanged. Core updates remain manual.
+This is a Core update. Models, wallets, plugins and their saved-data locations stay unchanged, and no plugin updates are required. Core updates remain manual.
