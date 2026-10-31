@@ -10,9 +10,17 @@ The Beta name is display branding. Core keeps the `io.koinosai.core` application
 
 Settings shows the installed version, checks for new Core releases, and offers an optional automatic-check setting (on by default). Local-Only privacy pauses checks and downloads. An update badge appears on Settings when a newer release is available.
 
-The installed Windows Setup version can download a verified update inside Core. **Restart and install** is an explicit action that stops Core's services before launching the installer. Closing to the tray, exiting normally, or finding an update never installs or restarts automatically. Portable, macOS and Linux builds check for new releases and open the official downloads page for manual installation. Plugin updates remain separate in Plugins.
+The installed Windows Setup version and user-owned Linux AppImages can download a verified update inside Core. **Restart and install** is an explicit action that stops Core's services before launching the installer. Closing to the tray, exiting normally, or finding an update never installs or restarts automatically. Portable Windows, macOS and non-AppImage Linux builds check for new releases and open the official downloads page for manual installation. Plugin updates remain separate in Plugins.
 
 Version 0.7.7 and earlier need one manual installation of the updater-enabled version. Application updates preserve the Core profile, wallet, models, installed plugins and plugin data. See [Windows signing and release setup](docs/foundation/WINDOWS_UPDATES.md) for the required Azure signing configuration and release verification.
+
+### Raspberry Pi and Linux installation
+
+Download **Install-KAI-Core-Pi.sh** from the [latest release](https://github.com/therexdev/kai-core/releases/latest), quit Core, then run `bash ~/Downloads/Install-KAI-Core-Pi.sh` from your normal desktop account, without sudo. It selects ARM64 for 64-bit Raspberry Pi OS or x64 for desktop Linux, verifies the release's size and SHA-256 checksum, and creates desktop/menu icons. The launcher uses a fixed `~/Applications/KAI-Core/KAI-Core.AppImage` path and FUSE-free extraction. On Pi it retains `--password-store=gnome-libsecret` for protected keyring storage on labwc/Wayland. Existing profiles and Alpha installations are untouched; migration remains an explicit Settings action.
+
+Linux versions before 0.7.14 need this one manual installation. From 0.7.14, Settings checks automatically by default; choose **Download update**, then **Restart and install**. Updates stop in Local-Only mode. They never run `sudo`, install system packages or disable Electron's sandbox. An installation in a system-owned/unwritable folder keeps the manual-download option. On Linux the download is authenticated through the official GitHub release/API over HTTPS and its exact size/SHA-256 digest; it does not carry an independent publisher code signature. Windows retains its timestamped Authenticode policy.
+
+A detached helper verifies the staged AppImage again and waits for Core's process to exit before an atomic replacement at the existing path. It retains `<AppImage>.previous`; an immediate process-start error restores that previous file. A later crash inside the new app is not automatically rolled back. A failed post-quit installation writes `<AppImage>.update-error.txt` and attempts to reopen the retained app. Wallets, models, plugins and profiles are never part of replacement. Native Linux verification uses a disposable packaged x64 Electron AppImage; real ARM64/Pi hardware still requires a device check.
 
 ## Ownership
 

@@ -53,3 +53,6 @@ jobs:
       - name: Application update desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:updates
+      - name: Native AppImage replacement and relaunch check
+        if: runner.os == 'Linux'
+        run: node scripts/foundation/linux-updates-smoke.js

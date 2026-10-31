@@ -122,16 +122,20 @@ function createWindowsUpdater({ app, platform, env, resourcesPath, canNetwork, c
   };
 }
 
+function createPlatformUpdater(options) {
+  return options.platform === "linux" ? require("./core-linux-updates").createLinuxUpdater(options) : createWindowsUpdater(options);
+}
 function createCoreUpdates({ app, settings, isLocalOnly, approveInstall = async () => false, performInstall, openExternal, onChange = () => {},
-  platform = process.platform, env = process.env, resourcesPath = process.resourcesPath, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout,
-  fetchRelease = fetchLatestRelease, adapterFactory = createWindowsUpdater, verifyInstaller = verifyDownloadedInstaller }) {
+  platform = process.platform, arch = process.arch, env = process.env, resourcesPath = process.resourcesPath, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout,
+  fetchRelease = fetchLatestRelease, adapterFactory = createPlatformUpdater, verifyInstaller }) {
   const currentVersion = app.getVersion();
   let automaticCheck = settings.get("applicationUpdates.automaticCheck", true) !== false;
   let state = "idle", revision = 0, availableVersion = null, error = null, progress = null, lastCheckedAt = null, nextCheckAt = null;
   let started = false, disposed = false, timer = null, pending = null, controller = null, cancellation = null, eligibleAt = 0, installPromise = null;
   let downloaded = null, metadata = null;
-  const adapter = adapterFactory({ app, platform, env, resourcesPath, canNetwork: () => !disposed && !isLocalOnly() });
+  const adapter = adapterFactory({ app, platform, arch, env, resourcesPath, fetchRelease, canNetwork: () => !disposed && !isLocalOnly() });
   const updater = adapter.updater;
+  const verifyFile = verifyInstaller || adapter.verifyInstaller || verifyDownloadedInstaller;
   const status = () => ({ state, revision, currentVersion, availableVersion, automaticCheck, lastCheckedAt, nextCheckAt, progress: progress ? { ...progress } : null, error,
     paused: isLocalOnly(), manualOnly: !updater, reason: adapter.reason || null,
     canDownload: !!updater && !!availableVersion && !isLocalOnly() && !disposed && ["available", "error"].includes(state),
@@ -197,12 +201,12 @@ function createCoreUpdates({ app, settings, isLocalOnly, approveInstall = async 
     return operation("download", async signal => {
       const result = await updater.checkForUpdates(); signal.throwIfAborted();
       if (!result?.isUpdateAvailable) throw Error("The release is no longer available. Check for updates again.");
-      metadata = assertUpdateInfo(result.updateInfo, availableVersion);
+      metadata = (adapter.assertUpdateInfo || assertUpdateInfo)(result.updateInfo, availableVersion);
       cancellation = new CancellationToken(); if (signal.aborted) cancellation.cancel();
       signal.addEventListener("abort", () => cancellation?.cancel(), { once: true });
       const files = await updater.downloadUpdate(cancellation); signal.throwIfAborted();
       if (!Array.isArray(files) || files.length !== 1 || updater.installerPath !== files[0]) throw Error("The update download did not return the expected installer.");
-      await verifyInstaller(files[0], metadata); signal.throwIfAborted();
+      await verifyFile(files[0], metadata); signal.throwIfAborted();
       downloaded = files[0]; progress = { percent: 100, transferred: metadata.size, total: metadata.size }; state = "downloaded"; error = null;
     }, DOWNLOAD_TIMEOUT);
   }
@@ -213,7 +217,7 @@ function createCoreUpdates({ app, settings, isLocalOnly, approveInstall = async 
       if (!await approveInstall(availableVersion) || disposed) return status();
       try {
         if (updater.installerPath !== downloaded) throw Error("The downloaded installer changed. Download it again.");
-        await verifyInstaller(downloaded, metadata);
+        await verifyFile(downloaded, metadata);
         if (disposed) return status();
         state = "installing"; error = null; clearSchedule(); changed();
         await performInstall(updater); return status();

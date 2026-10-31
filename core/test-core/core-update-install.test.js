@@ -29,3 +29,10 @@ test("installer failure waits for the themed error notice before quitting", asyn
   installAndQuit({ updater, app: { quit() { quits++; } }, dialog: { showErrorBox() { return new Promise(resolve => { dismiss = resolve; }); } } });
   assert.equal(quits, 0); dismiss(); await new Promise(resolve => setImmediate(resolve)); assert.equal(quits, 1);
 });
+
+test("an asynchronous Linux helper failure releases the stopped app with an error notice", async () => {
+  const updater = new EventEmitter(); let quits = 0, notices = 0;
+  updater.quitAndInstall = async () => { throw Error("Helper could not start"); };
+  installAndQuit({ updater, app: { quit() { quits++; } }, dialog: { showErrorBox() { notices++; } } });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(quits, 1); assert.equal(notices, 1);
+});

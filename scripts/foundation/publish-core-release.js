@@ -5,7 +5,7 @@ const { readVerifiedArtifacts, hash } = require("./windows-signing");
 
 function releaseFiles(dir, identity) {
   const verified = readVerifiedArtifacts(dir, identity), { version } = identity;
-  const names = [...verified.names, verified.reportFile,
+  const names = [...verified.names, verified.reportFile, "Install-KAI-Core-Pi.sh",
     `KAI-Core-Beta-${version}-linux-x86_64.AppImage`, `KAI-Core-Beta-${version}-linux-arm64.AppImage`,
     ...["x64", "arm64"].flatMap(arch => ["dmg", "zip"].map(ext => `KAI-Core-Beta-${version}-mac-${arch}.${ext}`))];
   for (const name of names) if (!fs.lstatSync(path.join(dir, name)).isFile()) throw Error(`Missing release artifact: ${name}`);

@@ -12,7 +12,7 @@ function installAndQuit({ updater, app, dialog }) {
     finally { app.quit(); }
   };
   updater.once("error", failure);
-  try { updater.quitAndInstall(); } catch { failure(); }
+  try { Promise.resolve(updater.quitAndInstall()).catch(failure); } catch { failure(); }
 }
 
 module.exports = { installAndQuit };
