@@ -106,6 +106,9 @@ jobs:
       - name: Application update desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:updates
+      - name: Native AppImage replacement and relaunch check
+        if: runner.os == 'Linux'
+        run: node scripts/foundation/linux-updates-smoke.js
       - name: Wallet send dialog desktop check (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:wallet-send
@@ -152,6 +155,9 @@ jobs:
       - name: Verify Windows signatures, publisher, timestamps and update feed
         if: runner.os == 'Windows'
         run: node scripts/foundation/verify-windows-signatures.js dist
+      - name: Include the Pi/Linux desktop installer
+        if: runner.os == 'Linux'
+        run: cp scripts/install-linux.sh dist/Install-KAI-Core-Pi.sh
       - uses: actions/upload-artifact@v4
         with:
           name: kai-core-foundation-${{ runner.os }}
@@ -163,6 +169,7 @@ jobs:
             dist/*.exe.blockmap
             dist/latest.yml
             dist/windows-signatures-*.json
+            dist/Install-KAI-Core-Pi.sh
             build/foundation-files.json
           if-no-files-found: error
 

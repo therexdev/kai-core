@@ -23,7 +23,7 @@ function fixture(t, releaseIdentity = identity) {
     artifacts: [names.setup, names.portable, names.blockmap, names.feed].map(name => ({ name, sha256: hash(path.join(dir, name)) })) };
   const write = () => fs.writeFileSync(path.join(dir, names.report), JSON.stringify(report));
   write();
-  const extras = [`KAI-Core-Beta-${releaseIdentity.version}-linux-x86_64.AppImage`, `KAI-Core-Beta-${releaseIdentity.version}-linux-arm64.AppImage`,
+  const extras = ["Install-KAI-Core-Pi.sh", `KAI-Core-Beta-${releaseIdentity.version}-linux-x86_64.AppImage`, `KAI-Core-Beta-${releaseIdentity.version}-linux-arm64.AppImage`,
     ...["x64", "arm64"].flatMap(arch => ["dmg", "zip"].map(ext => `KAI-Core-Beta-${releaseIdentity.version}-mac-${arch}.${ext}`))];
   extras.forEach(name => fs.writeFileSync(path.join(dir, name), "manual platform installer"));
   return { dir, names, report, write, feed, signature };
@@ -62,7 +62,7 @@ test("signature policy rejects unsigned, wrong publisher, expired trust and miss
 test("release gate accepts only matching Windows artifacts and complete signature evidence", t => {
   const f = fixture(t);
   assert.equal(readVerifiedArtifacts(f.dir, identity).names.length, 4);
-  assert.equal(releaseFiles(f.dir, identity).length, 11);
+  assert.equal(releaseFiles(f.dir, identity).length, 12);
   f.report.signatures.pop(); f.write();
   assert.throws(() => readVerifiedArtifacts(f.dir, identity), /Missing signature evidence/);
 });
@@ -152,8 +152,8 @@ test("merged macOS blockmaps do not enter the Windows manifest or published rele
   const windows = readVerifiedArtifacts(f.dir, identity).names;
   assert.deepEqual(windows, [f.names.setup, f.names.portable, f.names.blockmap, f.names.feed].sort());
   const published = releaseFiles(f.dir, identity);
-  assert.equal(published.length, 11);
-  assert.equal(new Set(published).size, 11);
+  assert.equal(published.length, 12);
+  assert.equal(new Set(published).size, 12);
   assert.deepEqual(published.filter(name => name.endsWith(".blockmap")), [f.names.blockmap]);
   fs.writeFileSync(path.join(f.dir, "unexpected.exe.blockmap"), "unreviewed Windows metadata");
   assert.throws(() => readVerifiedArtifacts(f.dir, identity), /Expected exactly/);

@@ -1,7 +1,9 @@
-# KAI Core Beta 0.7.13
+# KAI Core Beta 0.7.14
 
-Adds Liquid LFM3 1.7B to the approved network catalog after the matching scheduler update. It remains a separate model alongside Qwen 2.5 1.5B. Its verified Q4_K_M package uses the upstream non-thinking template for network inference, at 10 input / 40 output credits per million tokens, with a 4,096-token context and 256-token output limit.
+Linux AppImages, including 64-bit Raspberry Pi OS, now support downloading updates in Settings and an explicit **Restart and install** action. Automatic checks remain optional; downloads and restarts require your action. Windows retains its existing signed installer flow, and macOS/unsupported builds keep manual downloads.
 
-The catalog extension preserves existing payment identities, model prices, provider device authorizations and saved request recovery. Older schedulers continue returning their existing catalog. Installing Liquid alone does not make it available: a sharing provider must pass the signed readiness checks, and network chat still excludes the customer's own provider.
+The Linux updater selects the exact architecture and stable release, verifies the official GitHub size and SHA-256 digest, stages on the same filesystem, and waits for Core to shut down before replacing the AppImage at the existing path. The previous app is retained, and immediate process-start failure restores it. Core profiles, wallets, models and plugins are outside the replacement path. Local-Only mode cancels update network activity.
 
-Validation covers catalog tampering and compatibility, durable credit recovery, locked-wallet device qualification and paid replies over real loopback HTTP with controlled inference/chain fixtures, plus the native Foundation checks. Full-weight Liquid tokenizer and readiness measurements are recorded in the scheduler repository. Tests do not claim a live provider is online or spend real funds.
+The included **Install-KAI-Core-Pi.sh** installs the latest stable ARM64/x64 AppImage with desktop/menu shortcuts. On Pi it preserves the GNOME Keyring launch option and uses a fixed app path with FUSE-free extraction. Existing Pi installs need to run this installer once to reach the updater-enabled version.
+
+Validation covers Core and service regressions, native public SDK and update UI checks, corrupted/cancelled downloads, target changes, helper failure, atomic replacement/rollback, and a disposable packaged x64 AppImage relaunch with retained test profile data. This does not claim real Pi hardware or live payment verification.
