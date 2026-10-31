@@ -47,6 +47,8 @@ Enabled services remain alive while navigating between Apps and while Core is in
 
 ## Build a plugin
 
+New to plugin development? Start with the [Plugin quickstart](docs/foundation/PLUGIN_QUICKSTART.md): copy an example, customize it, sign it and install it in Core.
+
 - [Plugin author guide](docs/foundation/PLUGIN_AUTHOR_GUIDE.md)
 - [Public API types](docs/foundation/api-v1.d.ts)
 - [Architecture](docs/foundation/ARCHITECTURE.md)
