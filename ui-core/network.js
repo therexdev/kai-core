@@ -51,26 +51,26 @@
   const $ = id => document.getElementById(`core-network-${id}`);
   const text = (id, value) => { const node = $(id), next = String(value); if (node.textContent !== next) node.textContent = next; };
   const html = (id, value) => { const node = $(id); if (node.innerHTML !== value) node.innerHTML = value; };
-  let snapshot = null, error = "", mode = null, active = false, generation = 0, pending = null, pollTimer, expiryTimer;
-  const visible = () => active && !document.hidden;
+  let snapshot = null, error = "", mode = null, active = false, warmed = false, generation = 0, pending = null, pollTimer, expiryTimer;
+  const visible = () => (active || warmed) && !document.hidden;
   const fresh = () => !!snapshot && !error && mode !== "local-only" && Date.now() < snapshot.validUntil && snapshot.observedAt <= Date.now() + 5000;
   const canUse = model => fresh() && snapshot.state === "available" && snapshot.source !== "public-scheduler" && model.available && model.providers > 0 && model.selectable !== false;
   function clearTimers() { clearTimeout(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null; }
   function paint() {
     const n = snapshot, current = fresh(), publicStatus = n?.source === "public-scheduler";
-    text("state", current ? n.state === "available" ? "AI network status" : "Network paused" : "Network status unavailable");
-    text("time", error || (n ? `Observed ${new Date(n.observedAt).toLocaleString()}${current ? "" : " · Availability unconfirmed"}` : "No verified observation yet."));
+    text("state", current ? n.state === "available" ? "AI network status" : "Network paused" : n ? "Last known network status" : "Network status unavailable");
+    text("time", n ? `Last updated ${new Date(n.observedAt).toLocaleString()}${current ? "" : " · Availability unconfirmed"}${error ? " · " + error : ""}` : error || "Checking network status…");
     $("state").dataset.state = current ? n.state : "unavailable";
     text("provider-label", publicStatus ? "providers online" : "providers ready");
     text("waiting-label", publicStatus ? "jobs waiting" : "requests waiting");
-    text("model-count", current ? n.models.filter(m => m.available).length : "—");
-    text("provider-count", current ? publicStatus ? n.providersOnline : n.readyProviders : "—");
-    text("waiting-count", current ? n.waitingRequests : "—");
+    text("model-count", n ? n.models.filter(m => m.available).length : "—");
+    text("provider-count", n ? publicStatus ? n.providersOnline : n.readyProviders : "—");
+    text("waiting-count", n ? n.waitingRequests : "—");
     const reported = n && !publicStatus && n.completedToday !== null;
     $("completed").hidden = !reported;
     $("model-grid").classList.toggle("product-single", !reported);
     $("recent").hidden = !n || publicStatus || n.activityAvailable === false;
-    text("completed-count", current && reported ? n.completedToday : "—");
+    text("completed-count", reported ? n.completedToday : "—");
     text("activity-state", n && !current ? "Last verified activity. Current network status is unavailable." : "");
     html("models", n?.models.length ? n.models.map(m => `<div class="product-model-row"><div><strong>${escape(modelName(m))}</strong>${m.freeEligible === null ? "" : `<p>${m.freeEligible ? "Free credits eligible" : "Purchased credits"}</p>`}</div><div><p>${current && m.unavailableReason === "self-only" ? "Only shared by your computer or account · use Local model" : current && m.unavailableReason === "wallet-connection-required" ? "Connect your wallet to use other providers while sharing this model" : current && m.available ? `${m.providers} provider${m.providers === 1 ? "" : "s"} ${publicStatus ? "online" : "ready"}` : "Availability unconfirmed"}</p>${publicStatus ? "" : `<button type="button" data-network-model="${escape(m.id)}"${canUse(m) ? "" : " disabled"}>Use model</button>`}</div></div>`).join("") : `<p class="product-empty">${n ? "No models are currently reported." : "No verified model availability yet."}</p>`);
     html("providers", n?.providers.length ? n.providers.map(p => `<div class="product-detail"><span>${p.self ? "Your computer or account" : `Provider ${escape(p.id)}`} · ${escape(modelName(p.model))}</span><span>${current ? escape(p.state.replace(/-/g, " ")) : "Last seen — status stale"}</span></div>`).join("") + (n.providersTruncated ? '<p class="muted">Showing the first 256 providers.</p>' : "") : `<p class="product-empty">${n ? "No recently observed providers." : "No verified provider status yet."}</p>`);
@@ -103,8 +103,14 @@
     generation++; pending = null; clearTimers(); snapshot = null; error = mode === "local-only" ? localOnlyMessage : ""; paint();
   }
   function enter() { active = true; paint(); return refresh(); }
-  function leave() { active = false; generation++; pending = null; clearTimers(); }
-  root.KaiCoreNetwork = Object.freeze({ enter, leave, refresh });
+  function leave() { active = false; if (!warmed) { generation++; pending = null; clearTimers(); } }
+  function observe(_wallet, privacyMode) {
+    if (!["local-only", "local-first", "network"].includes(privacyMode)) return;
+    if (mode !== privacyMode) { mode = privacyMode; invalidate(); }
+    if (warmed) return;
+    warmed = true; if (visible() && mode !== "local-only") void refresh();
+  }
+  root.KaiCoreNetwork = Object.freeze({ enter, leave, refresh, observe });
   $("refresh").onclick = () => refresh();
   $("models").onclick = event => {
     const button = event.target.closest?.("button[data-network-model]");
@@ -120,6 +126,6 @@
   for (const event of ["kai-credit-identity-changed", "kai-account-signed-out"]) root.addEventListener(event, () => { invalidate(); if (visible()) refresh(); });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { generation++; pending = null; clearTimers(); }
-    else if (active) { paint(); refresh(); }
+    else if (active || warmed) { paint(); refresh(); }
   });
 })(typeof window === "object" ? window : null);

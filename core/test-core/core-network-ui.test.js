@@ -99,20 +99,20 @@ test("actual model names replace stale aliases in models, provider lists and act
   assert.deepEqual(f.dispatched.filter(event => event.type === "kai-core-use-network-model").map(event => event.detail.model), models.map(model => model.id));
 });
 
-test("expiry removes ready counts and disables model use even while the next read is pending", async () => {
+test("expiry retains last-known counts and disables model use even while the next read is pending", async () => {
   const f = fixture(); await f.api.enter();
   f.setResponse(() => new Promise(() => {})); await f.advance(10000);
   assert.equal(f.$("state").textContent, "AI network status");
   await f.advance(5000);
-  assert.equal(f.$("state").textContent, "Network status unavailable"); assert.equal(f.$("provider-count").textContent, "—");
+  assert.equal(f.$("state").textContent, "Last known network status"); assert.equal(f.$("provider-count").textContent, "2");
   assert.match(f.$("models").innerHTML, / disabled/); assert.match(f.$("providers").innerHTML, /status stale/);
   f.clickModel(); assert.ok(!f.dispatched.some(event => event.type === "kai-core-use-network-model"));
 });
 
 test("read failures immediately mark retained rows stale and explain the failure", async () => {
   const f = fixture(); await f.api.enter(); f.setResponse(Error("Cannot reach the selected network.")); await f.api.refresh();
-  assert.equal(f.$("state").textContent, "Network status unavailable"); assert.equal(f.$("time").textContent, "Cannot reach the selected network.");
-  assert.equal(f.$("model-count").textContent, "—"); assert.match(f.$("models").innerHTML, /Availability unconfirmed/);
+  assert.equal(f.$("state").textContent, "Last known network status"); assert.match(f.$("time").textContent, /Cannot reach the selected network/);
+  assert.equal(f.$("model-count").textContent, "1"); assert.match(f.$("models").innerHTML, /Availability unconfirmed/);
   assert.match(f.$("activity-state").textContent, /Last verified/);
 });
 
@@ -141,7 +141,7 @@ test("leaving or hiding cancels polling and discards responses from a previous p
   assert.equal(f.$("provider-count").textContent, "—"); assert.equal(f.timers.size, 0);
   f.setResponse(overview()); await f.api.enter(); await f.hide(true);
   const count = f.calls.length; await f.advance(16000); assert.equal(f.calls.length, count); assert.equal(f.timers.size, 0);
-  await f.hide(false); assert.equal(f.$("provider-count").textContent, "—");
+  await f.hide(false); assert.equal(f.$("provider-count").textContent, "2"); assert.match(f.$("time").textContent, /Availability unconfirmed/);
 });
 
 test("untrusted model and provider metadata are escaped in every generated row and attribute", async () => {
@@ -171,4 +171,23 @@ test("display names normalize known aliases while preserving names of unrelated 
   assert.equal(modelName(" koinos-fast,koinos-network:koinos-balanced, koinos-smart "), "Qwen 2.5 1.5B, Llama 3.2 3B, Qwen 2.5 7B");
   assert.equal(modelName({ id: "custom-model", name: "My custom model" }), "My custom model");
   assert.equal(modelName("qwen2.5:7b"), "Qwen2.5 7b");
+});
+
+
+test("background observation warms the page without navigation, pauses in tray and resets on privacy changes", async () => {
+  const f = fixture(); f.api.observe({address:"wallet"}, "network"); await flush();
+  assert.equal(f.$("provider-count").textContent, "2");
+  f.api.leave(); const before=f.calls.length;
+  await f.advance(10000); assert.equal(f.calls.length,before+1);
+  await f.hide(true); const hidden=f.calls.length; await f.advance(30000); assert.equal(f.calls.length,hidden);
+  await f.hide(false); assert.equal(f.calls.length,hidden+1);
+  f.emit("kai-core-privacy-changed", {mode:"local-only"}); const stopped=f.calls.length;
+  await f.advance(30000); assert.equal(f.calls.length,stopped); assert.equal(f.$("provider-count").textContent,"—");
+});
+
+test("navigation immediately paints the retained observation while a replacement is delayed", async () => {
+  const f=fixture();await f.api.enter();f.api.leave();
+  let done;f.setResponse(()=>new Promise(resolve=>{done=resolve;}));const visit=f.api.enter();
+  assert.equal(f.$("provider-count").textContent,"2");
+  done(overview({readyProviders:4}));await visit;assert.equal(f.$("provider-count").textContent,"4");
 });

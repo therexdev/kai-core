@@ -90,6 +90,7 @@ async function main(){
    assert.equal(result.ok,true,result.error);if(result.result?.status)assert.ok(result.result.status<400,JSON.stringify(result.result));plugin.status=result.result;
    const ui=await appEval(plugin.id,`({title:document.title,text:document.body.innerText.slice(0,6000),node:typeof require,core:typeof window.kaiCore,bridge:typeof window.kai?.call})`);
    assert.equal(ui.node,"undefined");assert.equal(ui.core,"undefined");assert.equal(ui.bridge,"function");assert.ok(ui.text.trim().length>20);plugin.ui=ui;
+   await appEval(plugin.id, `Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{}))).then(()=>true)`);
    const file=path.join(output,plugin.id+".png");await application.evaluate((_electron,{id,file})=>global.__foundationCapture(file,id),{id:plugin.id,file});report.screenshots.push(file);
   });
   const persistent=report.plugins.find(p=>p.id==="kai.documents")||report.plugins.find(p=>p.id!=="kai.assistant");

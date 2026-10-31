@@ -148,24 +148,24 @@ test("testnet drop keeps the original exact 1 KOIN per 5 wallet KAI estimate, ex
   assert.equal(legacySummary({ wallet: { address: "wallet-a" }, earnings: null }), null);
 });
 
-test("Earn reads locked-wallet KAI without starting, signing or changing wallet state; failed reads clear both amounts", async () => {
+test("Earn reads locked-wallet KAI without starting, signing or changing wallet state; failed reads retain the last verified amounts", async () => {
   const f = fixture(info(), { legacy: true }); assert.equal(f.calls.length, 0); await f.enter();
   assert.deepEqual(f.controller.getState().legacy, { wallet: "fixture-wallet", kai: "12,345.67890123", koin: "2,469.13578024" });
   assert.deepEqual(f.calls.map(call => call.action).sort(), ["legacy-balance", "provider-public-earnings", "provider-public-info"]);
   f.setLegacy(Error("Balance unavailable")); await f.controller.refresh();
-  assert.equal(f.controller.getState().legacy, null); assert.equal(f.controller.getState().legacyError, "Balance unavailable");
+  assert.equal(f.controller.getState().legacy.kai, "12,345.67890123"); assert.equal(f.controller.getState().legacyError, "Balance unavailable");
   f.setLegacy({ wallet: { address: "fixture-wallet" }, earnings: { address: "fixture-wallet", kai: "0" } }); await f.controller.refresh();
   assert.equal(f.controller.getState().legacy.kai, "0"); assert.equal(f.controller.getState().legacyError, ""); f.controller.leave();
-  assert.equal(f.controller.getState().legacy, null); assert.equal(f.timers.size, 0);
+  assert.equal(f.controller.getState().legacy.kai, "0"); assert.equal(f.timers.size, 0);
 });
 
-test("a delayed KAI refresh never extends a stale amount and leaving discards its response", async () => {
+test("a delayed KAI refresh retains an explicitly stale amount and leaving discards its response", async () => {
   const f = fixture(info(), { legacy: true }); await f.enter();
   let release; f.setLegacy(() => new Promise(resolve => { release = resolve; }));
   await f.advance(20000); assert.ok(f.controller.getState().legacy);
-  await f.advance(10000); assert.equal(f.controller.getState().legacy, null);
+  await f.advance(10000); assert.equal(f.controller.getState().legacy.kai, "12,345.67890123"); assert.match(f.controller.getState().legacyError, /fresh/);
   f.controller.leave(); release({ wallet: { address: "fixture-wallet" }, earnings: { address: "fixture-wallet", kai: "999" } }); await flush();
-  assert.equal(f.controller.getState().legacy, null); assert.equal(f.timers.size, 0);
+  assert.equal(f.controller.getState().legacy.kai, "12,345.67890123"); assert.equal(f.timers.size, 0);
 });
 
 test("privacy or identity reset clears KAI and rejects an earlier account's delayed read", async () => {
@@ -175,4 +175,33 @@ test("privacy or identity reset clears KAI and rejects an earlier account's dela
   assert.equal(f.controller.getState().legacy, null);
   release({ wallet: { address: "old-wallet" }, earnings: { address: "old-wallet", kai: "999" } }); await oldRead;
   assert.equal(f.controller.getState().legacy, null); f.controller.leave();
+});
+
+
+test("reopening Earn retains KAI and reward totals until a fresh read arrives", async () => {
+ const f=fixture(info(),{legacy:true});await f.enter();f.controller.leave();
+ const saved=f.controller.getState().legacy;let done;f.setLegacy(()=>new Promise(resolve=>{done=resolve;}));
+ await f.enter();assert.deepEqual(f.controller.getState().legacy,saved);
+ done({wallet:{address:"fixture-wallet"},earnings:{address:"fixture-wallet",kai:"25"}});await flush();
+ assert.equal(f.controller.getState().legacy.kai,"25");f.controller.leave();
+});
+
+test("Earn's mounted page warms without navigation, pauses hidden, and purges data on identity/privacy changes", async()=>{
+ const fs=require("node:fs"),vm=require("node:vm"),path=require("node:path"),events=new Map(),documentEvents=new Map(),nodes=new Map(),calls=[],timers=new Map();let timer=0,now=start;
+ const node=id=>{if(!nodes.has(id))nodes.set(id,{hidden:false,disabled:false,dataset:{},textContent:"",innerHTML:"",value:"",addEventListener(){},setAttribute(){},querySelector(){return null;},querySelectorAll(){return [];}});return nodes.get(id);};
+ const document={hidden:false,getElementById:node,addEventListener:(name,fn)=>documentEvents.set(name,fn)};
+ const window={document,KaiRewardSummary:summaryApi,KaiCoreNotice:{create:()=>({show(){}})},addEventListener:(name,fn)=>events.set(name,fn),dispatchEvent(){},
+  kaiCore:{credit:async action=>{calls.push(action);return action==="provider-public-info"?{state:"ready",enabled:false,running:false,models:[]}:rewards();},call:async()=>({wallet:{address:"fixture-wallet"},earnings:{address:"fixture-wallet",kai:"125"}})}};
+ class Clock extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../../ui-core/earning.js"),"utf8"),{window,Date:Clock,console,setTimeout(fn,delay){const id=++timer;timers.set(id,{fn,at:now+delay});return id;},clearTimeout:id=>timers.delete(id)});
+ const api=window.KaiCoreEarning;api.observe({address:"fixture-wallet"},"network");await flush();
+ assert.equal(node("earn-wallet-kai").textContent,"125");assert.equal(calls.length,2);
+ api.leave();now+=15000;for(const[id,t]of[...timers])if(t.at<=now&&timers.delete(id))t.fn();await flush();assert.equal(calls.length,4);
+ document.hidden=true;documentEvents.get("visibilitychange")();assert.equal(timers.size,0);assert.equal(node("earn-wallet-kai").textContent,"125");
+ document.hidden=false;documentEvents.get("visibilitychange")();await flush();assert.equal(calls.length,6);
+ events.get("kai-core-privacy-changed")({detail:{mode:"local-only"}});assert.equal(node("earn-wallet-kai").textContent,"—");assert.equal(timers.size,0);
+ api.enter();await flush();assert.equal(calls.length,6);assert.match(node("provider-detail").textContent,/paused in Local-Only/);
+ events.get("kai-core-privacy-changed")({detail:{mode:"network"}});await flush();assert.equal(node("earn-wallet-kai").textContent,"125");
+ window.kaiCore.call=()=>new Promise(()=>{});events.get("kai-credit-identity-changed")();assert.equal(node("earn-wallet-kai").textContent,"—");
+ document.hidden=true;documentEvents.get("visibilitychange")();
 });

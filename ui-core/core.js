@@ -110,6 +110,8 @@ async function refresh() {
     text("wallet-address", address || "No wallet created"); text("wallet-detail", s.wallet.unlocked ? "Wallet unlocked. Core’s plugin API does not share its private key." : "Unlock to authorize wallet actions.");
     $("create-wallet").hidden = s.wallet.exists; $("restore-wallet").hidden = s.wallet.exists; $("unlock-button").hidden = !s.wallet.exists || s.wallet.unlocked; $("lock-wallet").hidden = !s.wallet.unlocked;
     window.KaiCoreWallet?.observe(s.wallet, s.network.privacyMode);
+    window.KaiCoreEarning?.observe(s.wallet, s.network.privacyMode);
+    window.KaiCoreNetwork?.observe(s.wallet, s.network.privacyMode);
     window.KaiCreditConnection?.observe(s.wallet, s.network.privacyMode);
     if (document.activeElement !== $("privacy")) $("privacy").value = s.network.privacyMode;
     notices["model-message"].show(s.importing ? `Importing model · ${Math.round(s.importing.pct || 0)}%` : s.importError || "",

@@ -171,11 +171,11 @@
         cancelTimer(legacyExpiryTimer);
         legacyExpiryTimer = setTimer(() => {
           if (!current()) return;
-          state.legacy = null; state.legacyAt = 0; state.legacyError = "Waiting for a fresh testnet KAI balance."; paint();
+          state.legacyError = "Waiting for a fresh testnet KAI balance."; paint();
         }, 30000);
       } catch (error) {
         if (!current()) return;
-        state.legacy = null; state.legacyAt = 0; state.legacyError = message(error); cancelTimer(legacyExpiryTimer);
+        state.legacyError = message(error); cancelTimer(legacyExpiryTimer);
       } finally {
         if (g === generation && revision === legacyRevision) { legacyPending = false; if (active) { paint(); legacyTimer = setTimer(refreshLegacy, POLL); } }
       }
@@ -213,7 +213,7 @@
       }
       state.notice = ""; paint();
     }
-    function leave() { active = false; ++readRevision; ++rewardRevision; ++legacyRevision; pending = false; rewardPending = false; legacyPending = false; cancelTimer(providerTimer); cancelTimer(rewardTimer); cancelTimer(expiryTimer); cancelTimer(legacyTimer); cancelTimer(legacyExpiryTimer); state.legacy = null; state.legacyAt = 0; }
+    function leave() { active = false; ++readRevision; ++rewardRevision; ++legacyRevision; pending = false; rewardPending = false; legacyPending = false; cancelTimer(providerTimer); cancelTimer(rewardTimer); cancelTimer(expiryTimer); cancelTimer(legacyTimer); cancelTimer(legacyExpiryTimer); }
     function enter() {
       if (active) return;
       active = true; state.rewardLoading = !state.rewards; paint(); armExpiry();
@@ -224,7 +224,7 @@
       Object.assign(state, { info: null, status: null, draft: null, stale: false, error: "", busy: false, action: "", notice: "", rewards: null, rewardError: "", rewardLoading: false, legacy: null, legacyAt: 0, legacyError: "" });
       paint(); if (wasActive) enter();
     }
-    return { enter, leave, reset, refresh: () => Promise.all([refreshProvider(), refreshRewards(), refreshLegacy()]), action, toggle, editSelection,
+    return { enter, leave, reset, pause(reason) { leave(); state.stale = true; state.error = reason; paint(); }, refresh: () => Promise.all([refreshProvider(), refreshRewards(), refreshLegacy()]), action, toggle, editSelection,
       resetSelection() { if (!state.busy && validSelection(state.info?.selection)) { state.draft = clone(state.info.selection); state.notice = ""; paint(); } },
       applySelection() { if (state.draft) return action("models", clone(state.draft)); }, getState: () => state };
   }
@@ -302,7 +302,7 @@
       picker.disabled = presentation.on || state.busy || state.stale || !choices.length || !["ready", "model-required", "download-required"].includes(info?.state);
       const legacy = state.legacy;
       text("earn-wallet-kai", legacy?.kai ?? "—"); text("earn-koin-drop", legacy?.koin ?? "—");
-      text("earn-legacy-status", legacy ? "Estimated drop · 1 KOIN per 5 KAI" : state.legacyError || "Checking Testnet KAI…");
+      text("earn-legacy-status", legacy ? `1 KOIN per 5 KAI · Last updated ${new Date(state.legacyAt).toLocaleTimeString()}${state.legacyError ? " · Update unavailable" : ""}` : state.legacyError || "Checking Testnet KAI…");
       $("earn-legacy-drop").title = legacy ? `Testnet KAI in wallet ${legacy.wallet}. Expected drop: 1 KOIN per 5 KAI, rounded down to 8 decimals. Estimate until the final drop snapshot.`
         : `${state.legacyError || "Checking testnet KAI balance."} The expected KOIN drop is calculated at 1 KOIN per 5 KAI when the balance is available.`;
       const rewards = state.rewards, feed = $("rewards"), markup = rewardMarkup(rewards);
@@ -329,10 +329,29 @@
     $("provider-reload").addEventListener("click", () => void controller.refresh()); $("provider-revoke").addEventListener("click", () => void controller.action("revoke"));
     $("provider-download").addEventListener("click", () => void controller.action("download")); $("provider-cancel").addEventListener("click", () => void controller.action("stop"));
     $("provider-wallet").addEventListener("click", () => navigate("wallet")); $("provider-open-models").addEventListener("click", () => navigate("models"));
-    let entered = false;
-    const api = { enter() { entered = true; if (!document.hidden) controller.enter(); }, leave() { entered = false; controller.leave(); }, refresh: controller.refresh };
-    document.addEventListener("visibilitychange", () => { if (document.hidden) controller.leave(); else if (entered) controller.enter(); });
-    for (const name of ["kai-account-signed-out", "kai-credit-identity-changed", "kai-core-privacy-changed"]) root.addEventListener(name, () => controller.reset());
+    // Read-only monitoring stays warm across navigation. Hidden/tray windows
+    // suspend polling, and privacy or identity changes clear retained figures.
+    let privacyMode = null, observed = false;
+    const resume = () => {
+      if (privacyMode === "local-only") controller.pause("Network updates are paused in Local-Only. Choose Local-First or Network in Settings.");
+      else if (observed && !document.hidden) controller.enter();
+    };
+    const api = {
+      enter() { resume(); }, leave() {}, refresh: controller.refresh,
+      observe(_wallet, mode) {
+        if (!["local-only", "local-first", "network"].includes(mode)) return;
+        observed = true; privacyMode = mode;
+        resume();
+      }
+    };
+    document.addEventListener("visibilitychange", () => { if (document.hidden) controller.leave(); else resume(); });
+    root.addEventListener("kai-core-privacy-changed", event => {
+      privacyMode = event.detail?.mode ?? event.detail?.privacyMode ?? event.detail;
+      controller.leave(); controller.reset(); resume();
+    });
+    for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) root.addEventListener(name, () => {
+      controller.leave(); controller.reset(); resume();
+    });
     return api;
   }
   const api = { createController, providerPresentation, validateRewards, rewardMarkup, legacyAtoms, legacySummary, modelRows, selectedModels, selectionKey, mount };
