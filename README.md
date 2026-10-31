@@ -6,6 +6,10 @@ This is a new architecture and a new profile. It does not automatically adopt ol
 
 The Beta name is display branding. Core keeps the `io.koinosai.core` application ID, the internal `KAI Core` OS identity and the existing `KAI Core/foundation-v1` data location. Windows keeps its `KAI Core.exe` executable and Linux keeps `kai-core`; installer and portable download filenames include `KAI-Core-Beta`.
 
+## Transfer from Koinos AI Alpha
+
+Follow the [illustrated transfer guide](docs/TRANSFER_GUIDE.md) to migrate models, your Core wallet and the regular Koinos Node. It includes snapshots, a PDF download and guidance for creating a separate Node wallet.
+
 ## Application updates
 
 Settings shows the installed version, checks for new Core releases, and offers an optional automatic-check setting (on by default). Local-Only privacy pauses checks and downloads. An update badge appears on Settings when a newer release is available.
