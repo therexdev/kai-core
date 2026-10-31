@@ -1,0 +1,68 @@
+name: Recover verified KAI Core Beta 0.7.8 publication
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/core-release-078-recovery.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: kai-core-release-078-recovery
+  cancel-in-progress: false
+jobs:
+  publish-verified-draft:
+    if: github.repository == 'therexdev/kai-core' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify publication and recovery rejection tests
+        run: node --test core/test-core/windows-release-signing.test.js
+      - name: Verify the pinned source run, successful builds and existing draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const { RECOVERY_078: pin, assertRecoverySource } = require('./scripts/foundation/publish-core-release');
+          if (require('./package.json').version !== '0.7.8') throw Error('This recovery is only for Core 0.7.8.');
+          const get = resource => JSON.parse(execFileSync('gh', ['api', `repos/therexdev/kai-core/${resource}`], { encoding: 'utf8' }));
+          assertRecoverySource({
+            run: get('actions/runs/41168191545'),
+            jobs: get('actions/runs/41168191545/jobs?per_page=100'),
+            artifacts: get('actions/runs/41168191545/artifacts?per_page=100'),
+            release: get('releases/429719462'),
+          });
+          console.log(`Verified source ${pin.commit}, all three platform builds, Windows signatures and draft ${pin.draftId}.`);
+          NODE
+      - name: Download only the three verified platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          repository: therexdev/kai-core
+          run-id: 41168191545
+          artifact-ids: 13030326518,13030585542,13029603175
+          github-token: ${{ github.token }}
+          path: release-assets
+          merge-multiple: true
+      - name: Verify exact uploaded bytes and publish only draft 429719462
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node <<'NODE'
+          const path = require('node:path');
+          const { publish } = require('./scripts/foundation/publish-core-release');
+          publish(path.resolve('release-assets/dist'), {
+            ...process.env,
+            GITHUB_SHA: '4a5e8863612496f153002faadc60ac7ec47b8eb8',
+            GITHUB_RUN_ID: '41168191545',
+          }, undefined, 429719462);
+          NODE

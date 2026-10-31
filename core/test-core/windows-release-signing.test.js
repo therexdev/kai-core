@@ -2,7 +2,7 @@
 const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), os = require("node:os");
 const yaml = require("js-yaml");
 const { PUBLISHER, REQUIRED_ENV, publisherMatches, configureSigning, assertSignature, versionNames, hash, readVerifiedArtifacts } = require("../../scripts/foundation/windows-signing");
-const { releaseFiles, publish } = require("../../scripts/foundation/publish-core-release");
+const { releaseFiles, publish, RECOVERY_078, assertRecoverySource } = require("../../scripts/foundation/publish-core-release");
 const currentVersion = require("../../package.json").version;
 const identity = { version: currentVersion, commit: "a".repeat(40), workflowRun: "12345" };
 function fixture(t) {
@@ -110,20 +110,119 @@ test("release gate rejects extra Windows executables and duplicate signature cov
   assert.throws(() => readVerifiedArtifacts(f.dir, identity), /coverage/);
 });
 
-test("publication checks exact uploaded bytes before making a draft public", t => {
+function publicationFixture(t, options = {}) {
   const f = fixture(t), calls = [], names = releaseFiles(f.dir, identity);
+  const draft = { id: 42, tag_name: `v${identity.version}`, target_commitish: identity.commit, name: `KAI Core Beta ${identity.version}`, draft: true, prerelease: false,
+    assets: names.map(name => ({ name, state: "uploaded", size: fs.statSync(path.join(f.dir, name)).size, digest: `sha256:${hash(path.join(f.dir, name))}` })) };
+  let exists = Boolean(options.existing);
   const env = { GITHUB_SHA: identity.commit, GITHUB_RUN_ID: identity.workflowRun };
   const run = args => {
     calls.push(args);
-    if (args[0] === "release" && args[1] === "list") return "[]";
-    if (args[0] === "api") return JSON.stringify({ draft: true, assets: names.map(name => ({ name, state: "uploaded", size: fs.statSync(path.join(f.dir, name)).size, digest: `sha256:${hash(path.join(f.dir, name))}` })) });
-    return "";
+    if (args.some(arg => /releases\/tags\//.test(arg))) throw Error("404: draft has no public tag");
+    if (args[0] === "release" && args[1] === "create") { exists = true; return "https://github.com/therexdev/kai-core/releases/tag/untagged-fixture"; }
+    if (args.includes("--paginate")) return JSON.stringify([[{ id: 1, tag_name: "v0.1.0" }], exists ? [draft, ...(options.duplicate ? [{ ...draft, id: 43 }] : [])] : []]);
+    if (args.includes("PATCH")) { assert.ok(args.includes("repos/therexdev/kai-core/releases/42")); return JSON.stringify({ ...draft, draft: false }); }
+    if (args[0] === "api" && args[1] === "repos/therexdev/kai-core/releases/42") return JSON.stringify(draft);
+    throw Error(`Unexpected command: ${args.join(" ")}`);
   };
-  publish(f.dir, env, run);
-  assert.ok(calls.find(args => args[1] === "create").includes("--draft"));
-  assert.deepEqual(calls.at(-1).slice(0, 3), ["release", "edit", `v${identity.version}`]);
-  assert.ok(calls.at(-1).includes("--draft=false"));
-  assert.throws(() => publish(f.dir, env, args => args[0] === "api" ? JSON.stringify({ draft: true, assets: [] }) : run(args)), /incomplete/);
-  assert.throws(() => publish(f.dir, env, () => JSON.stringify([{ tagName: `v${identity.version}` }])), /already exists/);
-  assert.throws(() => publish(f.dir, env, () => { throw Error("authentication failed"); }), /authentication failed/);
+  return { ...f, calls, draft, env, run };
+}
+
+test("publication discovers an untagged draft and verifies exact bytes before publishing by ID", t => {
+  const f = publicationFixture(t);
+  publish(f.dir, f.env, f.run);
+  assert.ok(f.calls.find(args => args[1] === "create").includes("--draft"));
+  assert.equal(f.calls.filter(args => args.includes("--paginate")).length, 2);
+  assert.ok(f.calls.at(-1).includes("PATCH"));
+  assert.ok(f.calls.at(-1).includes("draft=false"));
+  assert.ok(f.calls.at(-1).includes("repos/therexdev/kai-core/releases/42"));
+  assert.equal(f.calls.some(args => args[0] === "release" && args[1] === "edit"), false);
+});
+
+test("publication resumes the exact complete draft without replacing or uploading assets", t => {
+  const f = publicationFixture(t, { existing: true });
+  publish(f.dir, f.env, f.run);
+  assert.equal(f.calls.some(args => args[0] === "release"), false);
+  assert.equal(f.calls.filter(args => args.includes("PATCH")).length, 1);
+});
+
+test("publication leaves incomplete, changed or duplicate draft assets unpublished", async t => {
+  const mutations = [draft => { draft.assets.pop(); }, draft => { draft.assets[0].digest = "sha256:" + "0".repeat(64); },
+    draft => { draft.assets[0].size++; }, draft => { draft.assets[0].state = "starter"; },
+    draft => { draft.assets[0] = draft.assets[1]; }];
+  for (const mutate of mutations) await t.test("invalid draft assets", t => {
+    const f = publicationFixture(t, { existing: true }); mutate(f.draft);
+    assert.throws(() => publish(f.dir, f.env, f.run), /incomplete|differs/);
+    assert.equal(f.calls.some(args => args.includes("PATCH") || args[0] === "release"), false);
+  });
+});
+
+test("publication rejects public, foreign, ambiguous or changed-identity releases", async t => {
+  const mutations = [draft => { draft.draft = false; }, draft => { draft.target_commitish = "b".repeat(40); },
+    draft => { draft.name = "Other build"; }, draft => { draft.prerelease = true; }];
+  for (const mutate of mutations) await t.test("wrong release identity", t => {
+    const f = publicationFixture(t, { existing: true }); mutate(f.draft);
+    assert.throws(() => publish(f.dir, f.env, f.run), /already exists|identity/);
+    assert.equal(f.calls.some(args => args.includes("PATCH") || args[0] === "release"), false);
+  });
+  const f = publicationFixture(t, { existing: true, duplicate: true });
+  assert.throws(() => publish(f.dir, f.env, f.run), /Multiple releases/);
+  const race = publicationFixture(t, { existing: true });
+  assert.throws(() => publish(race.dir, race.env, args => {
+    const output = race.run(args);
+    return args[0] === "api" && args[1] === "repos/therexdev/kai-core/releases/42" ? JSON.stringify({ ...race.draft, tag_name: "v9.0.0" }) : output;
+  }), /identity/);
+  assert.equal(race.calls.some(args => args.includes("PATCH")), false);
+});
+
+test("release discovery errors never create a replacement draft", t => {
+  const f = publicationFixture(t);
+  assert.throws(() => publish(f.dir, f.env, () => { throw Error("authentication failed"); }), /authentication failed/);
+  assert.throws(() => publish(f.dir, f.env, () => "{}"), /Invalid release-list/);
+});
+
+test("recovery publication cannot create or substitute its pinned draft", t => {
+  const f = publicationFixture(t, { existing: true });
+  assert.throws(() => publish(f.dir, f.env, f.run, 99), /expected recovery draft/);
+  assert.equal(f.calls.some(args => args.includes("PATCH") || args[0] === "release"), false);
+  const absent = publicationFixture(t);
+  assert.throws(() => publish(absent.dir, absent.env, absent.run, 42), /expected recovery draft/);
+  assert.equal(absent.calls.some(args => args.includes("PATCH") || args[0] === "release"), false);
+});
+
+function recoveryEvidence() {
+  const pin = RECOVERY_078;
+  return {
+    run: { id: pin.runId, head_sha: pin.commit, head_branch: "main", event: "push", path: pin.workflowPath,
+      workflow_id: pin.workflowId, run_attempt: pin.attempt, status: "completed", conclusion: "failure",
+      repository: { id: pin.repositoryId, full_name: pin.repository }, head_repository: { id: pin.repositoryId, full_name: pin.repository } },
+    jobs: { total_count: 3, jobs: pin.jobs.map(job => ({ ...job, head_sha: pin.commit, run_attempt: pin.attempt, status: "completed", conclusion: "success",
+      steps: ["Build signed Windows Foundation installers", "Verify Windows signatures, publisher, timestamps and update feed"].map(name => ({ name, status: "completed", conclusion: "success" })) })) },
+    artifacts: { total_count: 3, artifacts: pin.artifacts.map(artifact => ({ ...artifact, expired: false,
+      workflow_run: { id: pin.runId, repository_id: pin.repositoryId, head_repository_id: pin.repositoryId, head_branch: "main", head_sha: pin.commit } })) },
+    release: { id: pin.draftId, name: `KAI Core Beta ${pin.version}`, tag_name: `v${pin.version}`, target_commitish: pin.commit, draft: true, prerelease: false },
+  };
+}
+
+test("one-time recovery requires the exact workflow, successful signed builds, artifacts and draft", () => {
+  assert.equal(assertRecoverySource(recoveryEvidence()), RECOVERY_078);
+  const mutations = [
+    evidence => { evidence.run.id++; }, evidence => { evidence.run.repository.full_name = "other/repo"; },
+    evidence => { evidence.run.head_repository.id++; }, evidence => { evidence.run.head_sha = "b".repeat(40); },
+    evidence => { evidence.run.event = "pull_request"; }, evidence => { evidence.run.head_branch = "foundation-v1"; },
+    evidence => { evidence.run.path = ".github/workflows/unreviewed.yml"; }, evidence => { evidence.run.workflow_id++; },
+    evidence => { evidence.run.run_attempt++; }, evidence => { evidence.run.status = "in_progress"; },
+    evidence => { evidence.jobs.jobs[0].conclusion = "failure"; }, evidence => { evidence.jobs.jobs[1].status = "in_progress"; },
+    evidence => { evidence.jobs.jobs[2].head_sha = "b".repeat(40); }, evidence => { evidence.jobs.jobs[0].steps[1].conclusion = "skipped"; },
+    evidence => { evidence.jobs.jobs[0].steps.pop(); }, evidence => { evidence.jobs.jobs.pop(); },
+    evidence => { evidence.artifacts.artifacts[0].expired = true; }, evidence => { evidence.artifacts.artifacts[1].id++; },
+    evidence => { evidence.artifacts.artifacts[1].digest = "sha256:" + "0".repeat(64); },
+    evidence => { evidence.artifacts.artifacts[2].workflow_run.head_sha = "b".repeat(40); }, evidence => { evidence.artifacts.artifacts.pop(); },
+    evidence => { evidence.release.id++; }, evidence => { evidence.release.draft = false; },
+    evidence => { evidence.release.target_commitish = "b".repeat(40); },
+  ];
+  for (const mutate of mutations) {
+    const evidence = recoveryEvidence(); mutate(evidence);
+    assert.throws(() => assertRecoverySource(evidence));
+  }
 });

@@ -2,6 +2,11 @@ name: KAI Core Beta installers
 on:
   push:
     branches: [main, foundation-v1]
+    paths-ignore:
+      - scripts/foundation/publish-core-release.js
+      - core/test-core/windows-release-signing.test.js
+      - .github/workflows/core-release-078-recovery.yml
+      - .github/workflows/core-build.yml
   workflow_dispatch:
 permissions:
   contents: read
