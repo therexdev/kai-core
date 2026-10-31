@@ -1,0 +1,20 @@
+name: Diagnose production Windows update verifier
+on:
+  push:
+    branches: [diagnose-windows-update-0710]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Compare inherited and clean Windows PowerShell module environments
+        run: node scripts/foundation/windows-update-diagnostic.cjs
