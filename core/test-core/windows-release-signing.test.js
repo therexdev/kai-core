@@ -3,26 +3,28 @@ const test = require("node:test"), assert = require("node:assert/strict"), fs = 
 const yaml = require("js-yaml");
 const { PUBLISHER, REQUIRED_ENV, publisherMatches, configureSigning, assertSignature, versionNames, hash, readVerifiedArtifacts } = require("../../scripts/foundation/windows-signing");
 const { releaseFiles, publish } = require("../../scripts/foundation/publish-core-release");
+const { verifyUpdater, verifyRejection } = require("../../scripts/foundation/verify-windows-signatures");
 const currentVersion = require("../../package.json").version;
 const identity = { version: currentVersion, commit: "a".repeat(40), workflowRun: "12345" };
-function fixture(t) {
+function fixture(t, releaseIdentity = identity) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-release-signing-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const names = versionNames(identity.version);
+  const names = versionNames(releaseIdentity.version);
   fs.writeFileSync(path.join(dir, names.setup), "signed setup bytes");
   fs.writeFileSync(path.join(dir, names.portable), "signed portable bytes");
   fs.writeFileSync(path.join(dir, names.blockmap), "verified blockmap bytes");
   const digest = hash(path.join(dir, names.setup), "sha512", "base64");
-  const feed = { version: identity.version, path: names.setup, sha512: digest, files: [{ url: names.setup, sha512: digest, size: fs.statSync(path.join(dir, names.setup)).size }] };
+  const feed = { version: releaseIdentity.version, path: names.setup, sha512: digest, files: [{ url: names.setup, sha512: digest, size: fs.statSync(path.join(dir, names.setup)).size }] };
   fs.writeFileSync(path.join(dir, names.feed), yaml.dump(feed));
   const signature = file => ({ path: file, status: "Valid", signatureType: "Authenticode", subject: PUBLISHER, timestampThumbprint: "f".repeat(40), signToolExitCode: 0 });
-  const report = { ...identity, schemaVersion: 1, publisher: PUBLISHER, rejectionChecks: { unsigned: true, tampered: true },
+  const report = { ...releaseIdentity, schemaVersion: 1, publisher: PUBLISHER, rejectionChecks: { unsigned: true, tampered: true },
+    updaterChecks: { setup: true, portable: true, downloadedSetup: true, cachedSetup: true, informationalStderr: true, unsigned: true, tampered: true, otherPublisher: true },
     signatures: [names.setup, names.portable, "win-unpacked/KAI Core.exe", "win-unpacked/resources/elevate.exe"].map(signature),
     artifacts: [names.setup, names.portable, names.blockmap, names.feed].map(name => ({ name, sha256: hash(path.join(dir, name)) })) };
   const write = () => fs.writeFileSync(path.join(dir, names.report), JSON.stringify(report));
   write();
-  const extras = [`KAI-Core-Beta-${identity.version}-linux-x86_64.AppImage`, `KAI-Core-Beta-${identity.version}-linux-arm64.AppImage`,
-    ...["x64", "arm64"].flatMap(arch => ["dmg", "zip"].map(ext => `KAI-Core-Beta-${identity.version}-mac-${arch}.${ext}`))];
+  const extras = [`KAI-Core-Beta-${releaseIdentity.version}-linux-x86_64.AppImage`, `KAI-Core-Beta-${releaseIdentity.version}-linux-arm64.AppImage`,
+    ...["x64", "arm64"].flatMap(arch => ["dmg", "zip"].map(ext => `KAI-Core-Beta-${releaseIdentity.version}-mac-${arch}.${ext}`))];
   extras.forEach(name => fs.writeFileSync(path.join(dir, name), "manual platform installer"));
   return { dir, names, report, write, feed, signature };
 }
@@ -63,6 +65,83 @@ test("release gate accepts only matching Windows artifacts and complete signatur
   assert.equal(releaseFiles(f.dir, identity).length, 11);
   f.report.signatures.pop(); f.write();
   assert.throws(() => readVerifiedArtifacts(f.dir, identity), /Missing signature evidence/);
+});
+
+test("new releases require production updater evidence while archived release proofs stay auditable", t => {
+  const next = { ...identity, version: "0.7.10" }, f = fixture(t, next);
+  assert.equal(readVerifiedArtifacts(f.dir, next).names.length, 4);
+  for (const name of Object.keys(f.report.updaterChecks)) {
+    f.report.updaterChecks[name] = false; f.write();
+    assert.throws(() => readVerifiedArtifacts(f.dir, next), /Production Windows updater verification checks are missing/);
+    f.report.updaterChecks[name] = true;
+  }
+  delete f.report.updaterChecks; f.write();
+  assert.throws(() => readVerifiedArtifacts(f.dir, next), /Production Windows updater verification checks are missing/);
+  const previous = { ...identity, version: "0.7.9" }, archived = fixture(t, previous);
+  delete archived.report.updaterChecks; archived.write();
+  assert.equal(readVerifiedArtifacts(archived.dir, previous).names.length, 4);
+});
+
+test("updater gate checks real download bytes, repeated cache checks and a signed foreign publisher", async t => {
+  const f = fixture(t), calls = [], foreign = path.join(f.dir, "foreign-node.exe");
+  const result = await verifyUpdater(f.dir, identity.version, {
+    otherPublisherFile: foreign,
+    inspect(files) { assert.deepEqual(files, [foreign]); return [{ ...f.signature(foreign), subject: "CN=OpenJS Foundation" }]; },
+    async verifySignature(file, options) {
+      calls.push({ file, options });
+      if (file === foreign) throw Error("Unexpected publisher");
+      assert.equal(fs.existsSync(file), true);
+    },
+  });
+  assert.deepEqual(result, { setup: true, portable: true, downloadedSetup: true, cachedSetup: true, informationalStderr: true, otherPublisher: true });
+  assert.equal(calls.length, 7);
+  assert.equal(calls.filter(call => call.file === path.join(f.dir, f.names.setup)).length, 3);
+  const cached = calls.filter(call => path.dirname(call.file) !== f.dir);
+  assert.equal(cached.length, 2); assert.equal(cached[0].file, cached[1].file);
+  assert.match(cached[0].file, /Míke's-用户/); assert.equal(fs.existsSync(cached[0].file), false);
+  assert.equal(typeof calls.find(call => call.options)?.options.execFile, "function");
+});
+
+test("updater gate fails when production verification, download bytes or foreign-publisher rejection fail", async t => {
+  for (const failedCall of [1, 2, 3, 4, 5, 6]) await t.test(`verification ${failedCall}`, async t => {
+    const f = fixture(t); let calls = 0;
+    await assert.rejects(verifyUpdater(f.dir, identity.version, { async verifySignature() {
+      if (++calls === failedCall) throw Error("Runtime verifier failed");
+    } }), /Runtime verifier failed/);
+    assert.equal(calls, failedCall);
+  });
+  await t.test("changed download", async t => {
+    const f = fixture(t); let calls = 0;
+    fs.appendFileSync(path.join(f.dir, f.names.setup), "tampered");
+    await assert.rejects(verifyUpdater(f.dir, identity.version, { async verifySignature() { calls++; } }), /incomplete/);
+    assert.equal(calls, 2);
+  });
+  await t.test("foreign publisher incorrectly accepted", async t => {
+    const f = fixture(t);
+    await assert.rejects(verifyUpdater(f.dir, identity.version, {
+      inspect(files) { return [{ ...f.signature(files[0]), subject: "CN=Other Publisher" }]; },
+      async verifySignature() {},
+    }), /Production updater accepted an executable from another publisher/);
+  });
+  await t.test("foreign control is not genuinely signed", async t => {
+    const f = fixture(t);
+    await assert.rejects(verifyUpdater(f.dir, identity.version, {
+      inspect(files) { return [{ ...f.signature(files[0]), subject: "CN=Other Publisher", status: "NotSigned" }]; },
+      async verifySignature() {},
+    }), /valid timestamped executable from another publisher/);
+  });
+});
+
+test("unsigned and tampered rejection must pass both release inspection and the production updater", async t => {
+  const f = fixture(t), signed = path.join(f.dir, f.names.setup);
+  fs.writeFileSync(signed, Buffer.alloc(4096));
+  const inspect = files => files.map(file => ({ ...f.signature(file), status: "NotSigned" })), checked = [];
+  assert.deepEqual(await verifyRejection(signed, { inspect, async verifySignature(file) {
+    checked.push(file); assert.equal(fs.existsSync(file), true); throw Error("Invalid signature");
+  } }), { unsigned: true, tampered: true });
+  assert.deepEqual(checked.map(file => path.basename(file)), ["unsigned.exe", "tampered.exe"]);
+  assert.ok(checked.every(file => !fs.existsSync(file)));
+  await assert.rejects(verifyRejection(signed, { inspect, async verifySignature() {} }), /Production updater accepted an invalid executable/);
 });
 
 test("merged macOS blockmaps do not enter the Windows manifest or published release", t => {

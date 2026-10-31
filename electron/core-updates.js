@@ -24,13 +24,21 @@ function validateSignatureRecord(record, file) {
 // malformed output must never count as successful publisher verification.
 async function verifyWindowsInstaller(file, { execFile = require("node:child_process").execFile, systemRoot = process.env.SystemRoot } = {}) {
   if (!systemRoot || !path.win32.isAbsolute(systemRoot)) throw Error("Windows signature verification is unavailable.");
-  const script = `$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $s=Get-AuthenticodeSignature -LiteralPath '${file.replace(/'/g, "''")}'; [pscustomobject]@{status=[int]$s.Status;signatureType=[int]$s.SignatureType;path=$s.Path;subject=$s.SignerCertificate.Subject;timestamp=$s.TimeStamperCertificate.Thumbprint}|ConvertTo-Json -Compress`;
+  // Windows PowerShell can serialize first-use module progress to stderr even
+  // after a successful command. Suppress progress at its source; stderr alone
+  // is not a signature decision. A zero exit and the complete pinned signature
+  // record below are both required before this installer is trusted.
+  const script = `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $s=Microsoft.PowerShell.Security\\Get-AuthenticodeSignature -LiteralPath '${file.replace(/'/g, "''")}'; [pscustomobject]@{status=[int]$s.Status;signatureType=[int]$s.SignatureType;path=$s.Path;subject=$s.SignerCertificate.Subject;timestamp=$s.TimeStamperCertificate.Thumbprint}|ConvertTo-Json -Compress`;
   const executable = path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   const encoded = Buffer.from(script, "utf16le").toString("base64");
   const record = await new Promise((resolve, reject) => {
     execFile(executable, ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-      { windowsHide: true, shell: false, timeout: 30000, maxBuffer: 65536, encoding: "utf8" }, (error, stdout, stderr) => {
-        if (error || String(stderr || "").trim()) return reject(Error("Windows could not verify the update signature. Try again or use the official download."));
+      { windowsHide: true, shell: false, timeout: 30000, maxBuffer: 65536, encoding: "utf8" }, (error, stdout) => {
+        if (error) {
+          if (error.killed || error.code === "ETIMEDOUT") return reject(Error("Windows signature verification timed out. Check your connection and try again, or use the official download."));
+          if (["ENOENT", "EACCES", "EPERM"].includes(error.code)) return reject(Error("Windows could not start its signature checker. Use the official download, or check whether Windows PowerShell is blocked on this computer."));
+          return reject(Error("Windows could not complete signature verification. Try again or use the official download."));
+        }
         try { resolve(JSON.parse(String(stdout).replace(/^\uFEFF/, "").trim())); }
         catch { reject(Error("Windows returned an invalid signature verification result.")); }
       });

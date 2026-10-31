@@ -1,8 +1,9 @@
 "use strict";
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
-const { execFileSync } = require("node:child_process");
+const { execFile, execFileSync } = require("node:child_process");
 const yaml = require("js-yaml");
-const { PUBLISHER, assertSignature, hash, artifactFiles, versionNames, readVerifiedArtifacts } = require("./windows-signing");
+const { PUBLISHER, publisherMatches, assertSignature, hash, artifactFiles, versionNames, readVerifiedArtifacts } = require("./windows-signing");
+const { verifyWindowsInstaller, verifyDownloadedInstaller, assertUpdateInfo } = require("../../electron/core-updates");
 
 function inspectFiles(files) {
   if (process.platform !== "win32") throw Error("Authenticode release verification must run on Windows");
@@ -19,7 +20,7 @@ function inspectFiles(files) {
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 }
 
-function verifyRejection(signedFile) {
+async function verifyRejection(signedFile, { inspect = inspectFiles, verifySignature = verifyWindowsInstaller } = {}) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "kai-core-signature-rejection-"));
   try {
     const unsigned = path.join(temp, "unsigned.exe"), tampered = path.join(temp, "tampered.exe");
@@ -28,17 +29,63 @@ function verifyRejection(signedFile) {
     const size = fs.statSync(tampered).size;
     if (size < 2048) throw Error("Signed installer is unexpectedly small");
     fs.truncateSync(tampered, size - 1024);
-    const results = inspectFiles([unsigned, tampered]);
+    const results = inspect([unsigned, tampered]);
     for (const record of results) {
       let rejected = false;
       try { assertSignature(record); } catch { rejected = true; }
       if (!rejected) throw Error(`Signature verifier accepted an invalid executable: ${record.path}`);
     }
+    for (const file of [unsigned, tampered]) {
+      let rejected = false;
+      try { await verifySignature(file); } catch { rejected = true; }
+      if (!rejected) throw Error(`Production updater accepted an invalid executable: ${file}`);
+    }
     return { unsigned: true, tampered: true };
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 }
 
-function verify(dir) {
+async function verifyUpdater(dir, version, { inspect = inspectFiles, verifySignature = verifyWindowsInstaller, otherPublisherFile = process.execPath } = {}) {
+  // CI's pwsh/SignTool checks cannot stand in for the Windows PowerShell 5.1
+  // verifier shipped to users. Run that exact verifier before publication.
+  const names = versionNames(version), setup = path.join(dir, names.setup), portable = path.join(dir, names.portable);
+  const feed = yaml.load(fs.readFileSync(path.join(dir, names.feed), "utf8"));
+  const metadata = assertUpdateInfo({ ...feed, tag: `v${version}` }, version);
+  await verifySignature(setup);
+  await verifySignature(portable);
+  await verifyDownloadedInstaller(setup, metadata, verifySignature);
+
+  // Exercise a cache-like path, including apostrophes and Unicode, and repeat
+  // the complete hash/signature check used immediately before installation.
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), "kai-update-Míke's-用户-"));
+  try {
+    const file = path.join(cache, names.setup);
+    fs.copyFileSync(setup, file);
+    await verifyDownloadedInstaller(file, metadata, verifySignature);
+    await verifyDownloadedInstaller(file, metadata, verifySignature);
+  } finally { fs.rmSync(cache, { recursive: true, force: true }); }
+
+  // A valid signature remains valid when PowerShell writes informational
+  // progress to stderr. Only the real command's stderr is supplemented;
+  // its exit code and signed-file result are never replaced.
+  await verifySignature(setup, { execFile(executable, args, options, done) {
+    return execFile(executable, args, options, (error, stdout, stderr) => done(error, stdout,
+      String(stderr || "") + '\r\n#< CLIXML\r\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><MS><S N="Activity">Preparing modules for first use.</S></MS></Obj></Objs>'));
+  } });
+
+  // The official CI Node executable supplies a genuinely signed foreign
+  // publisher without creating certificates or changing the machine's trust.
+  const [foreign] = inspect([otherPublisherFile]);
+  if (foreign?.status !== "Valid" || foreign.signatureType !== "Authenticode" || foreign.signToolExitCode !== 0 ||
+      !/^[a-f0-9]{40,64}$/i.test(foreign.timestampThumbprint || "") || publisherMatches(foreign.subject)) {
+    throw Error("A valid timestamped executable from another publisher is required for the updater rejection check");
+  }
+  let rejected = false;
+  try { await verifySignature(otherPublisherFile); } catch { rejected = true; }
+  if (!rejected) throw Error("Production updater accepted an executable from another publisher");
+  return { setup: true, portable: true, downloadedSetup: true, cachedSetup: true, informationalStderr: true, otherPublisher: true };
+}
+
+async function verify(dir) {
   const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
   if (!pkg.build.win.forceCodeSigning || pkg.build.win.verifyUpdateCodeSignature !== true ||
       pkg.build.win.azureSignOptions?.publisherName !== PUBLISHER) throw Error("Mandatory Windows signing was not configured");
@@ -58,16 +105,18 @@ function verify(dir) {
     assertSignature(record);
     record.path = path.relative(dir, record.path).split(path.sep).join("/");
   });
+  const updaterChecks = await verifyUpdater(dir, pkg.version);
+  const rejectionChecks = await verifyRejection(path.join(dir, versionNames(pkg.version).setup));
   const report = {
     schemaVersion: 1, version: pkg.version, publisher: PUBLISHER,
     commit: process.env.GITHUB_SHA, workflowRun: process.env.GITHUB_RUN_ID,
     verifiedAt: new Date().toISOString(), signatures,
-    rejectionChecks: verifyRejection(path.join(dir, versionNames(pkg.version).setup)),
+    rejectionChecks, updaterChecks: { ...updaterChecks, ...rejectionChecks },
     artifacts: names.map(name => ({ name, sha256: hash(path.join(dir, name)) })),
   };
   fs.writeFileSync(path.join(dir, versionNames(pkg.version).report), JSON.stringify(report, null, 2) + "\n");
   readVerifiedArtifacts(dir, report);
-  console.log(`Verified ${signatures.length} Windows signatures, timestamps, publisher, rejection checks and update hashes.`);
+  console.log(`Verified ${signatures.length} Windows signatures, timestamps, publisher, rejection checks, update hashes and the production Windows PowerShell updater.`);
 }
-if (require.main === module) verify(path.resolve(process.argv[2] || "dist"));
-module.exports = { inspectFiles, verifyRejection, verify };
+if (require.main === module) verify(path.resolve(process.argv[2] || "dist")).catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = { inspectFiles, verifyRejection, verifyUpdater, verify };

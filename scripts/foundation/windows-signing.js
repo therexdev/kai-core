@@ -2,6 +2,7 @@
 
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
 const yaml = require("js-yaml");
+const semver = require("semver");
 const { parseDn } = require("builder-util-runtime");
 
 // Reuse the established public Azure identity, not a rotating certificate thumbprint.
@@ -69,6 +70,10 @@ function readVerifiedArtifacts(dir, identity) {
   }
   if (!Array.isArray(report.artifacts) || report.artifacts.length !== names.length || new Set(report.artifacts.map(a => a.name)).size !== names.length) throw Error("Windows artifact coverage mismatch");
   if (report.rejectionChecks?.unsigned !== true || report.rejectionChecks?.tampered !== true) throw Error("Windows signature rejection checks are missing");
+  if (semver.gte(identity.version, "0.7.10") &&
+      ["setup", "portable", "downloadedSetup", "cachedSetup", "informationalStderr", "unsigned", "tampered", "otherPublisher"].some(name => report.updaterChecks?.[name] !== true)) {
+    throw Error("Production Windows updater verification checks are missing");
+  }
   for (const name of names) {
     const entry = report.artifacts.find(item => item.name === name);
     if (!entry || entry.sha256 !== hash(path.join(dir, name))) throw Error(`Windows artifact changed after verification: ${name}`);

@@ -85,8 +85,33 @@ test("Windows native verification rejects unsigned, wrong publisher, missing tim
   validateSignatureRecord(record, file);
   for (const change of [{ status: 2 }, { signatureType: 2 }, { subject: "CN=Someone Else" }, { timestamp: null }, { path: "C:\\other.exe" }]) assert.throws(() => validateSignatureRecord({ ...record, ...change }, file));
   await verifyWindowsInstaller(file, { systemRoot: "C:\\Windows", execFile(exe, args, opts, done) { assert.equal(exe, "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"); assert.equal(opts.shell, false); assert(args.includes("-EncodedCommand")); done(null, JSON.stringify(record), ""); } });
-  await assert.rejects(verifyWindowsInstaller(file, { systemRoot: "C:\\Windows", execFile(_exe, _args, _opts, done) { done(Error("powershell absent"), "", ""); } }), /could not verify/);
+  await assert.rejects(verifyWindowsInstaller(file, { systemRoot: "C:\\Windows", execFile(_exe, _args, _opts, done) { done(Error("powershell failed"), "", ""); } }), /could not complete/);
   await assert.rejects(verifyWindowsInstaller(file, { systemRoot: "C:\\Windows", execFile(_exe, _args, _opts, done) { done(null, "not JSON", ""); } }), /invalid signature/);
+});
+test("Windows module progress cannot reject a successful, fully verified signature", async () => {
+  const file = "C:\\Users\\Míke O'Brien\\update.exe";
+  const record = { status: 0, signatureType: 1, path: file, subject: PUBLISHER, timestamp: "a".repeat(40) };
+  const progress = '#< CLIXML\r\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress"><MS><PR N="Record"><AV>Preparing modules for first use.</AV></PR></MS></Obj></Objs>';
+  const verify = (value, diagnostics = progress, failure = null) => verifyWindowsInstaller(file, { systemRoot: "C:\\Windows", execFile(_exe, args, _opts, done) {
+    const script = Buffer.from(args[args.indexOf("-EncodedCommand") + 1], "base64").toString("utf16le");
+    assert.match(script, /\$ProgressPreference='SilentlyContinue'/);
+    assert.match(script, /\$ErrorActionPreference='Stop'/);
+    assert.ok(script.includes("Microsoft.PowerShell.Security\\Get-AuthenticodeSignature"));
+    assert.ok(script.includes("-LiteralPath 'C:\\Users\\Míke O''Brien\\update.exe'"));
+    done(failure, JSON.stringify(value), diagnostics);
+  } });
+  await verify(record);
+  // Diagnostics cannot substitute for a successful process or trusted result.
+  for (const invalid of [null, {}, { ...record, status: 2 }, { ...record, subject: "CN=Someone Else" }, { ...record, timestamp: null }]) {
+    await assert.rejects(verify(invalid), /valid, timestamped signature/);
+  }
+  await assert.rejects(verify(record, progress, Object.assign(Error("process failed"), { code: 1 })), /could not complete/);
+});
+test("signature checker failures distinguish blocked execution and timeout without allowing installation", async () => {
+  const file = "C:\\cache\\update.exe", valid = { status: 0, signatureType: 1, path: file, subject: PUBLISHER, timestamp: "a".repeat(40) };
+  for (const [failure, expected] of [[{ code: "ENOENT" }, /could not start/], [{ code: "EACCES" }, /could not start/], [{ code: "EPERM" }, /could not start/], [{ killed: true }, /timed out/], [{ code: "ETIMEDOUT" }, /timed out/], [{ code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" }, /could not complete/]]) {
+    await assert.rejects(verifyWindowsInstaller(file, { systemRoot: "C:\\Windows", execFile(_exe, _args, _opts, done) { done(Object.assign(Error("failed"), failure), JSON.stringify(valid), ""); } }), expected);
+  }
 });
 test("download hash, size and native signature are all required, including cached files", async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-core-update-")); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
