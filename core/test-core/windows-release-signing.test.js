@@ -65,6 +65,24 @@ test("release gate accepts only matching Windows artifacts and complete signatur
   assert.throws(() => readVerifiedArtifacts(f.dir, identity), /Missing signature evidence/);
 });
 
+test("merged macOS blockmaps do not enter the Windows manifest or published release", t => {
+  const f = fixture(t);
+  for (const arch of ["x64", "arm64"]) for (const ext of ["dmg", "zip"]) {
+    fs.writeFileSync(path.join(f.dir, `KAI-Core-Beta-${identity.version}-mac-${arch}.${ext}.blockmap`), "macOS metadata");
+  }
+  const windows = readVerifiedArtifacts(f.dir, identity).names;
+  assert.deepEqual(windows, [f.names.setup, f.names.portable, f.names.blockmap, f.names.feed].sort());
+  const published = releaseFiles(f.dir, identity);
+  assert.equal(published.length, 11);
+  assert.equal(new Set(published).size, 11);
+  assert.deepEqual(published.filter(name => name.endsWith(".blockmap")), [f.names.blockmap]);
+  fs.writeFileSync(path.join(f.dir, "unexpected.exe.blockmap"), "unreviewed Windows metadata");
+  assert.throws(() => readVerifiedArtifacts(f.dir, identity), /Expected exactly/);
+  fs.unlinkSync(path.join(f.dir, "unexpected.exe.blockmap"));
+  fs.writeFileSync(path.join(f.dir, "unexpected.blockmap"), "unrecognized metadata");
+  assert.throws(() => readVerifiedArtifacts(f.dir, identity), /Expected exactly/);
+});
+
 test("release gate rejects changed installer, feed, blockmap and wrong workflow provenance", async t => {
   for (const target of ["setup", "portable", "blockmap", "feed"]) await t.test(target, t => {
     const f = fixture(t); fs.appendFileSync(path.join(f.dir, f.names[target]), "changed");

@@ -124,7 +124,7 @@ jobs:
             dist/*.AppImage
             dist/*.dmg
             dist/*.zip
-            dist/*.blockmap
+            dist/*.exe.blockmap
             dist/latest.yml
             dist/windows-signatures-*.json
             build/foundation-files.json

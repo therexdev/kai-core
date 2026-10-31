@@ -45,7 +45,12 @@ function versionNames(version) {
 }
 function artifactFiles(dir, version) {
   const expected = versionNames(version);
-  const names = fs.readdirSync(dir).filter(name => /\.(exe|blockmap)$/.test(name) || name === "latest.yml").sort();
+  // The publication job merges all platform artifacts. macOS packaging can
+  // supply its own blockmaps; they are not Windows update metadata and are not
+  // published by releaseFiles. Keep rejecting every unexpected Windows file.
+  const macBlockmaps = new Set(["x64", "arm64"].flatMap(arch => ["dmg", "zip"]
+    .map(ext => `KAI-Core-Beta-${version}-mac-${arch}.${ext}.blockmap`)));
+  const names = fs.readdirSync(dir).filter(name => !macBlockmaps.has(name) && (/\.(exe|blockmap)$/i.test(name) || name === "latest.yml")).sort();
   const wanted = [expected.setup, expected.portable, expected.blockmap, expected.feed].sort();
   if (JSON.stringify(names) !== JSON.stringify(wanted)) throw Error("Expected exactly the Core Windows Setup, portable, Setup blockmap and latest.yml");
   for (const name of names) if (!fs.lstatSync(path.join(dir, name)).isFile()) throw Error(`Invalid Windows artifact: ${name}`);
