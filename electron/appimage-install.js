@@ -34,7 +34,7 @@ async function stageInstall({ target, file, info, parentPid, args = [], env = pr
     const staged = path.join(directory, "next.AppImage");
     await fs.promises.copyFile(file, staged, fs.constants.COPYFILE_EXCL);
     await verifyImage(staged, info); await fs.promises.chmod(staged, 0o755);
-    const handle = await fs.promises.open(staged, "r"); try { await handle.sync(); } finally { await handle.close(); }
+    const handle = await fs.promises.open(staged, "r+"); try { await handle.sync(); } finally { await handle.close(); }
     const helper = path.join(directory, "install.cjs"), jobFile = path.join(directory, "job.json");
     await fs.promises.copyFile(__filename, helper);
     await fs.promises.writeFile(jobFile, JSON.stringify({ target, staged, before, info, parentPid, args, env: launchEnv(env, target) }), { mode: 0o600, flag: "wx" });
