@@ -3,55 +3,6 @@ const fs = require("node:fs"), path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { readVerifiedArtifacts, hash } = require("./windows-signing");
 
-const RECOVERY_078 = {
-  repository: "therexdev/kai-core", repositoryId: 1439355076,
-  runId: 41168191545, commit: "4a5e8863612496f153002faadc60ac7ec47b8eb8",
-  workflowId: 401456796, workflowPath: ".github/workflows/core-build.yml", attempt: 1,
-  version: "0.7.8", draftId: 429719462,
-  jobs: [
-    { id: 124440213275, name: "build (windows-latest, --win --x64)" },
-    { id: 124440213416, name: "build (macos-latest, --mac --x64 --arm64)" },
-    { id: 124440213449, name: "build (ubuntu-latest, --linux --x64 --arm64)" },
-  ],
-  artifacts: [
-    { id: 13030326518, name: "kai-core-foundation-Windows", digest: "sha256:4c89feee7b53f39620cb2fba9889479b217e406f82c4e2a06bd9469162738387" },
-    { id: 13030585542, name: "kai-core-foundation-macOS", digest: "sha256:269d8db92ca2caf941cb4420586bb2eac5101b8aa4fc3eeecbeaa7dc5aa091d0" },
-    { id: 13029603175, name: "kai-core-foundation-Linux", digest: "sha256:70d715c5bbe9a56ec563191694d5663c1e59796efb92d78932fc342c2bf87416" },
-  ],
-};
-
-function assertRecoverySource({ run, jobs, artifacts, release }) {
-  const pin = RECOVERY_078;
-  if (run?.id !== pin.runId || run.head_sha !== pin.commit || run.head_branch !== "main" || run.event !== "push" ||
-      run.path !== pin.workflowPath || run.workflow_id !== pin.workflowId || run.run_attempt !== pin.attempt ||
-      run.repository?.id !== pin.repositoryId || run.repository?.full_name !== pin.repository ||
-      run.head_repository?.id !== pin.repositoryId || run.head_repository?.full_name !== pin.repository ||
-      run.status !== "completed" || run.conclusion !== "failure") throw Error("Recovery source workflow does not match the pinned release run.");
-  if (!Array.isArray(jobs?.jobs) || jobs.total_count !== jobs.jobs.length) throw Error("Recovery job evidence is incomplete.");
-  for (const expected of pin.jobs) {
-    const matching = jobs.jobs.filter(job => job.id === expected.id || job.name === expected.name);
-    const job = matching[0];
-    if (matching.length !== 1 || job.id !== expected.id || job.name !== expected.name || job.head_sha !== pin.commit ||
-        job.run_attempt !== pin.attempt || job.status !== "completed" || job.conclusion !== "success") throw Error(`Recovery build job was not verified: ${expected.name}`);
-  }
-  const windows = jobs.jobs.find(job => job.id === pin.jobs[0].id);
-  for (const name of ["Build signed Windows Foundation installers", "Verify Windows signatures, publisher, timestamps and update feed"]) {
-    const steps = windows.steps?.filter(step => step.name === name) || [];
-    if (steps.length !== 1 || steps[0].status !== "completed" || steps[0].conclusion !== "success") throw Error("Recovery requires the completed Windows signing and signature checks.");
-  }
-  if (!Array.isArray(artifacts?.artifacts) || artifacts.total_count !== artifacts.artifacts.length) throw Error("Recovery artifact evidence is incomplete.");
-  for (const expected of pin.artifacts) {
-    const matching = artifacts.artifacts.filter(artifact => artifact.id === expected.id || artifact.name === expected.name);
-    const artifact = matching[0], source = artifact?.workflow_run;
-    if (matching.length !== 1 || artifact.id !== expected.id || artifact.name !== expected.name || artifact.digest !== expected.digest || artifact.expired !== false ||
-        source?.id !== pin.runId || source.repository_id !== pin.repositoryId || source.head_repository_id !== pin.repositoryId ||
-        source.head_branch !== "main" || source.head_sha !== pin.commit) throw Error(`Recovery artifact provenance changed: ${expected.name}`);
-  }
-  assertReleaseIdentity(release, { version: pin.version, commit: pin.commit }, true);
-  if (release.id !== pin.draftId) throw Error("Recovery draft ID does not match the existing release.");
-  return pin;
-}
-
 function releaseFiles(dir, identity) {
   const verified = readVerifiedArtifacts(dir, identity), { version } = identity;
   const names = [...verified.names, verified.reportFile,
@@ -119,4 +70,4 @@ function publish(dir, env = process.env, run = (args, options) => execFileSync("
   console.log(`Published ${tag} from verified release ${found.id}.`);
 }
 if (require.main === module) publish(path.resolve(process.argv[2] || "release-assets/dist"));
-module.exports = { releaseFiles, findRelease, assertReleaseIdentity, assertReleaseAssets, publish, RECOVERY_078, assertRecoverySource };
+module.exports = { releaseFiles, findRelease, assertReleaseIdentity, assertReleaseAssets, publish };

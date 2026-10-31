@@ -2,7 +2,7 @@
 const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), os = require("node:os");
 const yaml = require("js-yaml");
 const { PUBLISHER, REQUIRED_ENV, publisherMatches, configureSigning, assertSignature, versionNames, hash, readVerifiedArtifacts } = require("../../scripts/foundation/windows-signing");
-const { releaseFiles, publish, RECOVERY_078, assertRecoverySource } = require("../../scripts/foundation/publish-core-release");
+const { releaseFiles, publish } = require("../../scripts/foundation/publish-core-release");
 const currentVersion = require("../../package.json").version;
 const identity = { version: currentVersion, commit: "a".repeat(40), workflowRun: "12345" };
 function fixture(t) {
@@ -188,41 +188,4 @@ test("recovery publication cannot create or substitute its pinned draft", t => {
   const absent = publicationFixture(t);
   assert.throws(() => publish(absent.dir, absent.env, absent.run, 42), /expected recovery draft/);
   assert.equal(absent.calls.some(args => args.includes("PATCH") || args[0] === "release"), false);
-});
-
-function recoveryEvidence() {
-  const pin = RECOVERY_078;
-  return {
-    run: { id: pin.runId, head_sha: pin.commit, head_branch: "main", event: "push", path: pin.workflowPath,
-      workflow_id: pin.workflowId, run_attempt: pin.attempt, status: "completed", conclusion: "failure",
-      repository: { id: pin.repositoryId, full_name: pin.repository }, head_repository: { id: pin.repositoryId, full_name: pin.repository } },
-    jobs: { total_count: 3, jobs: pin.jobs.map(job => ({ ...job, head_sha: pin.commit, run_attempt: pin.attempt, status: "completed", conclusion: "success",
-      steps: ["Build signed Windows Foundation installers", "Verify Windows signatures, publisher, timestamps and update feed"].map(name => ({ name, status: "completed", conclusion: "success" })) })) },
-    artifacts: { total_count: 3, artifacts: pin.artifacts.map(artifact => ({ ...artifact, expired: false,
-      workflow_run: { id: pin.runId, repository_id: pin.repositoryId, head_repository_id: pin.repositoryId, head_branch: "main", head_sha: pin.commit } })) },
-    release: { id: pin.draftId, name: `KAI Core Beta ${pin.version}`, tag_name: `v${pin.version}`, target_commitish: pin.commit, draft: true, prerelease: false },
-  };
-}
-
-test("one-time recovery requires the exact workflow, successful signed builds, artifacts and draft", () => {
-  assert.equal(assertRecoverySource(recoveryEvidence()), RECOVERY_078);
-  const mutations = [
-    evidence => { evidence.run.id++; }, evidence => { evidence.run.repository.full_name = "other/repo"; },
-    evidence => { evidence.run.head_repository.id++; }, evidence => { evidence.run.head_sha = "b".repeat(40); },
-    evidence => { evidence.run.event = "pull_request"; }, evidence => { evidence.run.head_branch = "foundation-v1"; },
-    evidence => { evidence.run.path = ".github/workflows/unreviewed.yml"; }, evidence => { evidence.run.workflow_id++; },
-    evidence => { evidence.run.run_attempt++; }, evidence => { evidence.run.status = "in_progress"; },
-    evidence => { evidence.jobs.jobs[0].conclusion = "failure"; }, evidence => { evidence.jobs.jobs[1].status = "in_progress"; },
-    evidence => { evidence.jobs.jobs[2].head_sha = "b".repeat(40); }, evidence => { evidence.jobs.jobs[0].steps[1].conclusion = "skipped"; },
-    evidence => { evidence.jobs.jobs[0].steps.pop(); }, evidence => { evidence.jobs.jobs.pop(); },
-    evidence => { evidence.artifacts.artifacts[0].expired = true; }, evidence => { evidence.artifacts.artifacts[1].id++; },
-    evidence => { evidence.artifacts.artifacts[1].digest = "sha256:" + "0".repeat(64); },
-    evidence => { evidence.artifacts.artifacts[2].workflow_run.head_sha = "b".repeat(40); }, evidence => { evidence.artifacts.artifacts.pop(); },
-    evidence => { evidence.release.id++; }, evidence => { evidence.release.draft = false; },
-    evidence => { evidence.release.target_commitish = "b".repeat(40); },
-  ];
-  for (const mutate of mutations) {
-    const evidence = recoveryEvidence(); mutate(evidence);
-    assert.throws(() => assertRecoverySource(evidence));
-  }
 });
