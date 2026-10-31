@@ -123,3 +123,21 @@ test("background activation and verified snapshots are reused within one lifetim
   const verified=await services.verifiedForUI("example.test");assert.equal(verified,services.records.get("example.test"));
   await services.close("example.test");await services.ensure("example.test");assert.equal(loads,2);
 });
+
+
+test("updates and rollback keep one data directory while code snapshots remain immutable", t => {
+  const manager = new PluginManager(workspace(t)), keys = key();
+  manager.install(pkg({ keys }), { trustNative: true });
+  const first = manager.materialize("example.test"), data = manager.dataDir("example.test");
+  manager.storage("example.test", "set", "saved", { keep: "existing feature data" });
+  manager.install(pkg({ keys, manifest: { version: "1.0.1" }, source: "exports.create=()=>({call:()=> 'updated'});" }), { trustNative: true });
+  const next = manager.materialize("example.test");
+  assert.equal(next.dataDir, data); assert.notEqual(next.root, first.root);
+  assert.equal(fs.statSync(path.join(first.root, "service/index.js")).mode & 0o200, 0);
+  assert.equal(fs.statSync(path.join(next.root, "service/index.js")).mode & 0o200, 0);
+  assert.deepEqual(manager.storage("example.test", "get", "saved"), { keep: "existing feature data" });
+  manager.change("example.test", "rollback");
+  const restored = manager.materialize("example.test");
+  assert.equal(restored.root, first.root); assert.equal(restored.dataDir, data);
+  assert.deepEqual(manager.storage("example.test", "get", "saved"), { keep: "existing feature data" });
+});

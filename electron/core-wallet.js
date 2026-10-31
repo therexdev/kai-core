@@ -171,7 +171,7 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
       pendingGuard();
       const review = await waitForReview(electron.dialog.showMessageBox(window, { type: "question", title: `Send ${token}`, message: `Send ${amount} ${token}?`,
         detail: `From: ${ctx.address}\nTo: ${request.to}\nNetwork: ${ctx.net.label}\n\nThis transfers tokens from your wallet. Confirm only if the recipient and exact amount are correct.`,
-        buttons: ["Cancel", "Send"], defaultId: 0, cancelId: 0, noLink: true }), controller.signal);
+        buttons: ["Cancel", "Send"], defaultId: 0, cancelId: 0, noLink: true, signal: controller.signal }), controller.signal);
       ctx.assert(); controller.signal.throwIfAborted();
       if (review.response !== 1) return { state: "cancelled" };
       pendingGuard();

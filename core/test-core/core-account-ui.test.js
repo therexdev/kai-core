@@ -6,7 +6,7 @@ function fixture(){
  const elements=new Map();for(const[,id]of html.matchAll(/\bid="([^"]+)"/g))elements.set(id,{id,hidden:false,disabled:false,value:id==="account-grant-cap"?"10":id==="account-grant-days"?"30":"",textContent:"",innerHTML:"",href:"",events:{},classList:{toggle(){}},addEventListener(name,fn){this.events[name]=fn;}});
  const calls=[],timers=[],events={},external=[],notices=[],responses=new Map(),settings={hidden:false};let confirm=true;
  const signedOut={ok:true,scope:"website",separateCreditAccount:true,site:"https://koinosai.com",signedIn:false};
- const ctx={document:{hidden:false,getElementById:id=>{assert.ok(elements.has(id),"missing "+id);return elements.get(id);},querySelector:()=>settings},window:{KaiCoreNotice:{create:()=>({show:(text,options)=>notices.push({text,options})})},kaiCore:{call:async(method,input)=>external.push({method,input})},addEventListener:(name,fn)=>events[name]=fn,dispatchEvent(){},},
+ const ctx={document:{hidden:false,getElementById:id=>{assert.ok(elements.has(id),"missing "+id);return elements.get(id);},querySelector:()=>settings},window:{KaiCoreNotice:{create:()=>({show:(text,options)=>notices.push({text,options})})},kaiCore:{call:async(method,input)=>external.push({method,input}),dialogs:{confirm:async()=>confirm}},addEventListener:(name,fn)=>events[name]=fn,dispatchEvent(){},},
  setInterval:()=>1,clearInterval(){},setTimeout:fn=>{timers.push(fn);return timers.length;},Event:class{constructor(type){this.type=type;}},confirm:()=>confirm,
  fetch:async(url,options={})=>{calls.push({url,options});const responder=responses.get(url),value=typeof responder==="function"?await responder(options):responder||signedOut;return {ok:value.ok!==false,status:value.ok===false?400:200,json:async()=>value};},console};
  vm.runInNewContext(source,ctx);
@@ -48,6 +48,11 @@ test("web grants use exact caps and explicit approval; revoke targets the server
 test("a pending website response cannot overwrite a newly selected credit account",async()=>{
  const f=fixture();let resolve;f.responses.set("/core/website-account",()=>new Promise(done=>resolve=done));const old=f.ctx.window.KaiCoreAccount.enter();
  f.responses.set("/core/account",{...f.signedOut,scope:"credits"});await f.ctx.window.selectAccountScope(false);resolve({...f.signedOut,signedIn:true,account:{id:"stale account"}});await old;assert.equal(f.$("account-heading").textContent,"AI credit account");assert.doesNotMatch(f.$("account-stats").innerHTML,/stale account/);
+});
+test("changing account scope while a themed grant review is open prevents the request",async()=>{
+ const f=fixture();let decide;f.ctx.window.kaiCore.dialogs.confirm=()=>new Promise(resolve=>decide=resolve);
+ const pending=f.$("btn-account-grant").events.click();f.responses.set("/core/account",{...f.signedOut,scope:"credits"});await f.ctx.window.selectAccountScope(false);
+ decide(true);await pending;assert.equal(f.calls.some(call=>call.url.endsWith("/grant")),false);
 });
 test("verification/help links use the native external URL broker only after a click",async()=>{
  const f=fixture();let prevented=false;f.$("account-settings").events.click({target:{closest:()=>({getAttribute:()=>"https://koinosai.com/link",href:"https://koinosai.com/link"})},preventDefault(){prevented=true;}});await flush();assert.equal(prevented,true);assert.equal(f.external[0].method,"desktop.openExternal");assert.equal(f.external[0].input.url,"https://koinosai.com/link");

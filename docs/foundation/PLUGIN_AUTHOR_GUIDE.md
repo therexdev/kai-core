@@ -46,7 +46,11 @@ Package limits are 512 MiB of encoded JSON and 16,384 files. Paths are at most 2
 
 ## Sandboxed renderer API
 
-Only `window.kai` is exposed. It has `apiVersion: 3`, `call(method, input)` and `onEvent(channel, callback)`; the event subscription returns a disposer.
+Only `window.kai` is exposed. It has `apiVersion: 3`, `call(method, input)`, `onEvent(channel, callback)`, and themed dialogs on Core 0.7.3 or later; the event subscription returns a disposer.
+
+Use `await window.kai.dialogs.confirm(message, { title?, detail?, confirmLabel?, cancelLabel? })` for a boolean choice, and `await window.kai.dialogs.alert(message, { title?, detail?, buttonLabel? })` for a notice. Default buttons are Cancel/Continue and OK. These methods are available to both sandboxed and native plugin renderers without another permission. Declare Core 0.7.3 as the catalog minimum when using them. Message and detail are plain text (up to 16,000 characters each), titles up to 180 characters, and button labels up to 80 characters. HTML is never rendered; the dialog identifies the installed plugin. One renderer dialog may be pending per plugin.
+
+Dialogs require the current visible plugin document. Closing the dialog, pressing Escape, hiding/reloading the plugin, closing to tray, disabling the plugin or quitting cancels the choice. Always await confirmation; a Promise is not approval. Renderer dialogs are presentation only and do not replace `api.desktop.confirm`, wallet reviews, or other native authorization checks. Native services calling Electron's asynchronous `dialog.showMessageBox` also receive Core's themed dialog. OS file choosers and system permission prompts retain their platform interfaces.
 
 | Method | Required permission | Input and result |
 | --- | --- | --- |

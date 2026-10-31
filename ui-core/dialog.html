@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>KAI</title>
+  <link rel="stylesheet" href="dialog.css">
+  <script src="dialog.js" defer></script>
+</head>
+<body>
+  <main class="core-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title dialog-message" aria-describedby="dialog-detail">
+    <header class="dialog-header">
+      <div class="header-label"><img src="assets/brand-mark.svg" width="23" height="25" alt=""><h1 id="dialog-title">KAI</h1></div>
+      <button id="dialog-close" class="icon-button" type="button" aria-label="Cancel and close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </header>
+    <div id="dialog-content" class="dialog-content" tabindex="0" aria-busy="true">
+      <p id="dialog-loading" role="status">Preparing details…</p>
+      <div id="dialog-ready" hidden>
+        <div class="message-heading">
+          <div id="dialog-icon" class="message-icon" aria-hidden="true">
+            <svg data-type="info" viewBox="0 0 24 24" hidden><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>
+            <svg data-type="question" viewBox="0 0 24 24" hidden><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4M12 17h.01"/></svg>
+            <svg data-type="warning" viewBox="0 0 24 24" hidden><path d="m10.3 4.3-8 14A1.8 1.8 0 0 0 3.9 21h16.2a1.8 1.8 0 0 0 1.6-2.7l-8-14a2 2 0 0 0-3.4 0ZM12 9v5M12 17h.01"/></svg>
+            <svg data-type="error" viewBox="0 0 24 24" hidden><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/></svg>
+          </div>
+          <h2 id="dialog-message"></h2>
+        </div>
+        <p id="dialog-detail" class="dialog-detail" hidden></p>
+      </div>
+      <p id="dialog-error" class="dialog-error" role="alert" hidden></p>
+    </div>
+    <footer class="dialog-footer">
+      <label id="dialog-checkbox-label" class="checkbox-label" hidden><input id="dialog-checkbox" type="checkbox"><span id="dialog-checkbox-text"></span></label>
+      <div id="dialog-actions" class="dialog-actions"></div>
+    </footer>
+  </main>
+</body>
+</html>

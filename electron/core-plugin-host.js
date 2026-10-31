@@ -8,6 +8,7 @@ class PluginHost {
     Object.assign(this, { electron, manager, core, features, getContainerWindow, onActivate });
     this.windows = new Map(); this.openings = new Map(); this.active = 0; this.selected = null; this.activation = 0; this.bounds = null;
     electron.ipcMain.handle("kai-plugin:call", (event, method, input) => this.call(event, method, input));
+    electron.ipcMain.handle("kai-plugin:dialog", (event, kind, input) => this.rendererDialog(event, kind, input));
     const container = getContainerWindow?.();
     if (container) {
       this.resize = () => this.applyBounds();
@@ -71,7 +72,9 @@ class PluginHost {
     const bounds = { x, y, width: Math.max(0, Math.min(width - x, Math.round(this.bounds.width * scale))), height: Math.max(0, Math.min(height - y, Math.round(this.bounds.height * scale))) };
     record.view.setBounds(bounds); record.view.setVisible(record.ready && bounds.width > 0 && bounds.height > 0);
   }
-  hideViews() { for (const record of this.windows.values()) if (record.view) record.view.setVisible(false); }
+  cancelDialogs(record) { record.dialogController?.abort(); record.dialogController = new AbortController(); }
+  dialogSignal(id) { const record = this.windows.get(id); return record?.dialogController?.signal; }
+  hideViews() { for (const record of this.windows.values()) if (record.view) { this.cancelDialogs(record); record.view.setVisible(false); } }
   hide() { ++this.activation; this.selected = null; this.hideViews(); return { hidden: true }; }
   async create(id, { manifest, package: pkg, fingerprint, digest, root, dispose: releasePackage }) {
     if (this.windows.size >= 24) throw Error("Close an unused app before opening another (limit: 24)");
@@ -103,28 +106,20 @@ class PluginHost {
     if (view) { view.setBackgroundColor("#f4f7fd"); view.setVisible(false); container.contentView.addChildView(view); }
     // WebRTC UDP is not an HTTP request and cannot be filtered by webRequest.
     webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
-    const record = { window, view, webContents, manifest, entry, fingerprint, digest, root, controller: new AbortController(), busy: false, calls: [], ready: false };
+    const record = { window, view, webContents, manifest, entry, fingerprint, digest, root, controller: new AbortController(), dialogController: new AbortController(), busy: false, calls: [], ready: false };
     this.windows.set(id, record);
+    webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) this.cancelDialogs(record); });
     if (mediaAccess) {
       const granted = new Set();
       session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permission === "media" && wc === webContents && [origin, origin + "/"].includes(requestingOrigin) && details?.isMainFrame === true && details.requestingUrl === entry && webContents.mainFrame.url === entry && !record.controller.signal.aborted && !!this.manager.state.installed[id]?.enabled && granted.has(details?.mediaType));
       session.setPermissionRequestHandler(async (wc, permission, callback, details) => {
-        const types = details?.mediaTypes || [];
-        if (permission !== "media" || wc !== webContents || details?.isMainFrame !== true || details.requestingUrl !== entry || wc.mainFrame.url !== entry || !types.length || types.some(type => !["audio", "video"].includes(type)) || record.controller.signal.aborted || !this.manager.state.installed[id]?.enabled) return callback(false);
-        try {
-          if (!types.every(type => granted.has(type))) {
-            const answer = await this.electron.dialog.showMessageBox(window, { type: "question", title: `${manifest.name} media access`, message: `Allow ${manifest.name} to use your ${types.map(type => type === "audio" ? "microphone" : "camera").join(" and ")}?`, detail: "Access is used for the voice or camera feature you start. This permission lasts until KAI quits or Assistant is disabled or updated.", buttons: ["Cancel", "Allow"], defaultId: 0, cancelId: 0 });
-            if (answer.response !== 1 || record.controller.signal.aborted || wc.mainFrame.url !== entry || !this.manager.state.installed[id]?.enabled) return callback(false);
-            types.forEach(type => granted.add(type));
-          }
-          callback(true);
-        } catch { callback(false); }
+        callback(await this.reviewMedia(record, granted, wc, permission, details));
       });
     }
     webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     for (const action of ["will-navigate", "will-redirect", "will-attach-webview"]) webContents.on(action, event => event.preventDefault());
     const cleanup = () => {
-      if (record.cleaned) return; record.cleaned = true; record.controller.abort();
+      if (record.cleaned) return; record.cleaned = true; record.controller.abort(); this.cancelDialogs(record);
       if (this.windows.get(id) === record) this.windows.delete(id);
       if (view && !window.isDestroyed()) window.contentView.removeChildView(view);
       if (!record.closingReason) void (this.features?.detachWindow?.(id) || this.features?.close(id))?.catch(error => console.warn("[plugin]", error.message));
@@ -151,6 +146,38 @@ class PluginHost {
     this.destroyRecord(record); return this.features?.close(id, { reason }) || Promise.resolve();
   }
   closeAll() { this.hide(); return Promise.allSettled([...this.windows.keys()].map(id => this.close(id, "quit"))); }
+  async reviewMedia(record, granted, wc, permission, details) {
+    const types = details?.mediaTypes;
+    if (permission !== "media" || wc !== record.webContents || details?.isMainFrame !== true || details.requestingUrl !== record.entry || !Array.isArray(types) || !types.length || types.some(type => !["audio", "video"].includes(type))) return false;
+    const id = record.manifest.id, frame = wc.mainFrame;
+    const signal = AbortSignal.any([record.controller.signal, record.dialogController.signal]);
+    const reviewable = () => !signal.aborted && this.windows.get(id) === record && this.isVisible(id) && !wc.isDestroyed() && wc.mainFrame === frame && frame.url === record.entry && !!this.manager.state.installed[id]?.enabled;
+    if (!reviewable()) return false;
+    try {
+      this.manager.assertActive(id, record.digest, record.fingerprint);
+      if (!types.every(type => granted.has(type))) {
+        const answer = await this.electron.dialog.showMessageBox(record.window, { type: "question", title: `${record.manifest.name} media access`, message: `Allow ${record.manifest.name} to use your ${types.map(type => type === "audio" ? "microphone" : "camera").join(" and ")}?`, detail: "Access is used for the voice or camera feature you start. This permission lasts until KAI quits or Assistant is disabled or updated.", buttons: ["Cancel", "Allow"], defaultId: 0, cancelId: 0, signal });
+        if (answer.response !== 1 || !reviewable()) return false;
+        this.manager.assertActive(id, record.digest, record.fingerprint);
+        types.forEach(type => granted.add(type));
+      }
+      return reviewable();
+    } catch { return false; }
+  }
+  async rendererDialog(event, kind, input) {
+    const record = [...this.windows.values()].find(r => r.webContents === event.sender);
+    if (!record || event.senderFrame !== event.sender.mainFrame || event.senderFrame.url !== record.entry) throw Error("Plugin caller denied");
+    this.manager.assertActive(record.manifest.id, record.digest, record.fingerprint);
+    if (record.dialogPending) throw Error("Finish the current app dialog first");
+    const frame = event.senderFrame, signal = AbortSignal.any([record.controller.signal, record.dialogController.signal]);
+    const reviewable = () => !signal.aborted && this.windows.get(record.manifest.id) === record && this.isVisible(record.manifest.id) && !record.webContents.isDestroyed() && record.webContents.mainFrame === frame && frame.url === record.entry;
+    record.dialogPending = true;
+    try {
+      const result = await require("./core-renderer-dialogs").showRendererDialog({ dialog: this.electron.dialog, parent: record.window, name: record.manifest.name, kind, input, signal, reviewable });
+      if (signal.aborted) return kind === "confirm" ? false : undefined;
+      this.manager.assertActive(record.manifest.id, record.digest, record.fingerprint); return result;
+    } finally { record.dialogPending = false; }
+  }
   async call(event, method, input) {
     const record = [...this.windows.values()].find(r => r.webContents === event.sender);
     if (!record || event.senderFrame !== event.sender.mainFrame || event.senderFrame.url !== record.entry) throw Error("Plugin caller denied");

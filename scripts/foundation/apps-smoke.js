@@ -33,7 +33,7 @@ async function main(){
  for(const[slug,method,input]of specs){
   if(selected&&!selected.has("kai."+slug))continue;
   if(packages){
-   const expected=releases.plugins.find(p=>p.id==="kai."+slug);assert.equal(expected.version,"0.3.0");
+   const expected=releases.plugins.find(p=>p.id==="kai."+slug);assert.match(expected.version,/^\d+\.\d+\.\d+$/);
    const installed=require("./apps-packages").installReleasedPackage(manager,path.join(packages,expected.file),expected,appRoot);
    report.plugins.push({...installed,method,input});console.log("Publisher package installed",installed.id,installed.files,"files");continue;
   }

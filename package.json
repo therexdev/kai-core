@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "private": true,
   "description": "KAI Foundation: a documented host for independent plugins",
   "license": "MIT",
@@ -25,7 +25,8 @@
     "test:services": "node --test --test-concurrency=2 core/test/wallet-session-secret.test.js core/test/wallet-credential-vault.test.js core/test/wallet-first-integration.test.js core/test/koin-credit-service.test.js core/test/credit-account.test.js core/test/model-manager.test.js core/test/gateway.test.js",
     "test:foundation-native": "node scripts/foundation/native-smoke.js",
     "test:alpha-migration": "node scripts/foundation/alpha-migration-smoke.js",
-    "test:credit-reconnect": "node scripts/foundation/credit-reconnect-smoke.js"
+    "test:credit-reconnect": "node scripts/foundation/credit-reconnect-smoke.js",
+    "test:dialogs": "node scripts/foundation/dialogs-smoke.js"
   },
   "devDependencies": {
     "electron": "^43.8.1",
@@ -127,6 +128,8 @@
       "electron/alpha-migration.js",
       "electron/core-app-order.js",
       "electron/core-chat.js",
+      "electron/core-dialogs-preload.js",
+      "electron/core-dialogs.js",
       "electron/core-main.js",
       "electron/core-plugin-catalog.js",
       "electron/core-plugin-host.js",
@@ -134,6 +137,7 @@
       "electron/core-plugin-install.js",
       "electron/core-plugin-preload.js",
       "electron/core-preload.js",
+      "electron/core-renderer-dialogs.js",
       "electron/core-tray.js",
       "electron/core-wallet.js",
       "electron/credit-model-pricing.js",

@@ -1,0 +1,37 @@
+/* Generic trusted Core dialogs share the install review's palette and type. */
+:root{color-scheme:light;--bg:#f4f7fd;--surface:#fff;--border:#dce5f2;--text:#14284e;--muted:#61728d;--accent:#155eef;font:14px/1.6 Inter,"Segoe UI",Arial,sans-serif;color:var(--text);background:var(--bg)}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#bdcde2 var(--bg)}
+body{margin:0;height:100dvh;overflow:hidden}
+[hidden]{display:none!important}
+button{font:inherit;font-size:12px;font-weight:550;line-height:1.5;min-height:39px;padding:9px 16px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:9px;cursor:pointer;overflow-wrap:anywhere;transition:background .15s,border-color .15s}
+button:hover:not(:disabled){background:#edf4ff;border-color:#b7cff6}
+button:disabled{opacity:.5;cursor:not-allowed}
+button:focus-visible,input:focus-visible,.dialog-content:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+button.primary{color:#fff;background:var(--accent);border-color:var(--accent);font-weight:650;min-width:100px}
+button.primary:hover:not(:disabled){background:#0c4ed3;border-color:#0c4ed3}
+svg{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.core-dialog{display:flex;flex-direction:column;height:100%;border:1px solid var(--border);overflow:hidden}
+.dialog-header{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:65px;padding:13px 23px;background:var(--surface);border-bottom:1px solid var(--border);flex:none;-webkit-app-region:drag}
+.header-label{display:flex;align-items:center;gap:11px;min-width:0}
+.header-label img{object-fit:contain;flex:none}
+.dialog-header h1{margin:0;font-size:14px;font-weight:650;line-height:1.45;letter-spacing:-.1px;overflow-wrap:anywhere;unicode-bidi:plaintext;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.icon-button{display:flex;align-items:center;justify-content:center;width:32px;min-width:32px;min-height:32px;padding:5px;border:0;background:transparent;color:var(--muted);-webkit-app-region:no-drag}
+.icon-button svg{width:19px;height:19px}
+.dialog-content{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:27px;outline-offset:-4px}
+.message-heading{display:flex;align-items:flex-start;gap:15px}
+.message-icon{display:flex;align-items:center;justify-content:center;width:47px;height:47px;flex:none;color:var(--accent);border:1px solid #d4e3ff;background:#edf4ff;border-radius:13px}
+.message-icon svg{width:26px;height:26px}
+.message-icon.warning{color:#9c6b12;border-color:#f0ddb2;background:#fff7e7}
+.message-icon.error{color:#c93d4c;border-color:#f2c4ce;background:#fff1f3}
+.message-heading h2{font-size:21px;font-weight:650;line-height:1.35;letter-spacing:-.45px;margin:8px 0 0;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext}
+.dialog-detail{font-size:12px;line-height:1.75;color:var(--muted);margin:22px 0 0;padding:17px 19px;background:var(--surface);border:1px solid var(--border);border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext;user-select:text}
+.dialog-footer{display:flex;flex-direction:column;align-items:stretch;gap:15px;flex:none;max-height:50%;overflow-y:auto;padding:18px 24px;background:var(--surface);border-top:1px solid var(--border)}
+.checkbox-label{display:flex;align-items:flex-start;gap:9px;font-size:12px;line-height:1.6;color:var(--muted);cursor:pointer}
+.checkbox-label input{flex:none;width:15px;height:15px;margin:2px 0 0;accent-color:var(--accent)}
+.checkbox-label span{white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext}
+.dialog-actions{display:flex;gap:9px;justify-content:flex-end;flex-wrap:wrap;align-items:center}
+.dialog-actions button{max-width:100%}
+#dialog-loading{font-size:12px;color:var(--muted);margin:5px 0}
+.dialog-error{font-size:12px;color:#c93d4c;background:#fff1f3;border:1px solid #f2c4ce;border-radius:10px;padding:13px 15px;overflow-wrap:anywhere}
+@media(max-width:480px){.dialog-content{padding:22px 19px}.dialog-header{padding-left:18px;padding-right:13px}.dialog-footer{padding:16px 18px}.message-heading{gap:12px}.message-heading h2{font-size:19px}.message-icon{width:42px;height:42px}.dialog-detail{padding:14px 15px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}

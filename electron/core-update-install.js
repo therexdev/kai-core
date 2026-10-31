@@ -4,10 +4,11 @@
 // electron-updater may emit an error instead of throwing when an installer fails.
 function installAndQuit({ updater, app, dialog }) {
   let failed = false;
-  const failure = () => {
+  const failure = async () => {
     if (failed) return;
     failed = true;
-    try { dialog.showErrorBox("KAI Core update could not start", "The installer could not start. KAI Core will close so it does not keep your profile locked. Open it again or install the new version using the manual download."); }
+    try { await dialog.showErrorBox("KAI Core update could not start", "The installer could not start. KAI Core will close so it does not keep your profile locked. Open it again or install the new version using the manual download."); }
+    catch { /* Failure to display a notice must still release the stopped app. */ }
     finally { app.quit(); }
   };
   updater.once("error", failure);

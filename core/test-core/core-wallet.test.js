@@ -192,6 +192,19 @@ test("view lifecycle guard also runs immediately before the chain signs", async 
   await assert.rejects(f.send(), /review stopped/);
 });
 
+test("wallet review shares its cancellation signal with the themed dialog", async t => {
+  const review = deferred(), f = fixture(t, { review: () => review.promise });
+  const task = f.send(); await tick();
+  const options = f.calls.find(([name]) => name === "review")[1];
+  assert.ok(options.signal instanceof AbortSignal); assert.equal(options.signal.aborted, false);
+  let dismissed = 0;
+  options.signal.addEventListener("abort", () => { dismissed++; review.resolve({ response: 0 }); }, { once: true });
+  const rejected = assert.rejects(task, error => error === options.signal.reason);
+  f.window.visible = false; f.window.emit("hide"); await rejected;
+  assert.equal(options.signal.aborted, true); assert.equal(dismissed, 1);
+  assert.ok(!f.calls.some(([name]) => ["signer", "transfer"].includes(name)));
+});
+
 test("shutdown releases an unanswered native review; late approval cannot sign", async t => {
   const review = deferred(), f = fixture(t, { review: () => review.promise });
   const task = f.send(); await tick();

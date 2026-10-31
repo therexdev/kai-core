@@ -245,10 +245,10 @@ $("btn-account-grant").addEventListener("click", async () => {
   // Say the number back before signing it. This is the only moment the cap
   // is chosen, and it is the only thing standing between the website and the
   // wallet — a typo here is not something to discover later.
-  if (!confirm(`Authorise koinosai.com to spend up to $${maxUsd.toFixed(2)} of model usage from this wallet over the next ${days} days?\n\nYou can end this at any time, from here or from the website.`)) return;
   btn.disabled = true;
   accountMsg("");
   try {
+    if (!await window.kaiCore.dialogs.confirm(`Authorise koinosai.com to spend up to $${maxUsd.toFixed(2)} of model usage from this wallet over the next ${days} days?\n\nYou can end this at any time, from here or from the website.`, { title: "Authorise web access", confirmLabel: "Authorise" }) || epoch !== accountEpoch) return;
     const r = await fetch(accountPath("/grant"), {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -270,13 +270,14 @@ $("btn-account-grant-revoke").addEventListener("click", async () => {
   const epoch = accountEpoch;
   const btn = $("btn-account-grant-revoke");
   if (!accountGrantId) return accountMsg("Nothing to end — reload Settings.");
-  if (!confirm("End web access now? The website stops being able to spend immediately. Anything already spent stays spent.")) return;
+  const grantId = accountGrantId;
   btn.disabled = true;
   try {
+    if (!await window.kaiCore.dialogs.confirm("End web access now? The website stops being able to spend immediately. Anything already spent stays spent.", { title: "End web access", confirmLabel: "End access" }) || epoch !== accountEpoch || grantId !== accountGrantId) return;
     const r = await fetch(accountPath("/grant/revoke"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: accountGrantId }),
+      body: JSON.stringify({ id: grantId }),
     });
     const j = await r.json();
     if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);

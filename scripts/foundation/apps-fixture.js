@@ -1,7 +1,7 @@
 "use strict";
 // Test instrumentation only. Real Core/server/manager/API/feature services run;
 // no model, chain, account or remote network response is mocked.
-function install({ appRoot, appData, reportFile, syntheticKeychain = false }) {
+function install({ appRoot, appData, reportFile, syntheticKeychain = false, realDialogs = false }) {
   const fs=require("node:fs"),path=require("node:path"),crypto=require("node:crypto"),{EventEmitter}=require("node:events");
   const electron=require("electron"),{app}=electron;
   app.setPath("appData",appData);app.disableHardwareAcceleration();
@@ -21,6 +21,14 @@ function install({ appRoot, appData, reportFile, syntheticKeychain = false }) {
   };
   electron.dialog.showErrorBox=(title,message)=>{state.errors.push({type:"startup",title,message});console.error("FOUNDATION_STARTUP_ERROR",title,message);};
   electron.dialog.showMessageBox=async(_parent,options)=>{const value=options||_parent;state.dialogs.push({title:value.title,message:value.message});return{response:value.cancelId??0};};
+  // Existing smoke flows intentionally simulate native review choices. Dedicated
+  // dialog UI coverage opts in to the real trusted windows with realDialogs.
+  if (!realDialogs && fs.existsSync(path.join(appRoot,"electron/core-dialogs.js"))) {
+    require(path.join(appRoot,"electron/core-dialogs")).createCoreDialogs = () => {
+      const showMessageBox = electron.dialog.showMessageBox, showErrorBox = electron.dialog.showErrorBox;
+      return { showMessageBox: (...args) => showMessageBox(...args), showErrorBox: (...args) => showErrorBox(...args), dispose() {} };
+    };
+  }
   electron.shell.openExternal=async()=>{throw Error("Smoke fixture does not open external applications");};
   app.on("web-contents-created",(_event,contents)=>{
     contents.on("console-message",(details)=>{if(details&&typeof details==="object"&&details.level==="error")state.errors.push({type:"console",url:contents.getURL(),message:details.message});});

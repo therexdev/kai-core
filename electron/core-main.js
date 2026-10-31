@@ -8,10 +8,15 @@ const { channelConfig, configureDesktop } = require("../core/lib/release-channel
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
 let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, alphaMigration, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
+const messageDialogs = require("./core-dialogs").createCoreDialogs({ electron, getWindow: () => win, isClosing: () => shuttingDown });
+// Electron is shared with native plugins. Every existing message-box caller gets
+// the same trusted Core presentation while keeping its approval/result contract.
+dialog.showMessageBox = (...args) => messageDialogs.showMessageBox(...args);
+dialog.showErrorBox = (...args) => messageDialogs.showErrorBox(...args);
 const { trustedMainDocument, protectNavigation } = require("./window-security");
 function stop() {
   if (!stopping) stopping = (async () => {
-    pluginDownload?.abort(); const errors = [];
+    pluginDownload?.abort(); messageDialogs.dispose(); const errors = [];
     // Finish every cleanup even if an earlier service cannot stop normally.
     for (const dispose of [() => alphaMigration?.dispose(), () => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
       try { await dispose(); } catch (error) { errors.push(error); }
@@ -35,7 +40,7 @@ if (!app.requestSingleInstanceLock()) {
     detail: "KAI Core is already running. Open it from its tray icon.", buttons: ["OK"] })).finally(() => app.quit());
 } else {
   app.on("second-instance", () => desktopTray?.show());
-  app.whenReady().then(start).catch(async error => { if (!shuttingDown) dialog.showErrorBox("KAI Core could not start", error.message); shuttingDown = true; await stop().catch(() => {}); shutdownComplete = true; app.quit(); });
+  app.whenReady().then(start).catch(async error => { if (!shuttingDown) await dialog.showErrorBox("KAI Core could not start", error.message); shuttingDown = true; await stop().catch(() => {}); shutdownComplete = true; app.quit(); });
 }
 async function start() {
   const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "foundation-v1");
@@ -93,7 +98,7 @@ async function start() {
   const openPlugin = async (id, section) => { await pluginHost.open(id); if (typeof section === "string") pluginHost.renderer(id)?.send("kai-plugin:navigate", { section }); return {opened:true}; };
   features = new (require("./foundation-plugin-services").FoundationPluginServices)({manager,
     createApi: record => require("./foundation-api").createFoundationApi({core,electron,getWindow:()=>win,
-      getWebContents:id=>pluginHost?.renderer(id),isVisible:id=>pluginHost?.isVisible(id)||false,
+      getWebContents:id=>pluginHost?.renderer(id),isVisible:id=>pluginHost?.isVisible(id)||false,getDialogSignal:id=>pluginHost?.dialogSignal(id),
       openPlugin,openCoreView,setPrivacyMode,isClosing:()=>shuttingDown,payments:()=>payments,wallet:()=>coreWallet},record),
     onDisposeError: async (id,error) => { if(!shuttingDown) await dialog.showMessageBox(win,{type:"warning",title:"Plugin could not fully stop",message:`${id} could not fully stop.`,detail:String(error?.message||"Check its running services before restarting."),buttons:["OK"]}); }
   });
@@ -112,6 +117,11 @@ async function start() {
   ipcMain.handle("kai-core:call", async (event, method, input) => {
     if (!trustedMainDocument(event, win, origin) || shuttingDown) throw Error("Core desktop access denied");
     switch (method) {
+      case "dialog.confirm": case "dialog.alert": {
+        const frame = event.senderFrame;
+        return require("./core-renderer-dialogs").showRendererDialog({ dialog, parent: win, name: "KAI Core", kind: method.slice(7), input,
+          reviewable: () => !shuttingDown && win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && trustedMainDocument({ sender: event.sender, senderFrame: frame }, win, origin) });
+      }
       case "migration.scan": return alphaMigration.scan();
       case "migration.chooseSource": return alphaMigration.chooseSource();
       case "migration.start": return alphaMigration.start(input);

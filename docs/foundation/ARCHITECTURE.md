@@ -12,6 +12,16 @@ Package schema 2 declares API 3, runtime, HTML entry, optional native service en
 
 `plugins-v3` contains installation metadata, immutable verified code versions and separate per-plugin writable data. New packages cannot silently substitute another publisher, even after a plugin is removed and its data retained. Updates stop/revoke the previous instance before activating the next. A failed cleanup blocks a new instance until cleanup can be retried.
 
+Normal application and plugin updates keep the same profile and writable-data paths. `foundation-v1` and `plugins-v3` identify storage formats; they are not app release numbers and do not increment on ordinary updates.
+
+| Location under the Core profile | Update behavior |
+| --- | --- |
+| `plugins-v3/<plugin-id>/data/` | Stable writable feature data, including the Node chain and plugin wallet |
+| Core wallet and model directories | Stable Core-owned data |
+| `plugins-v3/<plugin-id>/code/<package-digest>/` | Read-only verified code snapshot; the digest changes when package contents change |
+
+The code digest is a content identity, not a saved-data version. Separate immutable code snapshots let Core verify the exact approved package, stop the old service before activating the new one, and roll back without copying or moving feature data. Plugin authors read bundled assets from `api.plugin.root` and write persistent files under `api.plugin.dataDir`; they must never hard-code a digest path or write into a code snapshot. Copying bundled configuration into writable data must create an independently writable file instead of inheriting the package's read-only mode.
+
 The Foundation profile is independent of old releases. There is no shared mutable legacy feature store. The optional Settings migration copies only user-selected Alpha model files and/or its encrypted wallet into Core-owned storage. It never imports plugin data or adopts the old profile. See [Alpha migration](ALPHA_MIGRATION.md). Plugin data ownership is Brain → memories/sources/awareness; Connections → providers/accounts; Workflows → definitions/runs/schedules; Assistant → conversations/providers/voice/desktop; Code → projects/sessions; Tools → tool servers and developer engines; Documents → documents; Compare → comparisons; Node → node and independent wallet; Agent Network → service/job state; Remote → keys/usage/relay.
 
 ## Public APIs and approvals

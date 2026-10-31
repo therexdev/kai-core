@@ -22,3 +22,10 @@ test("a successful installer retains control over exit and relaunch", () => {
   installAndQuit({ updater, app: { quit() { quits++; } }, dialog: { showErrorBox() { assert.fail("unexpected failure"); } } });
   assert.equal(starts, 1); assert.equal(quits, 0);
 });
+
+test("installer failure waits for the themed error notice before quitting", async () => {
+  const updater = new EventEmitter(); let quits = 0, dismiss;
+  updater.quitAndInstall = () => updater.emit("error", Error("Installer unavailable"));
+  installAndQuit({ updater, app: { quit() { quits++; } }, dialog: { showErrorBox() { return new Promise(resolve => { dismiss = resolve; }); } } });
+  assert.equal(quits, 0); dismiss(); await new Promise(resolve => setImmediate(resolve)); assert.equal(quits, 1);
+});

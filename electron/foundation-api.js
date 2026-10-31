@@ -33,9 +33,10 @@ function createFoundationApi(ctx, record) {
     if (!reviewable()) return false;
     const message = String(title), text = typeof detail === "string" ? detail : JSON.stringify(detail, null, 2);
     if (!message || message.length > 180 || typeof text !== "string" || text.length > 16000) throw Error("Action details are too long to review");
+    const dialogSignal = AbortSignal.any([signal, ...(requester?.signal ? [requester.signal] : []), ...(ctx.getDialogSignal?.(ownerId) ? [ctx.getDialogSignal(ownerId)] : [])]);
     const result = await electron.dialog.showMessageBox(w, { type: "question", title: "KAI · Review action", message,
-      detail: `${record.manifest.name}${requester && requester.id !== id ? ` · Requested by ${requester.name}` : ""}\n\n${text}`, buttons: ["Cancel", "Allow once"], defaultId: 0, cancelId: 0, noLink: true });
-    active(); return result.response === 1 && reviewable();
+      detail: `${record.manifest.name}${requester && requester.id !== id ? ` · Requested by ${requester.name}` : ""}\n\n${text}`, buttons: ["Cancel", "Allow once"], defaultId: 0, cancelId: 0, noLink: true, signal: dialogSignal });
+    active(); return result.response === 1 && !dialogSignal.aborted && reviewable();
   }
 
   const settings = Object.freeze({

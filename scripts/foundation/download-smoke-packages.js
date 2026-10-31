@@ -9,7 +9,7 @@ const publishers = require("./apps-publishers.json");
 
 function releaseCoordinates(expected) {
   assert.match(expected.id, /^kai\.[a-z]+(?:-[a-z]+)*$/);
-  assert.equal(expected.version, "0.3.0");
+  assert.match(expected.version, /^\d+\.\d+\.\d+$/);
   assert.match(expected.fingerprint, /^[a-f0-9]{64}$/);
   const repository = "therexdev/kai-plugin-" + expected.id.slice(4);
   const file = repository.slice("therexdev/".length) + "-" + expected.version + ".kaiplugin";

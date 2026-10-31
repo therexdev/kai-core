@@ -7,3 +7,16 @@ test("fresh foundation profile never adopts or edits an earlier profile",t=>{con
 test("corrupt Foundation configuration is refused without replacing it",t=>{const dir=temp(t);prepareFoundationProfile(dir);fs.writeFileSync(path.join(dir,"settings.json"),"broken");assert.throws(()=>prepareFoundationProfile(dir));assert.equal(fs.readFileSync(path.join(dir,"settings.json"),"utf8"),"broken");});
 test("production module graph contains no optional feature engines or private plugin contracts",()=>{const graph=closure(entries);assert.deepEqual(graph.missing,[]);for(const file of graph.files)assert.doesNotMatch(file,/(?:plugin-services\/|companion|workflow|agent-network|code-agent|mcp-manager|mascot|speech\.js|whisper|koinos-node|contracts\.json)/,file);const main=fs.readFileSync(path.join(__dirname,"../../electron/core-main.js"),"utf8");assert.doesNotMatch(main,/ensureLegacyFeature|\bFeatureServices\b|\bextensions:\s*(?:true|false)/);});
 test("uninstalled feature routes are absent from the foundation server",async t=>{const dir=temp(t);const {createCore}=require("../server");const core=await createCore({dataDir:dir,port:0});await core.start();t.after(()=>core.stop());for(const route of ["docs","chats","remote","keys","mcp","tools","speech","voice","transcribe","teams","bench","code/projects","agents/definitions","koinos/channels","tasks"]){const response=await fetch(`http://127.0.0.1:${core.gateway.port}/core/${route}`);assert.equal(response.status,404,route);}assert.equal((await fetch(`http://127.0.0.1:${core.gateway.port}/core/models`)).status,200);});
+
+
+test("the production closure includes every declared window preload", () => {
+  const root = path.resolve(__dirname, "../.."), graph = closure(entries), included = new Set(graph.files); let found = 0;
+  for (const relative of graph.files.filter(file => file.endsWith(".js"))) {
+    const source = fs.readFileSync(path.join(root, relative), "utf8");
+    for (const match of source.matchAll(/preload:\s*path\.join\(__dirname,\s*["']([^"']+)["']\)/g)) {
+      const target = path.relative(root, path.resolve(root, path.dirname(relative), match[1])).replaceAll(path.sep, "/");
+      assert.ok(included.has(target), `Missing production preload: ${target}`); found++;
+    }
+  }
+  assert.ok(found >= 4, "Core, plugin, install-review and message preloads were checked");
+});

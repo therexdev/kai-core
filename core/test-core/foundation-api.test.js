@@ -60,6 +60,11 @@ test("external URLs and account paths cannot bypass destination validation",asyn
   const f=fixture(t);for(const url of ["file:///tmp/local","http://example.org","https://user:secret@example.org"])await assert.rejects(f.api.desktop.openExternal(url),/HTTPS/);
   f.setPrivacy("network");for(const url of ["https://evil.test/","//evil.test/","/\\evil.test/"])await assert.rejects(f.api.account.request(url),/path/);
 });
+test("native review cannot approve after its originating view was hidden and reopened",async t=>{
+  const f=fixture(t), lifecycle=new AbortController(); f.context.getDialogSignal=()=>lifecycle.signal;
+  f.context.electron.dialog.showMessageBox=async(_window,options)=>{assert.equal(options.signal.aborted,false);lifecycle.abort();return{response:1};};
+  assert.equal(await f.api.desktop.confirm("Do work?","Bounded details"),false);
+});
 test("account requests keep credentials in headers and abort when Local-Only returns",async t=>{
   const f=fixture(t);f.setPrivacy("network");let seen;
   mockFetch(t,async(url,options)=>{seen={url,options};return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode("hello"));}}));});

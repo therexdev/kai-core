@@ -1,11 +1,13 @@
-# KAI Foundation 0.7.2
+# KAI Core 0.7.3
 
-**Restore purchased credits and activity.** Your Credits now offers **Restore wallet credits** for an imported wallet. Unlock it if needed, then approve connecting this installation. Core proves ownership of the same wallet and reloads its existing purchased balance and recent server-side purchase/usage history. No new purchase or old credential-file migration is needed. Records that existed only in the old application's local recovery journal are not reconstructed from the wallet.
+Core and plugin approvals, warnings and alerts now use the same font, colors, spacing and buttons as the plugin installation popup. This includes token-send reviews, wallet-credit connections, model and network approvals, media access and native plugin messages. Every message dialog has a close X and safe Escape handling; long details remain readable and scroll within the window.
 
-**Testnet KAI and expected KOIN drop.** Fixed the broken Earn balance endpoint left after Node functionality moved into its plugin. The public wallet balance now loads independently of AI privacy and wallet unlock, with bounded, validated reads. The estimate remains 1 KOIN per 5 Testnet KAI and excludes pending rewards. Service failures remain explicit rather than displaying a made-up zero.
+Closing a review, leaving its originating app, hiding Core in the tray or stopping the operation cancels the review. Approval still requires an explicit user decision and the original operation checks. Hidden plugins cannot request media permission. Dialog content is rendered as text in an isolated Core-owned window.
 
-**Optional model cleanup.** The Alpha migration popup now includes **Delete old models after migration**, off by default. Same-drive transfers avoid a second full model copy. Across drives, Core verifies and flushes each copied file before deleting its Alpha original, freeing source space as it proceeds. Interrupted transfers can be retried. Cleanup is limited to Alpha's models folder; external imported files and generated runtime caches are retained and identified in the result. Alpha's wallet is never deleted.
+Install Core 0.7.3 first, then update the plugins offered in Plugins. Assistant, Brain, Connections, Workflows, Tools and Code 0.3.1 and Koinos Node 0.3.5 replace their remaining browser dialogs and align their active custom popups with the app. Reusable budget dialogs clear prior results before reopening. Node includes the read-only configuration startup repair from 0.3.4.
 
-The Koinos Node plugin has a separate update for reviewing and migrating a stopped legacy node's chain data. Update that plugin through Plugins when its catalog update appears. Wallets, production keys, KOIN and VHP are not migrated with the chain.
+Profile, model, wallet and per-plugin data locations stay unchanged. `foundation-v1` and `plugins-v3` describe storage formats, not release numbers. The hash-named code subfolders remain immutable verified package snapshots; saved plugin data stays in the same separate `data` folder through updates and rollback.
 
-Core updates remain manual. Validation includes model transfer and cancellation tests, actual desktop migration and credit reconnection checks, and same-wallet restoration against a local backend with synthetic balances and transactions. Live user funds and a live Docker blockchain were not moved during testing.
+System file pickers and operating-system permission prompts continue to use their native interfaces. Core updates remain manual; no automatic updater feed is enabled.
+
+Validation includes approval/cancellation and stale-context regression tests, rendered desktop dialog checks, native SDK and installed-app checks in disposable profiles, and platform CI. No live funds, user wallet or node operations are used for these checks.

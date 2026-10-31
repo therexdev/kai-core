@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("kaiCore", Object.freeze({
   call: (method, input) => ipcRenderer.invoke("kai-core:call", method, input),
   credit: (action, input) => ipcRenderer.invoke("koin:test-payments", action, input),
+  dialogs: Object.freeze({
+    confirm: (message, options) => ipcRenderer.invoke("kai-core:call", "dialog.confirm", { message, options }),
+    alert: (message, options) => ipcRenderer.invoke("kai-core:call", "dialog.alert", { message, options }),
+  }),
   onOpenView: callback => {
     if (typeof callback !== "function") throw TypeError("A navigation callback is required");
     const listener = (_event, view) => callback(view);

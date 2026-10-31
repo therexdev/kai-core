@@ -148,6 +148,11 @@ export interface NativeServiceModule {
 
 export interface KaiRenderer {
   readonly apiVersion: 3;
+  /** Core 0.7.3+: themed presentation, never a native payment/service authorization. */
+  readonly dialogs: {
+    confirm(message: string, options?: { title?: string; detail?: string; confirmLabel?: string; cancelLabel?: string }): Promise<boolean>;
+    alert(message: string, options?: { title?: string; detail?: string; buttonLabel?: string }): Promise<void>;
+  };
   call(method: "models.list", input?: Record<string, never>): Promise<ModelAlias[]>;
   call(method: "inference.local", input: { model: string; prompt: string; maxTokens?: number }): Promise<{ text: string }>;
   call<T extends JSONValue = JSONValue>(method: "storage.get", input: { key: string }): Promise<T | null>;
