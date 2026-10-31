@@ -6,6 +6,20 @@ const WAKE_THROTTLE = 60 * 1000;
 const BUSY_RETRY = 30 * 1000;
 const REQUEST_TIMEOUT = 30 * 1000;
 
+// A repository is catalog attribution, not proof that GitHub controls a signing
+// key. Never borrow it from an entry that merely reuses an installed plugin ID.
+function installedCatalogMetadata(installed, entries, bundled = []) {
+  const sources = [...entries, ...bundled];
+  return installed.map(plugin => {
+    const match = sources.find(entry => entry.id === plugin.id &&
+      typeof plugin.fingerprint === "string" && /^[a-f0-9]{64}$/.test(plugin.fingerprint) && entry.fingerprint === plugin.fingerprint);
+    if (!match) return plugin;
+    const repository = match.repository;
+    if (typeof repository !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(repository) || /\/\.{1,2}$/.test(repository)) return plugin;
+    return { ...plugin, repository, description: plugin.description || match.description || "" };
+  });
+}
+
 // This monitor only refreshes the signed catalog. Package downloads, permission
 // reviews and installation remain separate, explicit desktop operations.
 function createCatalogMonitor({ registry, isLocalOnly, isBusy = () => false, onChange = () => {}, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
@@ -99,4 +113,4 @@ function createCatalogMonitor({ registry, isLocalOnly, isBusy = () => false, onC
   };
 }
 
-module.exports = { createCatalogMonitor, CHECK_INTERVAL, RETRY_INTERVAL, WAKE_THROTTLE, BUSY_RETRY, REQUEST_TIMEOUT };
+module.exports = { createCatalogMonitor, installedCatalogMetadata, CHECK_INTERVAL, RETRY_INTERVAL, WAKE_THROTTLE, BUSY_RETRY, REQUEST_TIMEOUT };

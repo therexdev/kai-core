@@ -102,7 +102,7 @@ async function refresh() {
     }
     knownWalletAddress = address || null;
     text("wallet-state", address ? s.wallet.unlocked ? "Unlocked on this computer" : "Saved wallet · locked" : "Create or restore your wallet");
-    text("wallet-address", address || "No wallet created"); text("wallet-detail", s.wallet.unlocked ? "Wallet unlocked. Plugins never receive its private key." : "Unlock to authorize wallet actions.");
+    text("wallet-address", address || "No wallet created"); text("wallet-detail", s.wallet.unlocked ? "Wallet unlocked. Core’s plugin API does not share its private key." : "Unlock to authorize wallet actions.");
     $("create-wallet").hidden = s.wallet.exists; $("restore-wallet").hidden = s.wallet.exists; $("unlock-button").hidden = !s.wallet.exists || s.wallet.unlocked; $("lock-wallet").hidden = !s.wallet.unlocked;
     window.KaiCoreWallet?.observe(s.wallet, s.network.privacyMode);
     window.KaiCreditConnection?.observe(s.wallet, s.network.privacyMode);
@@ -140,6 +140,22 @@ function pluginUpdates() {
   }
   return updates;
 }
+function pluginRepository(repository) {
+  if (typeof repository !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9_.-]{1,100}$/.test(repository)) return null;
+  const [owner, name] = repository.split("/");
+  if (name === "." || name === "..") return null;
+  return { owner, repository, url: `https://github.com/${repository}` };
+}
+function pluginDeveloper(repository) {
+  const source = pluginRepository(repository);
+  if (!source) return "";
+  const github = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 6v-3.9a3.4 3.4 0 0 0-1-2.7c3.3-.4 6.8-1.6 6.8-7.4A5.8 5.8 0 0 0 19.2 4a5.4 5.4 0 0 0-.1-4S17.8-.4 15 1.5a14.1 14.1 0 0 0-7 0C5.2-.4 3.9 0 3.9 0A5.4 5.4 0 0 0 3.8 4a5.8 5.8 0 0 0-1.6 4c0 5.8 3.5 7 6.8 7.4a3.4 3.4 0 0 0-1 2.7V22" transform="translate(1 1) scale(.92)"/></svg>';
+  return `<div class="plugin-developer"><span>by <strong>${esc(source.owner)}</strong></span><a class="plugin-repository-link" href="${esc(source.url)}" data-plugin-repository="${esc(source.repository)}" aria-label="Open ${esc(source.repository)} on GitHub" title="View ${esc(source.repository)} on GitHub">${github}</a></div>`;
+}
+function pluginCardDisplay(plugin) {
+  const display = window.KaiPluginPresentation.get(plugin.id, plugin);
+  return { ...display, description: typeof plugin.description === "string" && plugin.description.trim() ? plugin.description : display.description };
+}
 function renderInstalledPlugins() {
   const s = snapshot, updates = pluginUpdates(), count = updates.size;
   text("plugin-update-count", count > 99 ? "99+" : String(count)); $("plugin-update-count").hidden = !count;
@@ -150,28 +166,40 @@ function renderInstalledPlugins() {
   const blocked = [...updates.values()].filter(item => item.compatible === false).length;
   text("plugin-updates-detail", blocked ? `${blocked} ${blocked === 1 ? "update needs" : "updates need"} a newer Core version. Review available updates below.` : "Review and install the new versions below.");
   html("plugins", s.plugins.length ? s.plugins.map(p => {
-    const display = window.KaiPluginPresentation.get(p.id, p), update = updates.get(p.id), blocked = update?.compatible === false;
+    const display = pluginCardDisplay(p), update = updates.get(p.id), blocked = update?.compatible === false;
     const updateLabel = update ? `<span class="pill plugin-update-label">${blocked ? "Core update required" : "Update available"}</span>` : "";
     const version = update ? `Version ${esc(p.version)} <span aria-hidden="true">→</span><span class="sr-only"> to </span> <strong>${esc(update.version)}</strong>` : `Version ${esc(p.version)}`;
     const updateButton = update ? `<button class="primary" data-install-plugin="${esc(p.id)}" ${blocked ? "disabled" : ""}>${blocked ? "Requires newer Core" : "Review update"}</button>` : "";
-    return `<article class="plugin-card${update ? " plugin-update-available" : ""}" data-installed-plugin="${esc(p.id)}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><div class="pills"><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span>${updateLabel}</div></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted plugin-version">${version}</p>${p.backgroundError ? `<p class="muted">Background service needs attention: ${esc(p.backgroundError)}</p>` : ""}${blocked ? `<p class="muted">${esc(update.compatibilityReason || `Requires KAI Core ${update.minCoreVersion || "a newer version"}.`)}</p>` : ""}<div class="actions">${updateButton}${p.enabled ? `<button data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></article>`;
+    return `<article class="plugin-card${update ? " plugin-update-available" : ""}" data-installed-plugin="${esc(p.id)}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div class="plugin-identity"><h2>${esc(display.name)}</h2>${pluginDeveloper(p.repository)}</div></div><div class="pills plugin-status"><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span>${updateLabel}</div><p class="plugin-description">${esc(display.description)}</p>${p.backgroundError ? `<p class="plugin-card-notice error">Background service needs attention: ${esc(p.backgroundError)}</p>` : ""}${blocked ? `<p class="plugin-card-notice">${esc(update.compatibilityReason || `Requires KAI Core ${update.minCoreVersion || "a newer version"}.`)}</p>` : ""}<div class="plugin-card-footer"><p class="muted plugin-version">${version}</p><div class="actions">${updateButton}${p.enabled ? `<button${update ? "" : ' class="primary"'} data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></div></article>`;
   }).join("") : "<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a plugin below to add the tools you need.</p></article>");
 }
 function renderCatalog() {
   if (!snapshot || !$("plugin-catalog")) return;
   const s = snapshot, updates = pluginUpdates(), query = ($("plugin-search")?.value || "").trim().toLowerCase();
-  const rows = (s.catalog || []).filter(p => { const display = window.KaiPluginPresentation.get(p.id, p); return `${display.name} ${display.description} ${p.id}`.toLowerCase().includes(query); });
+  const rows = (s.catalog || []).filter(p => { const display = pluginCardDisplay(p), source = pluginRepository(p.repository); return `${display.name} ${display.description} ${p.id} ${source?.owner || ""}`.toLowerCase().includes(query); });
   html("plugin-catalog", rows.length ? rows.map(p => {
-    const display = window.KaiPluginPresentation.get(p.id, p), installed = s.plugins.find(x => x.id === p.id), update = updates.get(p.id), blocked = p.compatible === false;
+    const display = pluginCardDisplay(p), installed = s.plugins.find(x => x.id === p.id), update = updates.get(p.id), blocked = p.compatible === false;
     const differentPublisher = installed && installed.fingerprint && p.fingerprint && installed.fingerprint !== p.fingerprint;
     const label = differentPublisher ? "Different publisher" : update ? blocked ? "Requires newer Core" : "Review update" : installed ? pluginVersionOrder(installed.version, p.version) === 1 ? "Newer version installed" : "Installed" : blocked ? "Requires newer Core" : "Install";
-    return `<article class="plugin-card${update ? " plugin-update-available" : ""}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div><h2>${esc(display.name)}</h2><div class="pills"><span class="pill">${p.official ? "KAI" : "Community"}</span>${update ? '<span class="pill plugin-update-label">Update available</span>' : ""}</div></div></div><p class="plugin-description">${esc(display.description)}</p><p class="muted">Version ${esc(p.version)}${p.minCoreVersion ? ` · Core ${esc(p.minCoreVersion)}+` : ""}</p>${blocked ? `<p>${esc(p.compatibilityReason || "Update Core to use this plugin.")}</p>` : ""}<button${update && !blocked ? ' class="primary"' : ""} data-install-plugin="${esc(p.id)}" ${blocked || differentPublisher || installed && !update ? "disabled" : ""}>${label}</button></article>`;
+    const unavailable = blocked || differentPublisher || installed && !update;
+    return `<article class="plugin-card${update ? " plugin-update-available" : ""}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div class="plugin-identity"><h2>${esc(display.name)}</h2>${pluginDeveloper(p.repository)}</div></div><div class="pills plugin-status"><span class="pill">${p.official ? "KAI" : "Community"}</span>${update ? '<span class="pill plugin-update-label">Update available</span>' : ""}</div><p class="plugin-description">${esc(display.description)}</p>${blocked ? `<p class="plugin-card-notice">${esc(p.compatibilityReason || "Update Core to use this plugin.")}</p>` : ""}<div class="plugin-card-footer"><p class="muted plugin-version">Version ${esc(p.version)}${p.minCoreVersion ? ` · Core ${esc(p.minCoreVersion)}+` : ""}</p><div class="actions"><button${!unavailable ? ' class="primary"' : ""} data-install-plugin="${esc(p.id)}" ${unavailable ? "disabled" : ""}>${label}</button></div></div></article>`;
   }).join("") : "<p>No plugins match your search.</p>");
   const r = s.registry, check = s.catalogCheck;
   const base = r?.available && !r.expired ? `Signed catalog ${r.version} · ${r.count} plugins.` : r?.present ? "Catalog unavailable. Check again before installing." : "Showing bundled KAI releases.";
   const detail = check?.paused || s.network.privacyMode === "local-only" ? "Update checks are paused in Local-Only mode." : check?.error || r?.error ? "Could not check for new updates. Try again when connected." : check?.checking && !r?.available ? "Checking for plugin updates…" : "";
   text("registry-status", [base, detail].filter(Boolean).join(" "));
   $("refresh-registry").disabled = !!check?.checking;
+}
+function openPluginRepository(event) {
+  const link = event.target.closest("[data-plugin-repository]");
+  if (!link) return false;
+  event.preventDefault();
+  const source = pluginRepository(link.dataset.pluginRepository);
+  if (source && link.getAttribute("aria-busy") !== "true") {
+    link.setAttribute("aria-busy", "true");
+    void action(null, () => bridge.call("desktop.openExternal", { url: source.url })).finally(() => link.removeAttribute("aria-busy"));
+  }
+  return true;
 }
 let pluginCheckBusy = false;
 async function checkPluginCatalog() {
@@ -186,8 +214,8 @@ bridge?.onPluginCatalogChange?.(() => { void refresh(); });
 if ($("plugin-search")) $("plugin-search").oninput = renderCatalog;
 if ($("refresh-registry")) $("refresh-registry").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("plugins.registry.refresh"); notify(`Catalog ${r.version} verified · ${r.count} plugins available.`); });
 $("models").onclick = e => { const b = e.target.closest("[data-model]"); if (b) void action(b, () => { notices["model-message"].clear(); return api("/core/models/ensure", { alias: b.dataset.model }); }); };
-$("plugins").onclick = e => { const update = e.target.closest("[data-install-plugin]"); if (update) { if (!update.disabled) void action(update, () => bridge.call("plugins.install", { id: update.dataset.installPlugin })); return; } const b = e.target.closest("[data-plugin]"); if (!b) return; if (b.dataset.operation === "open") { void openApp(snapshot.plugins.find(plugin => plugin.id === b.dataset.plugin)); return; } void action(b, () => bridge.call("plugins.change", { id: b.dataset.plugin, action: b.dataset.operation })); };
-if ($("plugin-catalog")) $("plugin-catalog").onclick = e => { const b = e.target.closest("[data-install-plugin]"); if (b && !b.disabled) void action(b, () => bridge.call("plugins.install", { id: b.dataset.installPlugin })); };
+$("plugins").onclick = e => { if (openPluginRepository(e)) return; const update = e.target.closest("[data-install-plugin]"); if (update) { if (!update.disabled) void action(update, () => bridge.call("plugins.install", { id: update.dataset.installPlugin })); return; } const b = e.target.closest("[data-plugin]"); if (!b) return; if (b.dataset.operation === "open") { void openApp(snapshot.plugins.find(plugin => plugin.id === b.dataset.plugin)); return; } void action(b, () => bridge.call("plugins.change", { id: b.dataset.plugin, action: b.dataset.operation })); };
+if ($("plugin-catalog")) $("plugin-catalog").onclick = e => { if (openPluginRepository(e)) return; const b = e.target.closest("[data-install-plugin]"); if (b && !b.disabled) void action(b, () => bridge.call("plugins.install", { id: b.dataset.installPlugin })); };
 $("install-file").onclick = e => action(e.currentTarget, () => bridge.call("plugins.install"));
 $("install-url").onsubmit = e => { e.preventDefault(); void action(e.submitter, () => bridge.call("plugins.install", { url: $("plugin-url").value })); };
 function applyPrivacy(mode) {

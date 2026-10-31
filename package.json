@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "private": true,
   "description": "KAI Foundation: a documented host for independent plugins",
   "license": "MIT",

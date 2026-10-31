@@ -131,7 +131,9 @@ async function start() {
       case "chat.local": return coreChat.send(input);
       case "chat.stop": return coreChat.stop();
       case "status": {
-        const installed = manager.list().map(plugin => ({ ...plugin, backgroundError: features.backgroundErrors?.get(plugin.id) || null })), entries = catalog();
+        const entries = catalog();
+        const installed = require("./core-plugin-catalog").installedCatalogMetadata(manager.list(), entries, firstParty)
+          .map(plugin => ({ ...plugin, backgroundError: features.backgroundErrors?.get(plugin.id) || null }));
         return { version: app.getVersion(), desktop: { trayAvailable: desktopTray.available }, profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
           models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null,
           plugins: installed, pluginsOrder: appOrder.read(), catalog: entries, registry: registry.status(), pluginUpdates: require("../core/lib/plugins/updates").pluginUpdates(installed, entries), catalogCheck: catalogMonitor.status() };

@@ -1,8 +1,9 @@
 "use strict";
 (() => {
-  // These labels describe native capabilities. Manifest text is never markup.
+  // These labels describe declared capabilities, not a sandbox for native code.
+  // Manifest text is never markup.
   const permissionLabels = Object.freeze({
-    "native.execute":"Run native code with full computer and application access",
+    "native.execute":"Run native code with KAI’s operating-system permissions",
     "models.read":"View installed models", "models.manage":"Set up and load models", "inference.local":"Run local AI models", "inference.network":"Request network AI",
     "storage.read":"Read plugin settings", "storage.write":"Save plugin settings", "secrets.use":"Use secure credential storage",
     "network.status":"Read network policy", "network.configure":"Request privacy changes", "network.fetch":"Make network requests",
@@ -50,8 +51,9 @@
       const data = await window.kaiPluginInstall.read();
       if (!data || typeof data.name !== "string" || typeof data.version !== "string" || typeof data.id !== "string" || typeof data.fingerprint !== "string" || !Array.isArray(data.permissions) || data.permissions.some(p => typeof p !== "string")) throw Error("Invalid review");
       const updating = !!data.installedVersion;
+      byId("permissions-heading").textContent = data.runtime === "native" ? "Declared capabilities" : "Requested access";
       byId("access-note").textContent = data.runtime === "native"
-        ? "Full computer access: this plugin runs native code inside KAI. It can read or change files, access accounts and credentials, run programs, and affect KAI itself. Listed API permissions do not confine native code. Install only if you trust this publisher completely."
+        ? "Native code: this plugin runs with the same operating-system permissions as KAI. It can access files and app data available to KAI, including credentials, make network connections, and run programs. The listed capabilities control KAI API calls; they do not restrict native code. This does not automatically grant administrator access. Install only if you trust the publisher."
         : "This plugin runs in a sandboxed view. Core provides only its granted APIs.";
       byId("access-note").classList.toggle("native-trust", data.runtime === "native");
 

@@ -9,9 +9,9 @@ There are two distinct version numbers: the signed package uses **schema 2 / `ap
 | Runtime | What runs | Trust and limits |
 | --- | --- | --- |
 | `sandboxed` | Packaged HTML, CSS and JavaScript in a sandboxed renderer | No Node, direct network access, frames, popups or arbitrary IPC. Uses the four public renderer methods below. No native service entry. |
-| `native` | Sandboxed UI plus a CommonJS service in Electron's main process | Explicit installation approval grants **full computer and application access**. Native code can read same-user files, execute programs, use Electron and affect Core. A crash or blocking loop can affect the whole application. |
+| `native` | Sandboxed UI plus a CommonJS service in Electron's main process | Explicit installation approval trusts code with **KAI's operating-system permissions**. Native code can access files and app data available to KAI, execute programs, use Electron and affect Core. A crash or blocking loop can affect the whole application. |
 
-Native execution is not an OS sandbox. The documented capability checks and plugin directories help avoid mistakes and keep normal API use consistent; they do not confine malicious native code. A signature identifies a publisher and detects changed package bytes. It does not mean KAI reviewed that publisher.
+Native execution is not an OS sandbox. The documented capability checks and plugin directories help avoid mistakes and keep normal API use consistent; they do not confine malicious native code. Native plugins do not automatically gain administrator/root access or bypass OS protections, but share any rights already held by KAI. A signature identifies a publisher and detects changed package bytes. It does not mean KAI reviewed that publisher. The GitHub owner shown on a plugin card is repository attribution from the catalog; it is not a separate verification of the publisher's signing key.
 
 Start with [`examples/sandboxed-notes`](../../examples/sandboxed-notes) for a small UI-only plugin, or [`examples/native-counter`](../../examples/native-counter) for a native service that owns its state and exposes a local read API. Both examples are dependency-free.
 
