@@ -61,10 +61,12 @@ test("cancelling a vision projector aborts the load instead of silently booting 
   assert.equal(missing.starts.length, 1, "ordinary projector failures preserve the existing text-only fallback");
 });
 
-test("LFM remains a separate local choice and has no approved paid-network tariff", () => {
+test("LFM remains a separate choice with an explicitly pinned network tariff", () => {
   assert.equal(catalog.aliases["lfm3-1.7b"].label, "Liquid LFM3 1.7B");
   assert.equal(catalog.aliases["koinos-fast"].package, "qwen2.5-1.5b-instruct-q4_k_m@1");
-  assert.equal(JSON.stringify(require("../lib/koin-network/credit-model-prices.json")).includes("lfm3-1.7b"), false);
+  const prices = require("../lib/koin-network/credit-model-prices.json"), config = require("../lib/koin-network/credit-service.json").config;
+  const tariff = require("../../electron/credit-models").approvedTariffs(prices.tariffs,config,prices.policyHash).find(t=>t.model==="lfm3-1.7b");
+  assert.equal(tariff.modelHash,catalog.packages[catalog.aliases[tariff.model].package].sha256);
 });
 
 test("a queued fallback switch keeps an active caller's served model until its lease is released", async () => {

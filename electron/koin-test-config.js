@@ -6,7 +6,7 @@ const { scheduler } = require("../core/lib/koin-network/grant-chat");
 const { utils } = require("koilib");
 function configuration(value) {
   const fields = "deployment,limits,maxOutput,maxRcPerDay,maxRcPerTransaction,mode,model,owner,policyHash,schedulerUrl,schema,version";
-  const expected = value && Object.hasOwn(value, "pricingPolicyHash") ? (fields + ",pricingPolicyHash").split(",").sort().join() : fields;
+  const expected = [...fields.split(","), ...["pricingPolicyHash", "catalogExtension"].filter(k => value && Object.hasOwn(value,k))].sort().join();
   if (!value || Object.keys(value).sort().join() !== expected ||
       value.schema !== 1 || !["test-deployment", "mainnet-pilot"].includes(value.mode)) throw Error("Exact public Test deployment manifest required");
   const c = structuredClone(value), client = new KoinChain(c.deployment);
@@ -16,6 +16,10 @@ function configuration(value) {
   if (Object.hasOwn(c, "pricingPolicyHash")) {
     if (!require("../core/lib/koin-network/product").isUsd(c.deployment)) throw Error("Pricing policy applies only to USD credit purchases");
     P.digest(c.pricingPolicyHash);
+  }
+  if (c.catalogExtension !== undefined) {
+    if (!require("../core/lib/koin-network/product").isUsd(c.deployment)) throw Error("Catalog extension requires USD credits");
+    c.catalogExtension = require("../core/lib/koin-network/catalog-extension").validate(c.catalogExtension,c.policyHash);
   }
   c.schedulerUrl = scheduler(c.schedulerUrl);
   if (!utils.isChecksumAddress(c.owner)) throw Error("Pin the Test wallet address");

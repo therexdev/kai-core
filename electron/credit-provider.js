@@ -263,7 +263,7 @@ class CreditProvider {
         policyHash: cfg.policyHash, domain: require("../core/lib/koin-network/payment-mode").testDomain(cfg.deployment, cfg.schedulerUrl) };
       this.abort = new AbortController(); this.release = this.core.gateway.network.trackShadowRequest(this.abort);
       this.worker = this.createWorker({ schedulerUrl: cfg.schedulerUrl, ...(this.device ? { providerSigner: c.signer } : { wallet: this.core.account.wallet }), runtime: this.core.runtime, hardware: this.core.hardware, models: this.core.models, modelPins: c.providerModelPins, idlePollMs: 5000,
-        fundedOnly: true, qualificationTarget: target, koinShadowJobs: false, koinFundedRehearsalJobs: cfg.mode === "test-deployment", koinMainnetPilotJobs: cfg.mode === "mainnet-pilot", koinMainnetTarget: target });
+        fundedOnly: true, catalogExtension: cfg.catalogExtension, qualificationTarget: target, koinShadowJobs: false, koinFundedRehearsalJobs: cfg.mode === "test-deployment", koinMainnetPilotJobs: cfg.mode === "mainnet-pilot", koinMainnetTarget: target });
       this.registeredModelPins = { ...c.offeredModelPins };
       const worker = this.worker;
       this.abort.signal.addEventListener("abort", () => { this.stopWorker(worker).catch(() => {}); }, { once: true });

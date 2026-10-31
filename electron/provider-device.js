@@ -28,7 +28,7 @@ class ProviderDevice {
     signal?.throwIfAborted();
     const response = await this.service.fetchImpl(c.config.schedulerUrl + "/koin/provider/device/" + route, {
       method: body === undefined ? "GET" : "POST", redirect: "error", signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(10000)]),
-      headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      headers: { "content-type": "application/json", ...(route === "capabilities" ? require("../core/lib/koin-network/catalog-extension").headers(c.config) : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const chunks = []; let size = 0;
     for await (const chunk of response.body) { signal?.throwIfAborted(); size += chunk.length; if (size > max) throw Error("Provider service response is too large"); chunks.push(chunk); }
     let value; try { value = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
@@ -258,14 +258,15 @@ class ProviderDevice {
       presence: report => this.proof(c, "presence", require("../core/lib/koin-network/presence").presenceHash(c.config.owner, c.config.schedulerUrl, report)),
       assign: job => {
         this.assert(c);
-        const checked = job?.type === "koin-provider-qualification" ? require("../core/lib/koin-network/qualification-protocol").validate(job, this.core.models.catalog, c.target, this.clock())
+        const jobTarget = require("../core/lib/koin-network/catalog-extension").target(c.target,c.config.catalogExtension,job?.challenge?.model || job?.model);
+        const checked = job?.type === "koin-provider-qualification" ? require("../core/lib/koin-network/qualification-protocol").validate(job, this.core.models.catalog, jobTarget, this.clock())
           : require("../core/lib/koin-network/funded-protocol").validateJob(job, this.core.models.catalog, this.clock());
-        if (JSON.stringify(checked.target) !== JSON.stringify(c.target)) throw Error("The job is for another provider deployment");
+        if (JSON.stringify(checked.target) !== JSON.stringify(jobTarget)) throw Error("The job is for another provider deployment");
         assigned = structuredClone(job);
       },
       qualification: (job, outputHash) => { matches(job); return this.proof(c, "qualification", require("../core/lib/koin-network/qualification-protocol").resultHash(job, outputHash)); },
-      chunk: (job, output, sequence) => { matches(job); return this.proof(c, "chunk", require("../core/lib/koin-network/funded-protocol").fundedChunkHash(c.target, job, output, sequence)); },
-      result: (job, output) => { matches(job); return this.proof(c, "result", require("../core/lib/koin-network/funded-protocol").fundedResultHash(c.target, job, output)); },
+      chunk: (job, output, sequence) => { matches(job); return this.proof(c, "chunk", require("../core/lib/koin-network/funded-protocol").fundedChunkHash(job.target, job, output, sequence)); },
+      result: (job, output) => { matches(job); return this.proof(c, "result", require("../core/lib/koin-network/funded-protocol").fundedResultHash(job.target, job, output)); },
       release: () => { assigned = null; }
     });
   }

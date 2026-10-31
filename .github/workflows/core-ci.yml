@@ -24,6 +24,18 @@ jobs:
       - run: npm run build:manifest
       - run: npm test
       - run: npm run test:services
+      - name: Checkout the reviewed additive network backend
+        uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai
+          ref: 87a7bd87faac1e2bd707eb60f6d225cbf25cc8e8
+          path: .network-integration
+          persist-credentials: false
+      - run: npm ci --ignore-scripts --prefix .network-integration
+      - name: Verify additive catalog qualification and signed replies
+        run: node --test --test-name-pattern="additive catalog" core/test/wallet-first-integration.test.js
+        env:
+          KAI_WALLET_BACKEND: ${{ github.workspace }}/.network-integration
       - name: Configure Electron sandbox helper on Linux
         if: runner.os == 'Linux'
         run: |

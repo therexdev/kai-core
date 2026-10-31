@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "product": "prepaid-usd-v1",
-  "policyHash": "9a4d812014a210d0d9fa083c479c0c0d82341ece2bde33b596ea8bb3826b9089",
+  "policyHash": "a5fb8224fa391c538270f68fcc4d682fce0741a2cb90fd0885041bbc80def0de",
   "source": {
     "repository": "therexdev/kai",
     "commit": "80eb56c94600b800c0b69910acde0937f0da052d",
@@ -90,6 +90,18 @@
       "outputAtomsPerMillion": "10000000",
       "templateHash": "cd8e9439f0570856fd70470bf8889ebd8b5d1107207f67a5efb46e342330527f",
       "tokenizerHash": "fee4b0cea9cad15d464b84d1f85fe7019103a76fca033894afd3685d77d8b4de",
+      "version": 1
+    },
+    {
+      "contextTokens": 4096,
+      "inputAtomsPerMillion": "1000000",
+      "maxLatencyMs": 120000,
+      "maxOutputTokens": 256,
+      "model": "lfm3-1.7b",
+      "modelHash": "3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4",
+      "outputAtomsPerMillion": "4000000",
+      "templateHash": "4f123bcdf40dc82ef3206ce81a0cf549f88b363742c37a767eb8f33bc515767d",
+      "tokenizerHash": "e8c17214efe762a8c5a1f6717b819a0ff375ef20f80364585cfad1b33f460411",
       "version": 1
     },
     {

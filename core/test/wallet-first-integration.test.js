@@ -38,7 +38,7 @@ function desktopWallet(signer) {
     signHash: async value => { if (!unlocked) throw Error("Wallet locked"); hashes++; return Buffer.from(await signer.signHash(value)).toString("base64"); },
     hashes: () => hashes };
 }
-async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", multiModel = false, runtimeReadiness = false, qualificationCases = 1, irreversiblePurchase = true, quoteTtlMs = USD.MAX_QUOTE_MS } = {}) {
+async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", multiModel = false, runtimeReadiness = false, additiveCatalog = false, qualificationCases = 1, irreversiblePurchase = true, quoteTtlMs = USD.MAX_QUOTE_MS } = {}) {
   const cleanup = cleanupStack(t);
   const backend = createRequire(path.join(path.resolve(BACKEND), "package.json"));
   const f = require("./helpers/koin-funding-recovery-fixture").fixture({ after: cleanup }, { usd: true, mainnet: true });
@@ -51,10 +51,14 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
   const tariff = runtimeReadiness ? publicTariffs.find(t => t.model === "koinos-smart") : fixtureTariff;
   const tariffs = runtimeReadiness ? ["koinos-smart", "koinos-fast", "koinos-balanced", "llama31-8b"].map(model => publicTariffs.find(t => t.model === model))
     : [tariff, ...(multiModel ? ["koinos-fast", "koinos-balanced", "llama-3.1-8b"].map(model => ({ ...tariff, model, modelHash: P.hash(model) })) : [])];
+  if(additiveCatalog)tariffs.push(runtimeReadiness ? backend("./deploy/koin-mainnet/candidates/liquid-lfm3-1.7b.json").tariff : {...tariff,model:"lfm3-1.7b",modelHash:P.hash("liquid-fixture")});
   const encode = value => [...Buffer.from(value)], render = JSON.stringify;
-  const meter = new (backend("./lib/koin-network/metering").Meter)(tariffs.map(tariff => ({ tariff, adapter: { ...tariff, encode, render, input: value => encode(render(value)).length, output: value => encode(value).length } })));
+  const entries=tariffs.map(tariff=>({tariff,adapter:{...tariff,encode,render,input:value=>encode(render(value)).length,output:value=>encode(value).length}}));
+  const Meter=backend("./lib/koin-network/metering").Meter,baseMeter=new Meter(additiveCatalog?entries.slice(0,-1):entries);
+  const meter=additiveCatalog?new (backend("./lib/koin-network/additive-catalog").AdditiveMeter)(baseMeter,entries.slice(-1),new Meter(entries).policyHash):baseMeter;
   const config = { schema: 1, mode: "mainnet-pilot", deployment: f.d, schedulerUrl, policyHash: meter.policyHash, version: 1, model: tariff.model, maxOutput: 64,
     pricingPolicyHash: Prices.pricingPolicyHash, maxRcPerTransaction: "10000000", maxRcPerDay: "500000000", limits: { amount: "10000000000", perJob: "1000000", maxJobs: 10, durationMs: 3600000 } };
+  if(additiveCatalog)config.catalogExtension={schema:1,policyHash:meter.catalogPolicyHash,models:["lfm3-1.7b"]};
   const target = require("../../electron/provider-device").target(config);
   const accounts = backend("./lib/accounts").createAccounts({ stateDir: dir, siteOrigin: origin });
   cleanup(() => accounts.service.db.close());
@@ -74,7 +78,7 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
     return backend("./lib/koin-network/network-overview").networkOverview(runtime);
   };
   const deviceOptions = { directory: path.join(dir, "provider-devices"), schedulerUrl, target, deployment: f.d, clock,
-    catalog: () => backend("./lib/koin-network/model-catalog").modelCatalog({ meter, target, networkOverview, clock }),
+    catalog: catalogPolicyHash => backend("./lib/koin-network/model-catalog").modelCatalog({ meter, target, networkOverview, clock, catalogPolicyHash }),
     status: (address, deviceId) => {
       if (multiModel) runtime.lastServing = clock();
       return { mode: config.mode, mainnetPaymentsEnabled: config.mode === "mainnet-pilot", observedAt: clock(),
@@ -92,7 +96,7 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
   cleanup(() => scheduler.close());
   const hosts = new (backend("./lib/koin-network/test-hosts").TestHosts)(path.join(dir, "hosts"), f.d.chainId);
   cleanup(() => hosts.close());
-  runtime = { accounts: accounts.service, scheduler, hosts, config: multiModel ? { ...config, models: tariffs.map(tariff => ({ tariff })), freePolicy: { eligibleModels: tariffs.map(t => t.model) } } : config,
+  runtime = { accounts: accounts.service, scheduler, hosts, config: multiModel ? { ...config, models: (additiveCatalog?tariffs.slice(0,-1):tariffs).map(tariff => ({ tariff })), ...(additiveCatalog?{catalogExtension:{models:tariffs.slice(-1).map(tariff=>({tariff}))}}:{}), freePolicy: { eligibleModels: tariffs.map(t => t.model) } } : config,
     prepaid: true, clock, claims: { accountStatus: () => [] } };
   if (multiModel) {
     Object.setPrototypeOf(runtime, backend("./lib/koin-network/test-runtime").TestRuntime.prototype);
@@ -104,7 +108,7 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
         reviewedEvidenceHash: P.hash("integration-only:" + t.model), minPass: qualificationCases, maxLatencyMs: 30000, renewBeforeMs: 60000, retryMs: 300000,
         cases: runtimeReadiness ? structuredClone(backend("./lib/koin-network/runtime-readiness").CASES)
           : Array.from({ length: qualificationCases }, (_, i) => ({ id: "fixture-answer-" + i, messages: [{ role: "user", content: "Fixture benchmark " + i }], maxOutput: 16, expected: [t.model === "koinos-balanced" ? "No" : "Yes"] })) }));
-    if (runtimeReadiness) { for (const policy of policies) policy.minPass = 2; runtime.config.qualificationPolicies = policies; }
+    if (runtimeReadiness) { for (const policy of policies) policy.minPass = 2; runtime.config.qualificationPolicies = additiveCatalog?policies.slice(0,-1):policies; if(additiveCatalog)runtime.config.catalogExtension.qualificationPolicies=policies.slice(-1); }
     runtime.qualifier = new (backend("./lib/koin-network/provider-qualification-set").ProviderQualificationSet)({
       file: path.join(dir, "qualification.json"), target, meter, clock, providerDevices: devices, preparePresence: worker => devices.presence(worker), policies });
     scheduler.providerQualification = runtime.qualifier;
@@ -188,7 +192,7 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
     const models = { ...core.models, aliases: () => tariffs.map(t => ({ alias: t.model, status: "ready", minRamGb: 1 })), packageStatus: () => ({ status: "ready" }) };
     const events = [];
     activeWorker = new Worker({ schedulerUrl, providerSigner: context.signer, runtime: workerRuntime, hardware: { ramBytes: 32e9 }, models,
-      modelPins: Object.fromEntries(selected.map(t => [t.model, t.modelHash])), fundedOnly: true, qualificationTarget: target, koinMainnetPilotJobs: true, koinMainnetTarget: target, idlePollMs: 5000, onEvent: event => events.push(event) });
+      modelPins: Object.fromEntries(selected.map(t => [t.model, t.modelHash])), fundedOnly: true, catalogExtension: config.catalogExtension, qualificationTarget: target, koinMainnetPilotJobs: true, koinMainnetTarget: target, idlePollMs: 5000, onEvent: event => events.push(event) });
     await activeWorker.start();
     return { worker: activeWorker, events, runtime: workerRuntime, acquisitions, async stop() { await activeWorker.stop(); globalThis.fetch = previous; } };
   }
@@ -883,4 +887,23 @@ test("delegated provider credentials cannot buy credits, administer accounts or 
   assert.equal(f.devices.active(PD.authorizationId(second.record.authorization)), true, "one revocation does not affect another device");
   f.advance(2592000001); f.restartDevices();
   assert.equal(f.devices.active(PD.authorizationId(second.record.authorization)), false, "expiry remains effective after server restart");
+});
+
+test("additive catalog: existing device authority qualifies Liquid, serves a signed paid reply and preserves legacy catalog",{...options,timeout:120000},async t=>{
+ const f=await fixture(t,{multiModel:true,runtimeReadiness:true,additiveCatalog:true,freeAllowance:"1"}),signal=AbortSignal.timeout(100000);
+ await f.service.connectWallet(f.window,{},signal);const preview=await f.service.run("purchase-preview",{usd:"1"},signal);await f.service.run("purchase-approve",preview.quote.id,signal,f.window);
+ await f.providerDevice.authorize(f.window,{},signal);const context=await f.providerDevice.context(signal),cert=context.record.authorization;
+ assert.equal(cert.target.policyHash,f.target.policyHash);const deviceId=f.providerDevice.identity().identity;
+ const legacy=await f.service.fetchImpl(f.config.schedulerUrl+"/koin/provider/device/capabilities",{});const old=await legacy.json();assert.equal(old.catalog.policyHash,f.target.policyHash);assert.ok(!old.catalog.tariffs.some(t=>t.model==="lfm3-1.7b"));
+ const full=await context.flow.models(signal);assert.equal(full.policyHash,f.config.catalogExtension.policyHash);assert.ok(full.tariffs.some(t=>t.model==="lfm3-1.7b"));
+ f.providerWallet.lock();f.wallet.lock();const running=await f.startWorker(context,{selectedModels:["lfm3-1.7b"]});
+ const end=Date.now()+70000;while(f.runtime.qualifier.status(f.providerWallet.address,"lfm3-1.7b")?.state!=="qualified"&&Date.now()<end)await new Promise(r=>setTimeout(r,25));
+ assert.equal(f.runtime.qualifier.status(f.providerWallet.address,"lfm3-1.7b")?.state,"qualified",JSON.stringify(running.events));
+ const engine=f.runtime.qualifier.engines.get("lfm3-1.7b"),run=engine.state.runs[f.providerWallet.address];
+ for(const result of run.results)assert.equal(f.backend("./lib/koin-network/qualification-evidence").verifyResult(result,{target:engine.target,authorizationTarget:f.target,policyHash:engine.policyHash,address:f.providerWallet.address,schedulerUrl:f.config.schedulerUrl,now:f.clock()}).readinessReplayed,true);
+ const answer=await f.service.run("chat-completion",{model:"koinos-network:lfm3-1.7b",messages:[{role:"user",content:"Ready?"}],max_tokens:16,stream:false},signal);
+ assert.equal(answer.choices[0].message.content,"Yes");assert.equal(answer.koin.target.policyHash,f.config.catalogExtension.policyHash);assert.equal(answer.koin.quote.policyHash,f.config.catalogExtension.policyHash);
+ const proof=PD.decodeAction(answer.koin.receipt.signature);assert.equal(proof.authorization.target.policyHash,f.target.policyHash);assert.equal(f.providerDevice.identity().identity,deviceId);
+ const paid=await f.service.run("credit-status",undefined,signal);assert.ok(BigInt(paid.credits.purchased.available)<100000000n);assert.equal(f.transactionSigns(),1);
+ await running.stop();f.restartDevices();assert.equal((await f.providerDevice.context(signal)).record.authorization.deviceId,cert.deviceId);
 });

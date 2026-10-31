@@ -43,7 +43,7 @@ class Worker {
     return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
   }
 
-  constructor({ schedulerUrl, wallet, providerSigner = null, runtime, hardware, models, modelPins = null, idlePollMs = 45000, producer, onEvent, fundedOnly = false, qualificationTarget = null, koinMainnetPilotJobs = false, koinMainnetTarget = null, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
+  constructor({ schedulerUrl, wallet, providerSigner = null, runtime, hardware, models, modelPins = null, idlePollMs = 45000, producer, onEvent, fundedOnly = false, qualificationTarget = null, catalogExtension = null, koinMainnetPilotJobs = false, koinMainnetTarget = null, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
     if (providerSigner && (wallet || !fundedOnly || !qualificationTarget || ["register", "presence", "assign", "qualification", "chunk", "result", "release"].some(k => typeof providerSigner[k] !== "function"))) throw Error("A scoped provider signer and pinned funded deployment are required");
     this.providerSigner = providerSigner;
@@ -57,6 +57,7 @@ class Worker {
     this.fundedOnly = fundedOnly === true;
     if (!Number.isInteger(idlePollMs) || idlePollMs < 5000 || idlePollMs > 45000 || (idlePollMs !== 45000 && !this.fundedOnly)) throw Error("Bounded funded provider poll interval required");
     this.idlePollMs = idlePollMs;
+    this.catalogExtension = require("./koin-network/catalog-extension").validate(catalogExtension,qualificationTarget?.policyHash);
     this.qualificationTarget = qualificationTarget ? require("./koin-network/session-delegation").target(qualificationTarget) : null;
     if (this.qualificationTarget && !this.fundedOnly) throw Error("Qualification requires the explicitly configured provider");
     this.koinMainnetPilotJobs = koinMainnetPilotJobs === true;
@@ -563,7 +564,7 @@ class Worker {
   async _prepareQualification(job, onStage = () => {}) {
     if (!this.providerSigner || !this.qualificationTarget || !this.modelPins) throw Error("Scoped model preparation is unavailable");
     this._assertModelOffered(job);
-    const checked = require("./koin-network/qualification-protocol").validatePreparation(job, this.models?.catalog, this.qualificationTarget);
+    const checked = require("./koin-network/qualification-protocol").validatePreparation(job, this.models?.catalog, require("./koin-network/catalog-extension").target(this.qualificationTarget,this.catalogExtension,job.challenge?.model || job.model));
     if (typeof this.runtime.acquireFor !== "function") throw Error("Model preparation requires a managed runtime lease");
     this._executing = true; this._shadowAbort = new AbortController();
     const signal = AbortSignal.any([this._shadowAbort.signal, this._workAbort?.signal || new AbortController().signal,
@@ -705,7 +706,7 @@ class Worker {
             if (!this.qualificationTarget) throw Error("Automatic qualification is not enabled for this connection");
             this._assertModelOffered(job.challenge);
             const qualification = require("./koin-network/qualification-protocol"), P = require("./koin-network/job-protocol");
-            const checked = qualification.validate(job, this.models?.catalog, this.qualificationTarget);
+            const checked = qualification.validate(job, this.models?.catalog, require("./koin-network/catalog-extension").target(this.qualificationTarget,this.catalogExtension,job.challenge?.model || job.model));
             this._executing = true; this._shadowAbort = new AbortController();
             const result = await require("./koin-network/shadow-worker").executeShadow({ job: checked.challenge, catalog: this.models?.catalog, runtime: this.runtime, signal: this._shadowAbort.signal,
               requireComplete: true,
@@ -816,7 +817,7 @@ class Worker {
     if (this.fundedOnly && !["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type)) throw Error("This Test worker accepts only funded Test requests");
     if (["koin-shadow-chat", "koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type)) {
       if (job.type === "koin-mainnet-pilot-chat") {
-        if (!this.koinMainnetPilotJobs || JSON.stringify(require("./koin-network/session-delegation").target(job.target)) !== JSON.stringify(this.koinMainnetTarget)) throw Error("Mainnet job differs from the explicitly configured worker target");
+        if (!this.koinMainnetPilotJobs || JSON.stringify(require("./koin-network/session-delegation").target(job.target)) !== JSON.stringify(require("./koin-network/catalog-extension").target(this.koinMainnetTarget,this.catalogExtension,job.model))) throw Error("Mainnet job differs from the explicitly configured worker target");
       } else if (job.type === "koin-funded-rehearsal-chat" ? !this.koinFundedRehearsalJobs : !this.koinShadowJobs) throw Error("Shadow jobs require explicit opt-in");
       this._shadowAbort = new AbortController();
       return require("./koin-network/shadow-worker").executeShadow({ job, catalog: this.models?.catalog,
