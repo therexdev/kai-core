@@ -3,6 +3,8 @@ on:
   push:
     branches: [main, foundation-v1]
     paths-ignore:
+      - README.md
+      - 'docs/**'
       - scripts/foundation/publish-core-release.js
       - core/test-core/windows-release-signing.test.js
       - .github/workflows/core-release-078-recovery.yml
