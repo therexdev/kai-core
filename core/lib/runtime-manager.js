@@ -7,6 +7,35 @@
  * runtime and starts the requested one.
  */
 
+// Package-specific defaults affect only the selected model, never other catalog
+// models or user-selected GPU/memory flags. A zero reasoning budget ensures the
+// lightweight chat model returns an answer within Core's output-token limit.
+// Its reasoning parser stays enabled so the forced end-of-thinking token is
+// separated from visible answer text, rather than leaking into the chat.
+function generationArgs(options) {
+  if (!options) return [];
+  const args = [];
+  const number = (key, flag, min, max, integer = false) => {
+    if (options[key] === undefined) return;
+    const value = options[key];
+    if (!Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value))) throw new Error(`Invalid model generation setting: ${key}`);
+    args.push(flag, String(value));
+  };
+  number("temperature", "--temp", 0, 2);
+  number("topK", "--top-k", 0, 1000, true);
+  number("repeatPenalty", "--repeat-penalty", 0, 3);
+  number("reasoningBudget", "--reasoning-budget", -1, 32768, true);
+  if (options.reasoning !== undefined) {
+    if (!["on", "off", "auto"].includes(options.reasoning)) throw new Error("Invalid model reasoning setting");
+    args.push("--reasoning", options.reasoning);
+  }
+  if (options.reasoningFormat !== undefined) {
+    if (!["none", "deepseek", "deepseek-legacy"].includes(options.reasoningFormat)) throw new Error("Invalid model reasoning format");
+    args.push("--reasoning-format", options.reasoningFormat);
+  }
+  return args;
+}
+
 class RuntimeManager {
   constructor({ models, makeRuntime, hardware, provisioner, makeFallback, preferFallback, onEvent, state }) {
     this.models = models; // ModelManager
@@ -246,6 +275,10 @@ class RuntimeManager {
 
   async _load(alias) {
     const resolved = this.models.resolveAlias(alias);
+    const fallbackAllowed = resolved.allowFallback !== false;
+    if (this.preferFallback && !fallbackAllowed) {
+      throw new Error("This model requires KAI’s managed llama.cpp engine. Turn off the forced Ollama runtime to load it.");
+    }
     const modelPath = await this.models.ensurePackage(resolved.packageId);
     const kind = resolved.runtime || "llamacpp";
     const wantGpu = !!this.hardware?.capabilities?.cudaEligible;
@@ -255,9 +288,12 @@ class RuntimeManager {
     // model switch re-ran the full crash-test ladder (field log: switches
     // every few seconds, each one a blocking multi-second freeze that
     // starved the worker's own presence signals while jobs kept serving).
-    if (this._llamaDead && this.runtime?.status().kind === "ollama" && this.runtime.status().running) {
+    if (fallbackAllowed && this._llamaDead && this.runtime?.status().kind === "ollama" && this.runtime.status().running) {
       const rt = this.runtime;
       try {
+        // A queued switch must preserve the model name held by an active
+        // caller, just as switching the managed engine waits for its leases.
+        await this._drain();
         this.onEvent({ type: "runtime:fast-switch", from: this.activeAlias, to: alias, via: "ollama" });
         const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
         await rt.start({ modelPath, sha256: resolved.sha256, modelName });
@@ -345,6 +381,8 @@ class RuntimeManager {
       try {
         mmprojPath = await this.models.ensureMmproj(resolved.packageId);
       } catch (e) {
+        // Cancelling a projector download cancels the requested load too.
+        if (e?.name === "AbortError" || e?.code === "ABORT_ERR") throw e;
         this.onEvent?.({ type: "runtime:vision-degraded", alias, message: String(e.message).slice(0, 200) });
       }
     }
@@ -359,7 +397,7 @@ class RuntimeManager {
         contextSize: resolved.contextSize || 4096,
         gpuLayers,
         sizeBytes: resolved.sizeBytes || 0,
-        extraArgs: mmprojPath ? ["--mmproj", mmprojPath] : [],
+        extraArgs: [...(mmprojPath ? ["--mmproj", mmprojPath] : []), ...generationArgs(resolved.generation)],
       });
       return runtime;
     };
@@ -423,6 +461,7 @@ class RuntimeManager {
     };
 
     const bootFallback = async (why) => {
+      if (!fallbackAllowed) throw new Error(`${why ? why + " · " : ""}This model requires KAI’s managed llama.cpp engine; Ollama fallback is unavailable for this model.`);
       const fb = this.makeFallback ? await this.makeFallback() : null;
       if (!fb) return null;
       if (why) this.onEvent({ type: "runtime:fallback", from: "llamacpp", to: fb.status().kind, reason: why });

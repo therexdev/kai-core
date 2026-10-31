@@ -377,6 +377,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
       return p;
     },
     async stop() {
+      gateway.stopModelQueue();
       for (const controller of shadowRequests) controller.abort();
       wallet.disposeCreditStorage();
       if (this._policyTimer) clearInterval(this._policyTimer);

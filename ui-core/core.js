@@ -20,6 +20,7 @@ async function action(button, fn) { globalNotice.clear(); if (button) button.dis
 const apps = window.KaiCoreApps?.create({ document, bridge, open: plugin => { void openApp(plugin); }, manage: plugin => {
   showPage("plugins"); notify(`${window.KaiPluginPresentation.get(plugin.id, plugin).name} is disabled. Choose Enable in Your installed plugins to use it.`);
 }, notify });
+const modelCards = window.KaiCoreModels.create({ document, container: $("models"), request: api, refresh });
 function appBounds() {
   const rect = $("app-content")?.getBoundingClientRect?.();
   return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
@@ -91,27 +92,6 @@ function modelDisplayName(value) {
   const alias = String(value ?? "").replace(/^koinos-network:/, "");
   return snapshot?.models?.find(model => model.alias === alias)?.label || alias;
 }
-function modelDescription(model) {
-  // Catalog blurbs already contain size; keep their useful model/RAM guidance
-  // while the footer shows the current, separately labelled file size.
-  return String(model.blurb || "").replace(/\s*·\s*\d+(?:\.\d+)?\s*GB\s*$/i, "").trim();
-}
-function modelSizeLabel(model) {
-  const known = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
-  const gb = bytes => bytes > 0 && bytes < 10000000 ? "<0.01 GB" : `${Number((bytes / 1e9).toFixed(bytes < 1e9 ? 2 : 1))} GB`;
-  const actual = known(model.diskBytes) ? model.diskBytes : null;
-  const total = known(model.downloadSizeBytes) && model.downloadSizeBytes > 0 ? model.downloadSizeBytes : null;
-  const expected = total ?? (!Object.hasOwn(model, "downloadSizeBytes") && known(model.sizeBytes) && model.sizeBytes > 0 ? model.sizeBytes : null);
-  if (model.status === "ready") return actual !== null ? `${gb(actual)} on disk` : expected !== null ? `${gb(expected)} model size` : "Size unavailable";
-  if (actual !== null && actual > 0) return total !== null ? `${gb(actual)} on disk · ${gb(total)} total` : `${gb(actual)} on disk`;
-  return expected !== null ? `${gb(expected)} ${model.custom || total === null ? "model size" : "download"}` : "Size unavailable";
-}
-function renderModels(models) {
-  html("models", models.map(model => {
-    const description = modelDescription(model);
-    return `<article class="model-card"><div class="model-card-heading"><h2>${esc(model.label || model.alias)}</h2><span class="pill">${esc(model.status)}</span></div>${description ? `<p class="model-description">${esc(description)}</p>` : ""}<div class="model-card-footer"><span class="model-size">${esc(modelSizeLabel(model))}</span><button data-model="${esc(model.alias)}">${model.status === "ready" ? "Load model" : "Download & load"}</button></div></article>`;
-  }).join(""));
-}
 document.addEventListener("kai-alpha-migration-complete", () => { void refresh(); });
 async function refresh() {
   if (!bridge || refreshing || document.hidden) return; refreshing = true;
@@ -132,14 +112,9 @@ async function refresh() {
     window.KaiCoreWallet?.observe(s.wallet, s.network.privacyMode);
     window.KaiCreditConnection?.observe(s.wallet, s.network.privacyMode);
     if (document.activeElement !== $("privacy")) $("privacy").value = s.network.privacyMode;
-    const modelBusy = !!s.importing || s.ensure?.state === "working";
-    const modelError = !modelBusy && (s.ensure?.state === "error" || !!s.importError);
-    notices["model-message"].show(s.importing ? `Importing model · ${Math.round(s.importing.pct || 0)}%`
-      : s.ensure?.state === "working" ? `Preparing ${modelDisplayName(s.ensure.alias)}…`
-      : s.ensure?.state === "error" ? s.ensure.error || "The model could not be loaded. Try another model or retry."
-      : s.importError || "", { error: modelError, dismissible: !modelBusy });
-    text("download", s.download ? `Downloading · ${Math.round(s.download.pct || 0)}%` : s.runtime.activeAlias ? `Loaded: ${modelDisplayName(s.runtime.activeAlias)}` : "");
-    renderModels(s.models);
+    notices["model-message"].show(s.importing ? `Importing model · ${Math.round(s.importing.pct || 0)}%` : s.importError || "",
+      { error: !s.importing && !!s.importError, dismissible: !s.importing });
+    modelCards.update(s);
     renderInstalledPlugins();
     apps?.update(s);
     if (activeAppId && !s.plugins.some(plugin => plugin.id === activeAppId && plugin.enabled)) showPage("plugins");
@@ -239,7 +214,6 @@ window.addEventListener("online", () => { void checkPluginCatalog(); });
 bridge?.onPluginCatalogChange?.(() => { void refresh(); });
 if ($("plugin-search")) $("plugin-search").oninput = renderCatalog;
 if ($("refresh-registry")) $("refresh-registry").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("plugins.registry.refresh"); notify(`Catalog ${r.version} verified · ${r.count} plugins available.`); });
-$("models").onclick = e => { const b = e.target.closest("[data-model]"); if (b) void action(b, () => { notices["model-message"].clear(); return api("/core/models/ensure", { alias: b.dataset.model }); }); };
 $("plugins").onclick = e => { if (openPluginRepository(e)) return; const update = e.target.closest("[data-install-plugin]"); if (update) { if (!update.disabled) void action(update, () => bridge.call("plugins.install", { id: update.dataset.installPlugin })); return; } const b = e.target.closest("[data-plugin]"); if (!b) return; if (b.dataset.operation === "open") { void openApp(snapshot.plugins.find(plugin => plugin.id === b.dataset.plugin)); return; } void action(b, () => bridge.call("plugins.change", { id: b.dataset.plugin, action: b.dataset.operation })); };
 if ($("plugin-catalog")) $("plugin-catalog").onclick = e => { if (openPluginRepository(e)) return; const b = e.target.closest("[data-install-plugin]"); if (b && !b.disabled) void action(b, () => bridge.call("plugins.install", { id: b.dataset.installPlugin })); };
 $("install-file").onclick = e => action(e.currentTarget, () => bridge.call("plugins.install"));
@@ -279,7 +253,6 @@ $("hide-backup").onclick = hideBackup;
 $("lock-wallet").onclick = e => { hideBackup(); return action(e.currentTarget, () => bridge.call("wallet.lock")); };
 $("connect-wallet").onclick = e => action(e.currentTarget, async () => { await bridge.credit("wallet-connect"); window.KaiCredits.clear(); await window.KaiCredits.refresh(); });
 $("import-model").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("models.import"); if (r) { notices["model-message"].clear(); await api("/core/models/import", { path: r.file }); } });
-$("cancel-download").onclick = e => action(e.currentTarget, () => api("/core/models/download/cancel", {}));
 let priceBusy = false;
 async function price() { if (!bridge || priceBusy || page !== "buy-credits" || snapshot?.network.privacyMode === "local-only") return; priceBusy = true; const generation = ++priceGeneration, usd = $("usd").value; try { const r = await bridge.credit("purchase-estimate", { usd }); if (generation === priceGeneration) text("price", `Estimated payment: ${r.estimate.koin} KOIN · ${r.estimate.credits} credits`); } catch (e) { if (generation === priceGeneration) text("price", e.message); } finally { priceBusy = false; } }
 $("usd").oninput = () => { priceGeneration++; text("price", "The exact KOIN payment will be shown before approval."); };

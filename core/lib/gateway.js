@@ -7,6 +7,7 @@ const FORWARDED_HEADERS = ["x-forwarded-for", "x-forwarded-host", "x-real-ip", "
 const http = require("http");
 const fs = require("fs");
 const nodePath = require("path");
+const { ModelLoadQueue } = require("./model-load-queue");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -93,6 +94,9 @@ class Gateway {
     this.onEvent = onEvent || (() => {});
     this.server = null;
     this._ensureJob = null; // background model-load kicked off by the UI
+    this._modelQueue = new ModelLoadQueue({ models, runtime, onChange: job => {
+      this._ensureJob = { alias: job.alias, state: job.state === "preparing" ? "working" : job.state === "done" ? "ready" : job.state, error: job.error };
+    } });
     // Headless hardening (A40 field report, pre-server-edition): when
     // KAI_CORE_TOKEN is set, every /core/* call must present it as a bearer.
     // Off by default — the desktop app's loopback trust model is unchanged,
@@ -141,6 +145,7 @@ class Gateway {
   }
 
   close() {
+    this.stopModelQueue();
     return new Promise((resolve) => {
       if (!this.server) return resolve();
       // Sever keep-alive sockets (fetch pools them), or close() waits forever.
@@ -148,6 +153,9 @@ class Gateway {
       this.server.close(resolve);
     });
   }
+
+  modelQueueSnapshot() { return this._modelQueue.snapshot(); }
+  stopModelQueue() { this._modelQueue.close(); }
 
   _json(res, status, body) {
     if (res.headersSent) return res.end();
@@ -332,6 +340,7 @@ class Gateway {
         importing: this.models.importStatus?.() ?? null,
         importError: this._lastImportError ?? null,
         runtimeDownload: this.runtime.provisioner?.downloadProgress() ?? null,
+        modelQueue: this.modelQueueSnapshot(),
         ensure: this._ensureJob
           ? { alias: this._ensureJob.alias, state: this._ensureJob.state, error: this._ensureJob.error }
           : null,
@@ -354,32 +363,21 @@ class Gateway {
       } catch (e) {
         return this._json(res, 400, { ok: false, error: String(e.message) });
       }
-      if (this._ensureJob?.state === "working") {
-        return this._json(res, 409, { ok: false, error: `Already loading ${this._ensureJob.alias}` });
+      try {
+        const { duplicate, job } = this._modelQueue.enqueue(alias);
+        return this._json(res, 202, { ok: true, started: !duplicate, alias, job, modelQueue: this.modelQueueSnapshot() });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
       }
-      const job = { alias, state: "working", error: null };
-      this._ensureJob = job;
-      this.runtime
-        .ensure(alias)
-        .then(() => (job.state = "ready"))
-        .catch((e) => {
-          job.state = "error";
-          job.error = String(e.message);
-        });
-      return this._json(res, 200, { ok: true, started: true, alias });
     }
     // The escape hatch cancelDownload() always had but never a route to (A40
     // field report): abort the in-flight model download. The ensure job then
     // rejects and frees its slot — no restart needed to un-wedge a bad mirror.
     if (path === "/core/models/download/cancel" && req.method === "POST") {
-      const r = this.models.cancelDownload();
-      const rt = this.runtime.provisioner?.cancelDownload?.() ?? null;
-      if (this._ensureJob?.state === "working" && !r.cancelled && !rt?.cancelled) {
-        // Loading but not downloading (engine spawn, disk copy): nothing we
-        // can safely abort — say so instead of pretending.
-        return this._json(res, 200, { ok: true, cancelled: false, note: "no download in flight — the current load step is not cancellable" });
-      }
-      return this._json(res, 200, { ok: true, cancelled: Boolean(r.cancelled || rt?.cancelled) });
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      const result = this._modelQueue.cancel(body.alias ? String(body.alias) : null);
+      return this._json(res, 200, { ok: true, ...result, modelQueue: this.modelQueueSnapshot(),
+        ...(!result.cancelled ? { note: "The current preparation step is not cancellable, or this model is no longer queued." } : {}) });
     }
     if (this.models && path === "/core/models/import" && req.method === "POST") {
       try {

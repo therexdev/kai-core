@@ -13,7 +13,9 @@ const { extractZipAsync } = require("./zip");
 function extractTarGzAsync(file, destDir) {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(destDir, { recursive: true });
-    const child = require("child_process").spawn("tar", ["-xzf", file, "-C", destDir], { stdio: ["ignore", "ignore", "pipe"] });
+    // Runtime files belong to the current app user, not the archive builder's
+    // numeric UID (which can be unavailable inside a Linux user namespace).
+    const child = require("child_process").spawn("tar", ["--no-same-owner", "-xzf", file, "-C", destDir], { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
     child.stderr.on("data", (c) => (err += c));
     child.on("error", (e) => reject(new Error(`tar unavailable: ${e.message}`)));

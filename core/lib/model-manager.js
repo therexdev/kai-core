@@ -293,6 +293,7 @@ class ModelManager {
     fs.mkdirSync(this.modelsDir, { recursive: true });
     const controller = new AbortController();
     this._active = { alias: packageId, controller };
+    this._progress = { packageId, pct: 0, done: 0, total: pkg.sizeBytes || null };
     this.state.set("modelDownload", { packageId, startedAt: new Date().toISOString() });
 
     try {
@@ -309,10 +310,12 @@ class ModelManager {
           }
         },
       });
+      controller.signal.throwIfAborted();
       this.onEvent({ type: "model:ready", packageId, path: file });
       return file;
     } finally {
       this._active = null;
+      this._progress = null;
       this.state.set("modelDownload", null);
     }
   }
@@ -343,6 +346,7 @@ class ModelManager {
     fs.mkdirSync(this.modelsDir, { recursive: true });
     const controller = new AbortController();
     this._active = { alias: `${packageId}#mmproj`, controller };
+    this._progress = { packageId: `${packageId}#mmproj`, pct: 0, done: 0, total: mm.sizeBytes || null };
     try {
       await downloadFile(mm.url, file, {
         sha256: mm.sha256,
@@ -353,9 +357,11 @@ class ModelManager {
           this.onEvent({ type: "model:download", packageId: `${packageId}#mmproj`, pct, done, total });
         },
       });
+      controller.signal.throwIfAborted();
       return file;
     } finally {
       this._active = null;
+      this._progress = null;
     }
   }
 

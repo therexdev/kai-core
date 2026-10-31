@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
@@ -95,6 +95,7 @@
       "core/lib/koinos/wallet-nonce.js",
       "core/lib/legacy-kai-balance.js",
       "core/lib/local-chat-messages.js",
+      "core/lib/model-load-queue.js",
       "core/lib/model-manager.js",
       "core/lib/network-overview.js",
       "core/lib/plugins/download.js",

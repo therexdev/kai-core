@@ -8,6 +8,12 @@
       "package": "qwen2.5-1.5b-instruct-q4_k_m@1",
       "minRamGb": 3
     },
+    "lfm3-1.7b": {
+      "label": "Liquid LFM3 1.7B",
+      "blurb": "Fast, lightweight chat and structured tasks · 1.1 GB",
+      "package": "liquid-lfm3-1.7b-q4_k_m@1",
+      "minRamGb": 4
+    },
     "koinos-balanced": {
       "label": "Llama 3.2 3B",
       "blurb": "Llama 3.2 3B — noticeably smarter, still CPU-friendly · 2 GB",
@@ -265,6 +271,24 @@
       "creator": "DeepSeek (quantized by bartowski)",
       "contextSize": 4096,
       "runtime": "llamacpp"
+    },
+    "liquid-lfm3-1.7b-q4_k_m@1": {
+      "filename": "LFM3-1.7B-Q4_K_M.gguf",
+      "url": "https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/resolve/bad5729bba61d076fff20d2548e62526665af215/LFM3-1.7B-Q4_K_M.gguf",
+      "sha256": "3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4",
+      "sizeBytes": 1099627808,
+      "contextSize": 4096,
+      "runtime": "llamacpp",
+      "license": "LFM Open License v1.0",
+      "allowFallback": false,
+      "generation": {
+        "temperature": 0.1,
+        "topK": 50,
+        "repeatPenalty": 1.1,
+        "reasoning": "on",
+        "reasoningBudget": 0,
+        "reasoningFormat": "deepseek"
+      }
     }
   }
 }

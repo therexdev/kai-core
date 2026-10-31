@@ -57,6 +57,18 @@ jobs:
       - name: Styled dialog desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:dialogs
+      - name: Verify real LFM3 and existing Qwen inference through Core
+        timeout-minutes: 25
+        run: node scripts/foundation/models-runtime-smoke.js
+        env:
+          KAI_MODEL_SMOKE_OUTPUT: ${{ github.workspace }}/.smoke/model-runtime
+      - name: Preserve real model verification results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kai-model-runtime-${{ runner.os }}
+          path: .smoke/model-runtime/
+          if-no-files-found: warn
       - name: Build Foundation only (no feature engines or updater publication)
         run: npm run dist -- ${{ matrix.args }}
         env:
