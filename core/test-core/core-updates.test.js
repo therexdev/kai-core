@@ -113,6 +113,17 @@ test("signature checker failures distinguish blocked execution and timeout witho
     await assert.rejects(verifyWindowsInstaller(file, { systemRoot: "C:\\Windows", execFile(_exe, _args, _opts, done) { done(Object.assign(Error("failed"), failure), JSON.stringify(valid), ""); } }), expected);
   }
 });
+test("Windows signature checking excludes inherited PowerShell 7 module paths without changing the parent environment", async () => {
+  const file = "C:\\cache\\update.exe", record = { status: 0, signatureType: 1, path: file, subject: PUBLISHER, timestamp: "a".repeat(40) };
+  const env = { PSModulePath: "C:\\PowerShell\\7\\Modules", psmodulepath: "C:\\custom-modules", PsMoDuLePaTh: "C:\\other-modules", SystemRoot: "C:\\Windows", PATH: "C:\\Windows\\System32", TEMP: "C:\\Temp" };
+  const before = { ...env };
+  await verifyWindowsInstaller(file, { env, systemRoot: env.SystemRoot, execFile(_exe, _args, options, done) {
+    assert.deepEqual(options.env, { SystemRoot: env.SystemRoot, PATH: env.PATH, TEMP: env.TEMP });
+    assert.notEqual(options.env, env);
+    done(null, JSON.stringify(record), "");
+  } });
+  assert.deepEqual(env, before);
+});
 test("download hash, size and native signature are all required, including cached files", async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-core-update-")); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const metadata = assertUpdateInfo(info(), "0.8.0"), file = path.join(root, metadata.name), bytes = Buffer.from("fixture installer"); fs.writeFileSync(file, bytes);
