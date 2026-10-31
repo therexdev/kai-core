@@ -199,8 +199,8 @@ test("Earn's mounted page warms without navigation, pauses hidden, and purges da
  api.leave();now+=15000;for(const[id,t]of[...timers])if(t.at<=now&&timers.delete(id))t.fn();await flush();assert.equal(calls.length,4);
  document.hidden=true;documentEvents.get("visibilitychange")();assert.equal(timers.size,0);assert.equal(node("earn-wallet-kai").textContent,"125");
  document.hidden=false;documentEvents.get("visibilitychange")();await flush();assert.equal(calls.length,6);
- events.get("kai-core-privacy-changed")({detail:{mode:"local-only"}});assert.equal(node("earn-wallet-kai").textContent,"—");assert.equal(timers.size,0);
- api.enter();await flush();assert.equal(calls.length,6);assert.match(node("provider-detail").textContent,/paused in Local-Only/);
+ events.get("kai-core-privacy-changed")({detail:{mode:"local-only"}});assert.equal(node("earn-wallet-kai").textContent,"—");
+ api.enter();await flush();assert.equal(calls.length,8);assert.equal(node("earn-wallet-kai").textContent,"125","Public KAI wallet balances remain available in Local-Only");
  events.get("kai-core-privacy-changed")({detail:{mode:"network"}});await flush();assert.equal(node("earn-wallet-kai").textContent,"125");
  window.kaiCore.call=()=>new Promise(()=>{});events.get("kai-credit-identity-changed")();assert.equal(node("earn-wallet-kai").textContent,"—");
  document.hidden=true;documentEvents.get("visibilitychange")();

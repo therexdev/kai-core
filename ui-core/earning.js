@@ -224,7 +224,7 @@
       Object.assign(state, { info: null, status: null, draft: null, stale: false, error: "", busy: false, action: "", notice: "", rewards: null, rewardError: "", rewardLoading: false, legacy: null, legacyAt: 0, legacyError: "" });
       paint(); if (wasActive) enter();
     }
-    return { enter, leave, reset, pause(reason) { leave(); state.stale = true; state.error = reason; paint(); }, refresh: () => Promise.all([refreshProvider(), refreshRewards(), refreshLegacy()]), action, toggle, editSelection,
+    return { enter, leave, reset, refresh: () => Promise.all([refreshProvider(), refreshRewards(), refreshLegacy()]), action, toggle, editSelection,
       resetSelection() { if (!state.busy && validSelection(state.info?.selection)) { state.draft = clone(state.info.selection); state.notice = ""; paint(); } },
       applySelection() { if (state.draft) return action("models", clone(state.draft)); }, getState: () => state };
   }
@@ -331,22 +331,22 @@
     $("provider-wallet").addEventListener("click", () => navigate("wallet")); $("provider-open-models").addEventListener("click", () => navigate("models"));
     // Read-only monitoring stays warm across navigation. Hidden/tray windows
     // suspend polling, and privacy or identity changes clear retained figures.
-    let privacyMode = null, observed = false;
+    // Public wallet balances are independent of AI privacy. The native service
+    // still enforces network/provider policy for the other read-only requests.
+    let observed = false;
     const resume = () => {
-      if (privacyMode === "local-only") controller.pause("Network updates are paused in Local-Only. Choose Local-First or Network in Settings.");
-      else if (observed && !document.hidden) controller.enter();
+      if (observed && !document.hidden) controller.enter();
     };
     const api = {
       enter() { resume(); }, leave() {}, refresh: controller.refresh,
       observe(_wallet, mode) {
         if (!["local-only", "local-first", "network"].includes(mode)) return;
-        observed = true; privacyMode = mode;
+        observed = true;
         resume();
       }
     };
     document.addEventListener("visibilitychange", () => { if (document.hidden) controller.leave(); else resume(); });
-    root.addEventListener("kai-core-privacy-changed", event => {
-      privacyMode = event.detail?.mode ?? event.detail?.privacyMode ?? event.detail;
+    root.addEventListener("kai-core-privacy-changed", () => {
       controller.leave(); controller.reset(); resume();
     });
     for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) root.addEventListener(name, () => {
