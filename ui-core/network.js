@@ -21,9 +21,14 @@
   }
   function modelName(model) {
     const id = typeof model === "string" ? model : model.id;
-    if (typeof model === "object" && model.name) return model.name;
-    const known = { "koinos-fast": "Koinos Fast", "koinos-balanced": "Koinos Balanced", "koinos-smart": "Koinos Smart" };
-    return known[id] || id.replace(/[_:/-]+/g, " ").replace(/\b[a-z]/g, c => c.toUpperCase());
+    const known = { "koinos-fast": "Qwen 2.5 1.5B", "koinos-balanced": "Llama 3.2 3B", "koinos-smart": "Qwen 2.5 7B" };
+    const ids = id.split(",");
+    return ids.map(value => {
+      const alias = value.trim().replace(/^koinos-network:/, "");
+      if (Object.hasOwn(known, alias)) return known[alias];
+      if (ids.length === 1 && typeof model === "object" && model.name) return model.name;
+      return alias.replace(/[_:/-]+/g, " ").replace(/\b[a-z]/g, c => c.toUpperCase());
+    }).join(", ");
   }
   if (typeof module === "object") module.exports = { validateNetwork, modelName };
   if (!root || typeof document !== "object") return;

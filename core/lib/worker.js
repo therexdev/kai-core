@@ -305,7 +305,7 @@ class Worker {
         const short = this.modelGate.filter((g) => g.reasonCode === "too-big").map((g) => `${g.alias} (${g.reason})`).join("; ");
         this.onEvent({
           type: "worker:no-servable-models",
-          message: `No model on this machine fits its memory, so nothing is offered to the network: ${short}. Download a smaller model (like Koinos Fast) to serve and earn.`,
+          message: `No model on this machine fits its memory, so nothing is offered to the network: ${short}. Download a smaller model (like Qwen 2.5 1.5B) to serve and earn.`,
         });
       }
       /*

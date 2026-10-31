@@ -129,13 +129,10 @@ test("a package without a pinned sha256 refuses to download (fail closed)", asyn
 });
 
 /*
- * Every alias in the catalog names the model it actually is — except the
- * three Koinos-branded ones, which for a while did not. The cost of that
- * showed up as the owner asking "do we even have Qwen 2.5 7B?" about a model
- * that had been shipping as Koinos Smart the whole time. If the person who
- * built it cannot tell, nobody choosing what to download can either.
+ * Display names identify the actual models. Stable aliases remain unchanged
+ * so saved selections, installed packages and network requests still resolve.
  */
-test("the Koinos-branded aliases say which model they are", () => {
+test("the stable Koinos aliases display their actual model names", () => {
   const catalog = require("../models/catalog.json");
   const expected = {
     "koinos-fast": /Qwen 2\.5 1\.5B/,
@@ -145,6 +142,7 @@ test("the Koinos-branded aliases say which model they are", () => {
   for (const [alias, namePattern] of Object.entries(expected)) {
     const entry = catalog.aliases[alias];
     assert.ok(entry, `${alias} is missing from the catalog`);
+    assert.match(entry.label, namePattern);
     assert.match(entry.blurb, namePattern,
       `${alias} ("${entry.label}") must name the model it runs, or it cannot be found by that name`);
   }

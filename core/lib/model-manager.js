@@ -24,7 +24,7 @@ function modelDiskBytes(files) {
 
 /*
  * Model manager (spec §6/§27): capability aliases over versioned, immutable,
- * hash-verified model packages. Consumers see "Koinos Fast", never a
+ * hash-verified model packages. Consumers see model names, never a
  * quantization string. Downloads are resumable (Range + .part file) and a
  * package is only accepted when its SHA-256 matches the catalog — a package
  * whose artifact changed is a different package.

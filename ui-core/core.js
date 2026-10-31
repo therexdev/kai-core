@@ -87,6 +87,10 @@ bridge?.onOpenView?.(target => {
   if (target?.section === "credit-account") window.KaiCoreAccount?.openCredit();
 });
 function html(id, value) { if ($(id).innerHTML !== value) $(id).innerHTML = value; }
+function modelDisplayName(value) {
+  const alias = String(value ?? "").replace(/^koinos-network:/, "");
+  return snapshot?.models?.find(model => model.alias === alias)?.label || alias;
+}
 function modelDescription(model) {
   // Catalog blurbs already contain size; keep their useful model/RAM guidance
   // while the footer shows the current, separately labelled file size.
@@ -131,15 +135,16 @@ async function refresh() {
     const modelBusy = !!s.importing || s.ensure?.state === "working";
     const modelError = !modelBusy && (s.ensure?.state === "error" || !!s.importError);
     notices["model-message"].show(s.importing ? `Importing model · ${Math.round(s.importing.pct || 0)}%`
-      : s.ensure?.state === "working" ? `Preparing ${s.ensure.alias}…`
+      : s.ensure?.state === "working" ? `Preparing ${modelDisplayName(s.ensure.alias)}…`
       : s.ensure?.state === "error" ? s.ensure.error || "The model could not be loaded. Try another model or retry."
       : s.importError || "", { error: modelError, dismissible: !modelBusy });
-    text("download", s.download ? `Downloading · ${Math.round(s.download.pct || 0)}%` : s.runtime.activeAlias ? `Loaded: ${s.runtime.activeAlias}` : "");
+    text("download", s.download ? `Downloading · ${Math.round(s.download.pct || 0)}%` : s.runtime.activeAlias ? `Loaded: ${modelDisplayName(s.runtime.activeAlias)}` : "");
     renderModels(s.models);
     renderInstalledPlugins();
     apps?.update(s);
     if (activeAppId && !s.plugins.some(plugin => plugin.id === activeAppId && plugin.enabled)) showPage("plugins");
     window.KaiCoreChat?.update(s);
+    if (page === "credits") renderCredits();
     renderCatalog();
     if (noticeSource === "refresh") globalNotice.clear();
   } catch (e) { notify(e.message, true, { background: true }); } finally { refreshing = false; }
@@ -331,7 +336,7 @@ function renderCredits() {
   const filter = $("credit-filter").value || "all";
   const when = value => { const stamp = Number(value); return Number.isFinite(stamp) && stamp > 0 && Number.isFinite(new Date(stamp).getTime()) ? stamp : 0; };
   const rows = [
-    ...(Array.isArray(s.usage) ? s.usage : []).slice(0, 500).filter(u => u && typeof u === "object").map(u => ({ kind: "usage", title: `Chat${u.model ? " · " + String(u.model).slice(0, 120) : ""}`, at: when(u.at), status: "Delivered", amount: creditAmount(u.credits), prefix: "−" })),
+    ...(Array.isArray(s.usage) ? s.usage : []).slice(0, 500).filter(u => u && typeof u === "object").map(u => ({ kind: "usage", title: `Chat${u.model ? " · " + modelDisplayName(u.model).slice(0, 120) : ""}`, at: when(u.at), status: "Delivered", amount: creditAmount(u.credits), prefix: "−" })),
     ...(Array.isArray(s.purchases) ? s.purchases : []).slice(0, 500).filter(u => u && typeof u === "object").map(u => {
       const confirmed = u.state === "confirmed", cancelled = !confirmed && (u.state === "cancelled" || cancelledPurchases.has(u.id));
       return { kind: "purchase", title: "Purchased credits", at: when(u.confirmedAt || u.createdAt), status: confirmed ? "Added to balance" : cancelled ? "Cancelled · no purchase" : String(u.state || "Pending").replaceAll("_", " ").slice(0, 100), amount: confirmed ? creditAmount(u.credits ?? u.amount) : cancelled ? "0" : "Pending", prefix: confirmed ? "+" : "" };

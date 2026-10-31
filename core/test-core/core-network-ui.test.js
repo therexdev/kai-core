@@ -80,6 +80,25 @@ test("fresh credit-backed models open chat with the exact model ID and disabled 
   assert.equal(f.dispatched.filter(event => event.type === "kai-core-use-network-model").length, 1);
 });
 
+test("actual model names replace stale aliases in models, provider lists and activity without changing selection IDs", async () => {
+  const models = [
+    { ...overview().models[0], name: "Koinos Fast" },
+    { ...overview().models[0], id: "koinos-balanced", name: "Koinos Balanced" },
+    { ...overview().models[0], id: "koinos-network:koinos-smart", name: "Koinos Smart" },
+  ];
+  const f = fixture(overview({ models,
+    providers: [{ id: "fixture-provider", model: "koinos-fast, koinos-balanced, koinos-network:koinos-smart", state: "ready" }],
+    activity: [{ model: "koinos-network:koinos-fast", at: startTime - 5000 }],
+  }));
+  await f.api.enter();
+  for (const name of ["Qwen 2.5 1.5B", "Llama 3.2 3B", "Qwen 2.5 7B"]) assert.ok(f.$("models").innerHTML.includes(`<strong>${name}</strong>`));
+  assert.match(f.$("providers").innerHTML, /Qwen 2\.5 1\.5B, Llama 3\.2 3B, Qwen 2\.5 7B/);
+  assert.match(f.$("activity").innerHTML, /Reply delivered · Qwen 2\.5 1\.5B/);
+  for (const section of ["models", "providers", "activity"]) assert.doesNotMatch(f.$(section).innerHTML, /Koinos (?:Fast|Balanced|Smart)/);
+  for (const model of models) f.clickModel(model.id);
+  assert.deepEqual(f.dispatched.filter(event => event.type === "kai-core-use-network-model").map(event => event.detail.model), models.map(model => model.id));
+});
+
 test("expiry removes ready counts and disables model use even while the next read is pending", async () => {
   const f = fixture(); await f.api.enter();
   f.setResponse(() => new Promise(() => {})); await f.advance(10000);
@@ -102,7 +121,7 @@ test("Local-Only clears private outputs and prevents new reads or late responses
   let resolve; f.setResponse(() => new Promise(done => { resolve = done; })); const pending = f.api.refresh();
   f.emit("kai-core-privacy-changed", { mode: "local-only" });
   assert.equal(f.$("recent").hidden, true); assert.doesNotMatch(f.$("providers").innerHTML, /fixture-provider/);
-  assert.doesNotMatch(f.$("activity").innerHTML, /Koinos Fast/); assert.match(f.$("time").textContent, /Local-Only/);
+  assert.doesNotMatch(f.$("activity").innerHTML, /Qwen 2\.5 1\.5B/); assert.match(f.$("time").textContent, /Local-Only/);
   const count = f.calls.length; await f.api.refresh(); await f.advance(30000); assert.equal(f.calls.length, count);
   resolve(overview()); await pending; assert.match(f.$("time").textContent, /Local-Only/); assert.equal(f.$("provider-count").textContent, "—");
   f.setResponse(publicOverview({ observedAt: startTime + 30000, validUntil: startTime + 45000 }));
@@ -112,7 +131,7 @@ test("Local-Only clears private outputs and prevents new reads or late responses
 test("identity changes purge old private activity before a replacement read completes", async () => {
   const f = fixture(); await f.api.enter();
   f.setResponse(() => new Promise(() => {})); f.emit("kai-credit-identity-changed");
-  assert.doesNotMatch(f.$("providers").innerHTML, /fixture-provider/); assert.doesNotMatch(f.$("activity").innerHTML, /Koinos Fast/);
+  assert.doesNotMatch(f.$("providers").innerHTML, /fixture-provider/); assert.doesNotMatch(f.$("activity").innerHTML, /Qwen 2\.5 1\.5B/);
   assert.equal(f.$("completed").hidden, true); assert.equal(f.$("model-count").textContent, "—");
 });
 
@@ -141,5 +160,15 @@ test("snapshot validation rejects invented freshness and malformed availability"
   }
   assert.throws(() => validateNetwork(publicOverview({ models: [{ ...publicOverview().models[0], selectable: true }] }), startTime), /verified/);
   assert.throws(() => validateNetwork(publicOverview({ activity: [{ model: "private", at: startTime }] }), startTime), /verified/);
-  assert.equal(modelName("koinos-balanced"), "Koinos Balanced");
+});
+
+test("display names normalize known aliases while preserving names of unrelated models", () => {
+  for (const [id, name] of [["koinos-fast", "Qwen 2.5 1.5B"], ["koinos-balanced", "Llama 3.2 3B"], ["koinos-smart", "Qwen 2.5 7B"]]) {
+    assert.equal(modelName(id), name);
+    assert.equal(modelName(`koinos-network:${id}`), name);
+    assert.equal(modelName({ id, name: "Old display name" }), name);
+  }
+  assert.equal(modelName(" koinos-fast,koinos-network:koinos-balanced, koinos-smart "), "Qwen 2.5 1.5B, Llama 3.2 3B, Qwen 2.5 7B");
+  assert.equal(modelName({ id: "custom-model", name: "My custom model" }), "My custom model");
+  assert.equal(modelName("qwen2.5:7b"), "Qwen2.5 7b");
 });

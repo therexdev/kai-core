@@ -1,7 +1,13 @@
-# KAI Core Beta 0.7.5
+# KAI Core Beta 0.7.6
 
-Model library cards now show a short description and model size in GB. Installed models show their current size on disk; models not yet installed show the expected download size. Vision projector files and partial downloads are included in local disk usage, and imported models are measured at their existing file location. Unknown sizes are labelled rather than displayed as zero.
+The three Koinos-branded model labels now show their actual model names:
 
-The model cards have tighter spacing and smaller controls while keeping two columns, including at the minimum supported window width. Descriptions remain readable and wrap as needed. Existing download, import and load actions are unchanged.
+- Koinos Fast → Qwen 2.5 1.5B
+- Koinos Balanced → Llama 3.2 3B
+- Koinos Smart → Qwen 2.5 7B
 
-This is a Core update. Models, wallets, plugins and their saved-data locations stay unchanged, and no plugin updates are required. Core updates remain manual.
+Model names are consistent across the model library, chat, earning, credit pricing and activity, network status, and model preparation messages. Compact two-column model cards, disk sizes and descriptions remain available.
+
+Existing model files, saved selections, network model identifiers and package hashes stay unchanged. No model downloads or data migration are required for these naming changes. This release does not add Liquid LFM3 or change the inference engines.
+
+Core updates continue to use manual installers. Plugin updates are managed separately in Plugins.

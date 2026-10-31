@@ -5,6 +5,7 @@
 const P = require("../core/lib/koin-network/job-protocol");
 const { utils } = require("koilib");
 const { trustedMainDocument } = require("./window-security");
+const modelAliases = require("../core/models/catalog.json").aliases;
 
 function atoms(value) {
   if (typeof value !== "string" || !/^(0|[1-9]\d{0,19})$/.test(value) || BigInt(value) > (1n << 64n) - 1n) throw Error("Invalid atom amount");
@@ -62,7 +63,7 @@ function createShadowReview({ dialog, clock = Date.now, tr = text => text }) {
         const detail = [
           tr(example ? "Example prices only. No KOIN will be spent." : "Simulation only. No KOIN will be spent."),
           "",
-          line("Model", q.tariff.model),
+          line("Model", modelAliases[q.tariff.model]?.label || q.tariff.model),
           line("Tariff version", q.tariff.version),
           line("Input tokens", q.inputTokens),
           line("Maximum output tokens", q.maxOutput),

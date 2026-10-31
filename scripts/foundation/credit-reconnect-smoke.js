@@ -76,7 +76,7 @@ async function main() {
     await app.evaluate(() => global.__creditReconnectFixture.reviewResponse = 1); await page.locator("#credit-connection-action").click();
     await until(async () => await page.locator("#credit-connection").isHidden(), "Verified credit connection did not complete");
     await until(async () => /1,990 purchased/.test(await page.locator("#credit-breakdown").textContent()), "Purchased balance did not restore");
-    assert.match(await page.locator("#credit-activity").textContent(), /Purchased credits/); assert.match(await page.locator("#credit-activity").textContent(), /koinos-fast/); await capture("restored-credits-and-activity");
+    assert.match(await page.locator("#credit-activity").textContent(), /Purchased credits/); assert.match(await page.locator("#credit-activity").textContent(), /Qwen 2\.5 1\.5B/); await capture("restored-credits-and-activity");
     const fixtureState = await app.evaluate(() => global.__creditReconnectFixture); assert.equal(fixtureState.proofCount, 1); assert.ok(!fixtureState.requests.some(route => /quote|purchase$/.test(route)));
     report.checks.push("Accepted wallet proof restores purchased balance and both remote activity types without purchase");
     assert.deepEqual(fs.readFileSync(wallet.keystorePath), originalWallet); assert.deepEqual(errors, []); assert.deepEqual((await app.evaluate(() => global.__foundationSmoke)).errors, []);
