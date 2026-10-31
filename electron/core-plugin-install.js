@@ -52,7 +52,7 @@ function createPluginInstallReview({ electron, getWindow, isClosing, isTrustedPa
     const window = new BrowserWindow({ parent, modal: true, show: false, width, height,
       minWidth: Math.min(420, width), minHeight: Math.min(440, height), frame: false,
       minimizable: false, maximizable: false, fullscreenable: false, resizable: true,
-      title: installedVersion ? "Update plugin · KAI Core" : "Install plugin · KAI Core", backgroundColor: "#f4f7fd",
+      title: installedVersion ? "Update plugin · KAI Core Beta" : "Install plugin · KAI Core Beta", backgroundColor: "#f4f7fd",
       webPreferences: { preload: path.join(__dirname, "core-plugin-install-preload.js"), contextIsolation: true,
         sandbox: true, nodeIntegration: false, webSecurity: true, session: isolated, spellcheck: false } });
     window.setMenu(null);

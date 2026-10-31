@@ -28,15 +28,15 @@ function createCoreTray({ app, win, Tray, Menu, nativeImage, iconDirectory, isQu
     const unpacked = iconPath.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
     if (unpacked !== iconPath && fs.existsSync(unpacked)) iconPath = unpacked;
     let image = nativeImage.createFromPath(iconPath);
-    if (image.isEmpty()) throw Error("KAI Core tray icon is unavailable");
+    if (image.isEmpty()) throw Error("KAI Core Beta tray icon is unavailable");
     if (platform !== "win32") image = image.resize({ width: 22, height: 22 });
     if (platform === "darwin") image.setTemplateImage(true);
     tray = new Tray(image);
-    tray.setToolTip("KAI Core");
+    tray.setToolTip("KAI Core Beta");
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: "Open KAI Core", click: show },
+      { label: "Open KAI Core Beta", click: show },
       { type: "separator" },
-      { label: "Quit KAI Core", click: quit },
+      { label: "Quit KAI Core Beta", click: quit },
     ]));
     tray.on("click", show); tray.on("double-click", show);
   } catch (error) {

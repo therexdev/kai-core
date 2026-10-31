@@ -10,7 +10,7 @@ function channelConfig(channel = process.env.KAI_CHANNEL || pkg.kaiChannel || "s
   const isTest = channel === "test";
   return {
     channel, isTest, isCore: channel === "core",
-    productName: channel === "core" ? "KAI Core" : isTest ? "Koinos AI Test" : "Koinos AI",
+    productName: channel === "core" ? "KAI Core Beta" : isTest ? "Koinos AI Test" : "Koinos AI",
     appId: channel === "core" ? "io.koinosai.core" : isTest ? "io.koinosai.desktop.test" : "io.koinosai.desktop",
     // Test exercises the owner's existing live node and profile.
     port: 41100,
@@ -21,9 +21,12 @@ function channelConfig(channel = process.env.KAI_CHANNEL || pkg.kaiChannel || "s
 
 function configureDesktop(app, config) {
   if (config.isCore) {
+    // Product branding may change; OS credentials, singleton and saved data must
+    // retain the original Core identity across Beta and later releases.
     app.setName("KAI Core");
     const profile = path.join(app.getPath("appData"), "KAI Core");
     app.setPath("userData", profile); app.setPath("sessionData", profile);
+    app.setAboutPanelOptions?.({ applicationName: config.productName });
   } else if (config.isTest) {
     // Keep the live OS credential identity and singleton/profile path. The
     // installer, window/tray label and updater still use Test's own identity.

@@ -81,7 +81,7 @@ async function main() {
     report.checks.push("Accepted wallet proof restores purchased balance and both remote activity types without purchase");
     assert.deepEqual(fs.readFileSync(wallet.keystorePath), originalWallet); assert.deepEqual(errors, []); assert.deepEqual((await app.evaluate(() => global.__foundationSmoke)).errors, []);
     const process = app.process(), ended = new Promise((resolve, reject) => { const timer = setTimeout(() => reject(Error("Core quit timed out")), 30000); process.once("exit", code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error("Core exit " + code)); }); });
-    await app.evaluate(() => setTimeout(() => global.__foundationTrayMenu.find(row => row.label === "Quit KAI Core").click(), 0)); await ended; app = null;
+    await app.evaluate(() => setTimeout(() => global.__foundationTrayMenu.find(row => row.label === "Quit KAI Core Beta").click(), 0)); await ended; app = null;
     report.checks.push("Wallet file is unchanged and Core exits without renderer/native errors"); report.status = "passed";
   } catch (error) { report.status = "failed"; report.error = error.stack; if (page) await page.screenshot({ path: path.join(output, "failure.png") }).catch(() => {}); throw error; }
   finally { if (app) await app.close().catch(() => {}); report.logs = logs; report.errors = errors; fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(report, null, 2)); fs.rmSync(temp, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); console.log("Report", path.join(output, "report.json")); }

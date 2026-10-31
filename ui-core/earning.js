@@ -317,7 +317,7 @@
     }
     const controller = createController({ credit: (action, input) => bridge?.credit ? bridge.credit(action, input) : Promise.reject(Error("Open the desktop app to check earning setup.")),
       readLegacy: async () => {
-        if (!bridge?.call) throw Error("Open KAI Core to read your Testnet KAI balance.");
+        if (!bridge?.call) throw Error("Open KAI Core Beta to read your Testnet KAI balance.");
         return bridge.call("earn.legacyBalance");
       }, render, summaryApi: root.KaiRewardSummary, navigate });
     $("earning-toggle").addEventListener("click", () => void controller.toggle());

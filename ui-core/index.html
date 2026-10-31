@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
-  <title>KAI Core</title>
+  <title>KAI Core Beta</title>
   <link rel="stylesheet" href="core.css"><link rel="stylesheet" href="account.css">
   <link rel="stylesheet" href="wallet.css">
   <link rel="stylesheet" href="earning.css">
@@ -32,7 +32,7 @@
         <p id="apps-order-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
       </section>
     </nav>
-    <div class="sidebar-status"><span class="dot"></span><span>KAI Core</span></div>
+    <div class="sidebar-status"><span class="dot"></span><span>KAI Core Beta</span></div>
     <div class="rail-icons" aria-label="App controls">
       <button class="rail-icon" data-page="settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3-.6 2.3-2 .9-2.1-.7-2 3.5L4 10.7v2.6L2.3 15l2 3.5 2.1-.7 2 .9L9 21h4l.6-2.3 2-.9 2.1.7 2-3.5-1.7-1.7v-2.6L19.7 9l-2-3.5-2.1.7-2-.9L13 3Z"/></svg><span>Settings</span></button>
       <button class="rail-icon" data-page="network" aria-label="Network" title="Network"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><circle cx="4.8" cy="18" r="2.2"/><circle cx="19.2" cy="18" r="2.2"/><path d="M12 6.7v4.8M12 11.5 6.3 16.3M12 11.5l5.7 4.8"/></svg><span>Network</span></button>
@@ -167,7 +167,7 @@
         </article>
         <article><h2>Closing the window</h2><p id="closing-window-detail">Checking system tray availability…</p></article>
         <article><h2>Application updates</h2><p>Core updates are installed manually. Download the latest release and run its installer.</p><button id="check-updates">Open downloads</button><div id="update-notice" class="dismissible-notice inline-notice" hidden><p id="update-state" role="status" aria-atomic="true"></p><button id="update-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div></article>
-        <article id="alpha-migration-settings"><h2>Migrate from Koinos AI Alpha</h2><p>Bring your downloaded models and encrypted wallet into KAI Core. Choose what to migrate, with an option to remove old model files after each verified transfer. Plugin data and connected accounts are not included.</p><button id="alpha-migration-open" type="button">Migrate</button><p id="alpha-migration-last-result" class="muted" role="status" hidden></p></article>
+        <article id="alpha-migration-settings"><h2>Migrate from Koinos AI Alpha</h2><p>Bring your downloaded models and encrypted wallet into KAI Core Beta. Choose what to migrate, with an option to remove old model files after each verified transfer. Plugin data and connected accounts are not included.</p><button id="alpha-migration-open" type="button">Migrate</button><p id="alpha-migration-last-result" class="muted" role="status" hidden></p></article>
       </section>
     </div>
   </main>
@@ -175,7 +175,7 @@
     <form id="alpha-migration-form">
       <header class="alpha-migration-header"><div><span class="alpha-migration-eyebrow">BRING YOUR DATA WITH YOU</span><h2 id="alpha-migration-title">Migrate from Koinos AI Alpha</h2></div><button id="alpha-migration-close" class="alpha-migration-close" type="button" aria-label="Close migration" title="Close"><span aria-hidden="true">×</span></button></header>
       <div class="alpha-migration-body">
-        <p id="alpha-migration-description">Choose what to migrate into KAI Core. Close Koinos AI Alpha, including its tray icon, before migrating.</p>
+        <p id="alpha-migration-description">Choose what to migrate into KAI Core Beta. Close Koinos AI Alpha, including its tray icon, before migrating.</p>
         <div class="alpha-migration-source"><div class="alpha-migration-source-heading"><span>Alpha profile</span><button id="alpha-migration-browse" class="text-button" type="button">Choose folder</button></div><code id="alpha-migration-source-path">Looking for your Alpha profile…</code></div>
         <fieldset id="alpha-migration-choices" class="alpha-migration-options"><legend>What would you like to migrate?</legend>
           <label class="alpha-migration-option" for="alpha-migration-models"><input id="alpha-migration-models" type="checkbox" aria-describedby="alpha-migration-models-detail alpha-migration-models-size"><span><strong>Models</strong><span id="alpha-migration-models-detail" class="alpha-migration-option-detail">Checking downloaded models…</span><span id="alpha-migration-models-size" class="alpha-migration-option-detail" hidden></span></span></label>

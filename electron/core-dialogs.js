@@ -13,7 +13,7 @@ function normalize(options) {
   const type = options.type ?? "none";
   if (!["none", "info", "error", "question", "warning"].includes(type)) throw Error("Invalid dialog type");
   if (options.checkboxChecked !== undefined && typeof options.checkboxChecked !== "boolean") throw Error("Invalid dialog checkbox");
-  return Object.freeze({ type, title: text(options.title, "KAI Core", 2048), message: text(options.message, "", 32768), detail: text(options.detail, "", 262144),
+  return Object.freeze({ type, title: text(options.title, "KAI Core Beta", 2048), message: text(options.message, "", 32768), detail: text(options.detail, "", 262144),
     buttons: Object.freeze([...buttons]), defaultId, cancelId, noLink: options.noLink !== false,
     checkboxLabel: text(options.checkboxLabel, "", 2048), checkboxChecked: !!options.checkboxChecked });
 }
@@ -62,7 +62,7 @@ function createCoreDialogs({ electron, getWindow = () => null, isClosing = () =>
       const width = Math.min(620, area.width), height = Math.min(record.details.detail.length > 1200 ? 660 : record.details.detail || record.details.checkboxLabel ? 490 : 340, area.height);
       const window = record.window = new BrowserWindow({ ...(record.parent ? { parent: record.parent, modal: true } : {}), show: false, frame: false,
         width, height, minWidth: Math.min(360, width), minHeight: Math.min(280, height), resizable: true, minimizable: false, maximizable: false, fullscreenable: false,
-        title: record.details.title || "KAI Core", backgroundColor: "#f4f7fd", webPreferences: { preload: path.join(__dirname, "core-dialogs-preload.js"),
+        title: record.details.title || "KAI Core Beta", backgroundColor: "#f4f7fd", webPreferences: { preload: path.join(__dirname, "core-dialogs-preload.js"),
           sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, webviewTag: false, session: isolated, spellcheck: false } });
       window.setMenu(null); window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       const cancel = () => record.finish();

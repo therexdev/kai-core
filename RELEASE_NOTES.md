@@ -1,4 +1,6 @@
-# KAI Core 0.7.4
+# KAI Core Beta 0.7.4
+
+This is the official KAI Core Beta release. The desktop app, shortcuts, tray and downloads use the KAI Core Beta name. Existing Core installations continue using the same app identity and saved-data locations; no new profile, wallet, model folder or plugin-data folder is created by this name change.
 
 Installed plugins and marketplace cards have a more readable responsive layout, with room for titles and complete descriptions, clear status badges, and consistent action placement. Catalog-listed plugins show their GitHub repository owner and a small accessible GitHub link. Links open through Core's reviewed external-browser flow. Installed attribution requires the same plugin ID and publisher fingerprint; unlisted packages do not receive a guessed developer identity.
 

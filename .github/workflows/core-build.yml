@@ -1,4 +1,4 @@
-name: Foundation preview installers
+name: KAI Core Beta installers
 on:
   push:
     branches: [main, foundation-v1]
@@ -98,4 +98,4 @@ jobs:
             echo "Version $tag already exists; refusing to replace immutable installers."
             exit 1
           fi
-          gh release create "$tag" "${assets[@]}" --target "$GITHUB_SHA" --title "KAI Foundation $version" --notes-file RELEASE_NOTES.md
+          gh release create "$tag" "${assets[@]}" --target "$GITHUB_SHA" --title "KAI Core Beta $version" --notes-file RELEASE_NOTES.md

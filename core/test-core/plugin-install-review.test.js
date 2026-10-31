@@ -62,7 +62,7 @@ test("review exposes an immutable metadata snapshot and approves only after expl
   assert.equal(Object.hasOwn(details, "package"), false); assert.equal(Object.isFrozen(details), true); assert.equal(Object.isFrozen(details.permissions), true);
   pkg.manifest.name = "Changed later"; pkg.manifest.permissions.push("inference.local");
   assert.equal(details.name, "Notes <script>bad()</script>"); assert.deepEqual(details.permissions, ["models.read", "storage.write"]);
-  assert.equal(window.options.title, "Update plugin · KAI Core");
+  assert.equal(window.options.title, "Update plugin · KAI Core Beta");
   assert.equal(f.call("decide", window, "approve"), true); assert.equal(await pending, true);
   assert.equal(window.destroyed, true); assert.equal(f.sessions[0].clearCount, 1);
   assert.throws(() => f.call("decide", window, "approve"), /access denied/);

@@ -1,9 +1,9 @@
 {
   "name": "kai-core-desktop",
-  "productName": "KAI Core",
+  "productName": "KAI Core Beta",
   "version": "0.7.4",
   "private": true,
-  "description": "KAI Foundation: a documented host for independent plugins",
+  "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
   "author": "therexdev",
   "repository": {
@@ -37,7 +37,7 @@
   "main": "electron/core-main.js",
   "build": {
     "appId": "io.koinosai.core",
-    "productName": "KAI Core",
+    "productName": "KAI Core Beta",
     "directories": {
       "output": "dist"
     },
@@ -191,13 +191,16 @@
         "nsis",
         "portable"
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "executableName": "KAI Core"
     },
     "nsis": {
       "oneClick": true,
       "perMachine": false,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "KAI-Core-Setup-${version}-${arch}.${ext}"
+      "artifactName": "KAI-Core-Beta-Setup-${version}-${arch}.${ext}",
+      "shortcutName": "KAI Core Beta",
+      "uninstallDisplayName": "KAI Core Beta"
     },
     "mac": {
       "target": [
@@ -210,7 +213,7 @@
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
-      "artifactName": "KAI-Core-${version}-${os}-${arch}.${ext}",
+      "artifactName": "KAI-Core-Beta-${version}-${os}-${arch}.${ext}",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Koinos AI uses the microphone when you start voice input or enable Hey KAI listening.",
         "NSCameraUsageDescription": "Koinos AI uses the camera only while you explicitly enable Camera in KAI Eyes."
@@ -225,7 +228,7 @@
       "executableName": "kai-core",
       "desktop": {
         "entry": {
-          "Name": "KAI Core",
+          "Name": "KAI Core Beta",
           "StartupWMClass": "kai-core"
         }
       }
@@ -238,9 +241,9 @@
         "releaseType": "draft"
       }
     ],
-    "artifactName": "KAI-Core-${version}-${os}-${arch}.${ext}",
+    "artifactName": "KAI-Core-Beta-${version}-${os}-${arch}.${ext}",
     "portable": {
-      "artifactName": "KAI-Core-Portable-${version}-${arch}.${ext}"
+      "artifactName": "KAI-Core-Beta-Portable-${version}-${arch}.${ext}"
     }
   },
   "dependencies": {

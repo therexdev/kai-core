@@ -37,10 +37,10 @@ app.on("window-all-closed", () => app.quit());
 app.on("will-quit", () => desktopTray?.dispose());
 if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => dialog.showMessageBox({ type: "info", title: "Close the other KAI app first", message: "Another KAI application is already running.",
-    detail: "KAI Core is already running. Open it from its tray icon.", buttons: ["OK"] })).finally(() => app.quit());
+    detail: "KAI Core Beta is already running. Open it from its tray icon.", buttons: ["OK"] })).finally(() => app.quit());
 } else {
   app.on("second-instance", () => desktopTray?.show());
-  app.whenReady().then(start).catch(async error => { if (!shuttingDown) await dialog.showErrorBox("KAI Core could not start", error.message); shuttingDown = true; await stop().catch(() => {}); shutdownComplete = true; app.quit(); });
+  app.whenReady().then(start).catch(async error => { if (!shuttingDown) await dialog.showErrorBox("KAI Core Beta could not start", error.message); shuttingDown = true; await stop().catch(() => {}); shutdownComplete = true; app.quit(); });
 }
 async function start() {
   const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "foundation-v1");
@@ -53,7 +53,7 @@ async function start() {
   core.gateway.staticAssets.set("/reward-summary.js", path.join(__dirname, "../ui-core/reward-summary.js"));
   const port = await core.start(), origin = `http://127.0.0.1:${port}`;
   if (shuttingDown) return;
-  win = new BrowserWindow({ width: 1200, height: 820, minWidth: 800, minHeight: 600, title: "KAI Core", backgroundColor: "#f4f7fd", autoHideMenuBar: true,
+  win = new BrowserWindow({ width: 1200, height: 820, minWidth: 800, minHeight: 600, title: release.productName, backgroundColor: "#f4f7fd", autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, "core-preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   desktopTray = require("./core-tray").createCoreTray({ app, win, Tray: electron.Tray, Menu: electron.Menu, nativeImage: electron.nativeImage,
     iconDirectory: path.join(__dirname, "../build"), isQuitting: () => shuttingDown });
@@ -119,7 +119,7 @@ async function start() {
     switch (method) {
       case "dialog.confirm": case "dialog.alert": {
         const frame = event.senderFrame;
-        return require("./core-renderer-dialogs").showRendererDialog({ dialog, parent: win, name: "KAI Core", kind: method.slice(7), input,
+        return require("./core-renderer-dialogs").showRendererDialog({ dialog, parent: win, name: release.productName, kind: method.slice(7), input,
           reviewable: () => !shuttingDown && win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && trustedMainDocument({ sender: event.sender, senderFrame: frame }, win, origin) });
       }
       case "migration.scan": return alphaMigration.scan();

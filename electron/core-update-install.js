@@ -7,7 +7,7 @@ function installAndQuit({ updater, app, dialog }) {
   const failure = async () => {
     if (failed) return;
     failed = true;
-    try { await dialog.showErrorBox("KAI Core update could not start", "The installer could not start. KAI Core will close so it does not keep your profile locked. Open it again or install the new version using the manual download."); }
+    try { await dialog.showErrorBox("KAI Core Beta update could not start", "The installer could not start. KAI Core Beta will close so it does not keep your profile locked. Open it again or install the new version using the manual download."); }
     catch { /* Failure to display a notice must still release the stopped app. */ }
     finally { app.quit(); }
   };

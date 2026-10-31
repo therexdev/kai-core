@@ -28,6 +28,22 @@ async function main() {
   const capture = async (dialog, name) => { await evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows().find(row => /\/dialog\.html$/.test(row.webContents.getURL())); window?.setContentSize(620, 540); return true; }); const file = path.join(output, name + ".png"); await dialog.screenshot({ path: file }); report.screenshots.push(file); };
   const pluginCall = (name, expression) => pluginEval(`if(window.testCase!==${JSON.stringify(name)}){window.testCase=${JSON.stringify(name)};window.testDone=false;window.testValue=null;Promise.resolve(${expression}).then(value=>{window.testValue=value??null;window.testDone=true;},error=>{window.testError=String(error);window.testDone=true;});}true`);
   const pluginResult = async () => { await until(() => pluginEval("window.testDone===true"), "Plugin dialog did not resolve"); const value = await pluginEval("({value:window.testValue,error:window.testError||null})"); assert.equal(value.error, null); return value.value; };
+  const coreResult = async () => { await page.waitForFunction(() => window.coreDialogDone); return page.evaluate(() => window.coreDialogValue); };
+  const closeDialog = async (popup, action, result, expected) => {
+    assert.equal(popup.isClosed(), false, "The intended dialog must be open before its closing action");
+    let closeRace;
+    try { await action(); }
+    catch (error) {
+      // Electron may destroy this window before Playwright finishes its input
+      // acknowledgement. Only accept that race after verifying both this exact
+      // window's closure and its result in the still-running originating view.
+      if (!String(error.message).includes("Target page, context or browser has been closed")) throw error;
+      closeRace = error;
+    }
+    await until(() => popup.isClosed(), "The acted-on dialog did not close");
+    assert.deepEqual(await result(), expected);
+    if (closeRace) report.verifiedCloseRaces = (report.verifiedCloseRaces || 0) + 1;
+  };
   try {
     app = await _electron.launch({ executablePath: require("electron"), args, env, timeout: 60000 });
     for (const stream of [app.process().stdout, app.process().stderr]) stream?.on("data", chunk => { logs = (logs + chunk).slice(-40000); });
@@ -38,19 +54,19 @@ async function main() {
     let popup = await dialog(); await capture(popup, "core-send-review");
     assert.match(await popup.locator("body").innerText(), /Send 0\.10000000 KOIN/);
     const font = await popup.evaluate(() => getComputedStyle(document.body).fontFamily); assert.match(font, /Inter|Segoe UI/);
-    await popup.locator("#dialog-close").click(); await page.waitForFunction(() => window.coreDialogDone); assert.equal(await page.evaluate(() => window.coreDialogValue), false);
+    await closeDialog(popup, () => popup.locator("#dialog-close").click(), coreResult, false);
     report.checks.push("Core token-review styling and X cancellation use the real trusted dialog");
     await page.locator('[data-app="example.dialogs"]').click();
     await until(() => evaluate(() => global.__foundationHost.windows.get("example.dialogs")?.ready), "Fixture plugin did not load");
-    await pluginCall("confirm-approve", 'window.kai.dialogs.confirm("Allow this synthetic action?",{confirmLabel:"Allow once"})'); popup = await dialog(); await popup.getByRole("button", { name: "Allow once", exact: true }).click(); assert.equal(await pluginResult(), true);
-    await pluginCall("confirm-escape", 'window.kai.dialogs.confirm("Cancel the next synthetic action?")'); popup = await dialog(); await popup.keyboard.press("Escape").catch(error => { if (!String(error.message).includes("has been closed")) throw error; }); assert.equal(await pluginResult(), false);
+    await pluginCall("confirm-approve", 'window.kai.dialogs.confirm("Allow this synthetic action?",{confirmLabel:"Allow once"})'); popup = await dialog(); await closeDialog(popup, () => popup.getByRole("button", { name: "Allow once", exact: true }).click(), pluginResult, true);
+    await pluginCall("confirm-escape", 'window.kai.dialogs.confirm("Cancel the next synthetic action?")'); popup = await dialog(); await closeDialog(popup, () => popup.keyboard.press("Escape"), pluginResult, false);
     report.checks.push("Plugin renderer confirmations require an explicit click and Escape never reuses earlier approval");
-    await pluginCall("sdk-review", 'window.kai.call("review",{})'); popup = await dialog(); assert.match(await popup.locator("body").innerText(), /Dialog Test Plugin/); await capture(popup, "plugin-action-review"); await popup.locator("#dialog-close").click(); assert.equal(await pluginResult(), false);
-    await pluginCall("native-review", 'window.kai.call("native",{})'); popup = await dialog(); assert.match(await popup.locator("body").innerText(), /SYNTHETIC TEST VALUE/); await capture(popup, "plugin-private-key-warning"); await popup.locator("#dialog-close").click(); assert.equal((await pluginResult()).response, 0);
+    await pluginCall("sdk-review", 'window.kai.call("review",{})'); popup = await dialog(); assert.match(await popup.locator("body").innerText(), /Dialog Test Plugin/); await capture(popup, "plugin-action-review"); await closeDialog(popup, () => popup.locator("#dialog-close").click(), pluginResult, false);
+    await pluginCall("native-review", 'window.kai.call("native",{})'); popup = await dialog(); assert.match(await popup.locator("body").innerText(), /SYNTHETIC TEST VALUE/); await capture(popup, "plugin-private-key-warning"); await closeDialog(popup, () => popup.locator("#dialog-close").click(), async () => (await pluginResult()).response, 0);
     report.checks.push("Native SDK reviews and direct Electron plugin warnings share the same styled trusted surface");
     const literal = '<img src="https://invalid.example/pixel" onerror="window.injected=true">';
     await pluginCall("literal-alert", `window.kai.dialogs.alert(${JSON.stringify(literal)}, {detail:${JSON.stringify("Long readable detail\n".repeat(250))}})`); popup = await dialog();
-    assert.match(await popup.locator("body").innerText(), /<img src=/); assert.equal(await popup.locator('img[src^="https:"]').count(), 0); await capture(popup, "long-alert"); await popup.locator("#dialog-close").click(); await pluginResult();
+    assert.match(await popup.locator("body").innerText(), /<img src=/); assert.equal(await popup.locator('img[src^="https:"]').count(), 0); await capture(popup, "long-alert"); await closeDialog(popup, () => popup.locator("#dialog-close").click(), pluginResult, null);
     report.checks.push("Alerts render literal text safely and long details scroll without losing close controls");
     await pluginCall("hidden-review", 'window.kai.dialogs.confirm("This review must cancel when its app is hidden.")'); await dialog(); await evaluate(() => { global.__foundationHost.hide(); return true; }); assert.equal(await pluginResult(), false);
     report.checks.push("Leaving the originating plugin cancels its pending review");
@@ -60,7 +76,7 @@ async function main() {
     report.checks.push("Closing Core to its tray cancels pending approvals");
     assert.deepEqual(pageErrors, []); assert.deepEqual((await evaluate(() => global.__foundationSmoke)).errors, []);
     const child = app.process(), ended = new Promise((resolve, reject) => { const timer = setTimeout(() => reject(Error("Core quit timed out")), 30000); child.once("exit", code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error("Core exit " + code)); }); });
-    await evaluate(() => { setTimeout(() => global.__foundationTrayMenu.find(row => row.label === "Quit KAI Core").click(), 0); return true; }); await ended; app = null;
+    await evaluate(() => { setTimeout(() => global.__foundationTrayMenu.find(row => row.label === "Quit KAI Core Beta").click(), 0); return true; }); await ended; app = null;
     report.status = "passed";
   } catch (error) { report.status = "failed"; report.error = error.stack; throw error; }
   finally { if (app) await app.close().catch(() => {}); report.logs = logs; report.pageErrors = pageErrors; fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(report, null, 2)); fs.rmSync(temp, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); console.log("Report", path.join(output, "report.json")); }

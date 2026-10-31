@@ -32,7 +32,7 @@ function fixture({ failure, platform = process.platform, iconDirectory = path.jo
 test("closing the main window hides it while leaving the application running", () => {
   const f = fixture(); assert.equal(f.control.available, true);
   assert.equal(f.win.close(), true); assert.equal(f.win.destroyed, false); assert.equal(f.win.visible, false);
-  assert.equal(f.tray.tooltip, "KAI Core"); assert.equal(f.calls.includes("quit"), false);
+  assert.equal(f.tray.tooltip, "KAI Core Beta"); assert.equal(f.calls.includes("quit"), false);
   assert.equal(f.calls.includes("destroy-tray"), false);
   f.win.close(); assert.equal(f.calls.filter(value => value === "hide").length, 2);
   f.control.dispose();
@@ -40,7 +40,7 @@ test("closing the main window hides it while leaving the application running", (
 
 test("tray Open, icon clicks and app activation reopen and focus the same window", () => {
   const f = fixture();
-  for (const open of [f.menu("Open KAI Core"), () => f.tray.emit("click"), () => f.tray.emit("double-click"), () => f.app.emit("activate")]) {
+  for (const open of [f.menu("Open KAI Core Beta"), () => f.tray.emit("click"), () => f.tray.emit("double-click"), () => f.app.emit("activate")]) {
     f.win.close(); f.win.minimized = true;
     open(); assert.equal(f.win.visible, true); assert.equal(f.win.minimized, false);
     assert.deepEqual(f.calls.slice(-3), ["restore", "show", "focus"]);
@@ -49,7 +49,7 @@ test("tray Open, icon clicks and app activation reopen and focus the same window
 });
 
 test("explicit Quit requests normal teardown once and cannot be turned into Hide", () => {
-  const f = fixture(), open = f.menu("Open KAI Core"), quit = f.menu("Quit KAI Core");
+  const f = fixture(), open = f.menu("Open KAI Core Beta"), quit = f.menu("Quit KAI Core Beta");
   quit(); quit(); assert.equal(f.calls.filter(value => value === "quit").length, 1);
   const previous = f.calls.length; open(); f.tray.emit("click"); f.app.emit("activate"); assert.equal(f.calls.length, previous);
   assert.equal(f.win.close(), false); assert.equal(f.win.destroyed, true); assert.equal(f.control.available, false);
@@ -81,7 +81,7 @@ test("a destroyed tray or failed Hide never traps the next window close", () => 
 });
 
 test("disposal removes every hook and makes retained menu callbacks inert", () => {
-  const f = fixture(), open = f.menu("Open KAI Core"), quit = f.menu("Quit KAI Core");
+  const f = fixture(), open = f.menu("Open KAI Core Beta"), quit = f.menu("Quit KAI Core Beta");
   f.control.dispose(); f.control.dispose();
   assert.equal(f.control.available, false); assert.equal(f.calls.filter(value => value === "destroy-tray").length, 1);
   assert.equal(f.app.listenerCount("activate"), 0);

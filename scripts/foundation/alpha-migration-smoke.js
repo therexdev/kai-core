@@ -102,8 +102,9 @@ async function main() {
     await page.waitForFunction(() => document.getElementById("version")?.textContent.startsWith("v"), { timeout: 60000 });
     await check("Real Core uses a separate empty Foundation profile", async () => {
       const status = await call("status"); assert.equal(status.profile.mode, "foundation"); assert.equal(status.network.privacyMode, "local-only"); assert.equal(status.wallet.exists, false); assert.deepEqual(status.plugins, []);
-      const actual = await application.evaluate(({ app }) => ({ appData: app.getPath("appData"), userData: app.getPath("userData") }));
+      const actual = await application.evaluate(({ app }) => ({ appData: app.getPath("appData"), userData: app.getPath("userData"), sessionData: app.getPath("sessionData"), name: app.getName() }));
       assert.equal(actual.appData, appData); assert.equal(actual.userData, path.join(appData, "KAI Core"));
+      assert.equal(actual.sessionData, actual.userData); assert.equal(actual.name, "KAI Core");
     });
     await check("Settings ends with the migration box and opens its styled dialog", async () => {
       await page.locator('[data-page="settings"]').click();
@@ -205,7 +206,7 @@ async function main() {
     });
     const child = application.process();
     const exited = new Promise((resolve, reject) => { const timer = setTimeout(() => reject(Error("Core did not quit after 30 seconds")), 30000); child.once("exit", code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error("Core exited " + code)); }); });
-    await application.evaluate(() => setTimeout(() => global.__foundationTrayMenu.find(item => item.label === "Quit KAI Core").click(), 0)); await exited; application = null;
+    await application.evaluate(() => setTimeout(() => global.__foundationTrayMenu.find(item => item.label === "Quit KAI Core Beta").click(), 0)); await exited; application = null;
     report.exit = readJson(exitReport); assert.deepEqual(report.exit.errors, []); assert.equal(report.exit.remainingServices, 0); assert.equal(report.exit.remainingViews, 0);
     report.status = "passed"; report.checks.push("Core quits cleanly after copying or selectively moving Alpha models");
   } catch (error) {

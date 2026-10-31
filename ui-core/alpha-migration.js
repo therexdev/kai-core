@@ -13,7 +13,7 @@
   function resultSummary(job) {
     if (typeof job?.result?.summary === "string") return job.result.summary;
     const preserved = job?.selected?.deleteOldModels ? "Completed transfers remain in Core; only verified model originals were removed." : "Your Alpha files are unchanged.";
-    return { complete: "Your selected items have been migrated into KAI Core.", cancelled: `Migration stopped. ${preserved}`, failed: `Migration could not finish. ${preserved}` }[job?.phase] || "";
+    return { complete: "Your selected items have been migrated into KAI Core Beta.", cancelled: `Migration stopped. ${preserved}`, failed: `Migration could not finish. ${preserved}` }[job?.phase] || "";
   }
   function resultDetails(job) {
     const models = job?.result?.models, wallet = job?.result?.wallet;
@@ -158,7 +158,7 @@
         text("last-result", state.lastResult); $("last-result").hidden = !state.lastResult;
         if (!state.open) return;
         $("choices").hidden = view.terminal; $("copy-note").hidden = view.terminal; $("browse").hidden = view.terminal;
-        text("description", view.terminal ? "Review the completed items and any files that were kept." : "Choose what to migrate into KAI Core. Close Koinos AI Alpha, including its tray icon, before migrating.");
+        text("description", view.terminal ? "Review the completed items and any files that were kept." : "Choose what to migrate into KAI Core Beta. Close Koinos AI Alpha, including its tray icon, before migrating.");
         const source = state.inventory?.source || state.job?.source, inventory = state.inventory;
         text("source-path", source?.path || (state.loading ? "Looking for your Alpha profile…" : view.busy ? "Migration in progress" : "No Alpha profile found. Choose its data folder to continue."));
         text("browse", state.choosing ? "Choosing folder…" : source ? "Choose another folder" : "Choose folder");
@@ -182,7 +182,7 @@
         text("cancel", state.cancelling ? "Cancelling…" : view.terminal ? "Close" : view.busy ? "Cancel migration" : "Cancel");
         $("submit").disabled = !view.canStart; $("submit").hidden = view.terminal;
         text("submit", state.starting ? "Starting…" : view.busy ? "Migrating…" : "Migrate");
-        text("selection-note", view.terminal ? state.selected.deleteOldModels ? "Completed model transfers remain in Core." : "Your Alpha files are unchanged." : view.busy ? "Keep KAI Core running while migrating." : state.loading ? "Checking your Alpha profile…" : state.selected.deleteOldModels ? "Verified model originals will be removed from Alpha." : "Select Models, Wallet, or both.");
+        text("selection-note", view.terminal ? state.selected.deleteOldModels ? "Completed model transfers remain in Core." : "Your Alpha files are unchanged." : view.busy ? "Keep KAI Core Beta running while migrating." : state.loading ? "Checking your Alpha profile…" : state.selected.deleteOldModels ? "Verified model originals will be removed from Alpha." : "Select Models, Wallet, or both.");
         $("progress-section").hidden = !view.busy;
         const progress = state.job?.progress, total = Math.max(0, Number(progress?.totalBytes) || 0), completed = Math.max(0, Number(progress?.completedBytes) || 0);
         text("progress-detail", state.cancelling ? "Stopping safely. Finishing cleanup…" : progress?.detail || (state.starting ? "Preparing your migration…" : "Copying selected items…"));
