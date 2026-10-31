@@ -6,3 +6,13 @@
 
 /* The desktop rail leaves less room than a standalone wallet at narrow widths. */
 @media(max-width:900px){.payment-wallet-stats{grid-template-columns:1fr}.payment-wallet-stat .value{font-size:24px}}
+
+.wallet-send-dialog{width:min(480px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;border:1px solid var(--border);border-radius:20px;background:var(--bg-raised);color:var(--text);font:inherit;box-shadow:0 24px 80px #14284e30;overflow:auto}
+.wallet-send-dialog::backdrop{background:#14284e60;backdrop-filter:blur(3px)}
+.wallet-send-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:24px 26px 20px;border-bottom:1px solid var(--border)}
+.wallet-send-eyebrow{display:block;color:var(--accent);font-size:10px;letter-spacing:1.2px;font-weight:650;margin-bottom:7px}.wallet-send-header h2{margin:0;font-size:23px;letter-spacing:-.5px}
+.wallet-send-close{width:30px;height:30px;padding:0;border:0;background:transparent;color:var(--text-dim);font-size:25px;line-height:1}
+.wallet-send-body{padding:20px 26px 24px}.wallet-send-body>p{font-size:12px;line-height:1.6;color:var(--text-dim);margin:0 0 19px}.wallet-send-body label{display:block;font-size:12px;color:var(--text-dim);margin:15px 0 7px}.wallet-send-body input,.wallet-send-body select{display:block;width:100%;box-sizing:border-box;margin:0;min-height:43px;padding:10px 12px;border-radius:9px}
+.wallet-send-amount-label{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:15px;margin-bottom:7px}.wallet-send-amount-label label{margin:0}.wallet-send-amount-label button{padding:5px 11px;font-size:11px;background:#edf3ff;color:var(--accent);font-weight:600}.wallet-send-body #wallet-send-message{margin:16px 0 0;padding:11px 13px;border:1px solid var(--border);border-radius:9px;background:#f4f8ff}.wallet-send-body #wallet-send-message.error{color:var(--danger);background:#fff4f5;border-color:#f0c4cc}
+.wallet-send-footer{display:flex;justify-content:flex-end;gap:10px;padding:17px 26px;background:#fafbfd;border-top:1px solid var(--border)}.wallet-send-footer .primary{background:linear-gradient(135deg,#1763ff,#3650e7);box-shadow:0 3px 9px #1763ff20}.wallet-send-dialog [hidden]{display:none!important}
+@media(max-width:540px){.wallet-send-header,.wallet-send-body,.wallet-send-footer{padding-left:20px;padding-right:20px}}

@@ -225,3 +225,26 @@ test("copy/backups/explorer reject identity changes and explorer URLs are derive
   assert.equal(f.calls.find(([name]) => name === "explorer")[1], `https://koinosblocks.com/address/${address}`);
   await assert.rejects(f.service.call("wallet.remove"), /Unknown/);
 });
+
+test("Send All reads a fresh mana-limited amount without signing or reviewing", async t => {
+  const f = fixture(t, { balanceRead: async () => ({ koin: "1000000000", vhp: "18446744073709551615", mana: "250000000" }) });
+  const read = token => f.service.call("wallet.maxSend", { token, expectedAddress: address, expectedNetwork: "mainnet" });
+  const koin = await read("koin"), vhp = await read("vhp");
+  assert.equal(koin.amount, "1.5"); assert.equal(koin.manaLimited, true);
+  assert.equal(vhp.amount, "184467440737.09551615"); assert.equal(vhp.manaLimited, false);
+  assert.equal(koin.address, address); assert.equal(koin.network, "mainnet");
+  assert.ok(!f.calls.some(([name]) => ["review", "signer", "transfer"].includes(name)));
+  await assert.rejects(f.service.call("wallet.maxSend", { token: "eth", expectedAddress: address, expectedNetwork: "mainnet" }));
+  await assert.rejects(f.service.call("wallet.maxSend", { token: "koin", expectedAddress: recipient, expectedNetwork: "mainnet" }));
+});
+
+test("Send All rejects stale, malformed or changed balances instead of guessing", async t => {
+  for (const balances of [{ koin: "1", vhp: "1", mana: null }, { koin: "1", vhp: "-1", mana: "1" }, { koin: "1", vhp: "1", mana: "1", stale: true }]) {
+    const f = fixture(t, { balanceRead: async () => balances });
+    await assert.rejects(f.service.call("wallet.maxSend", { token: "vhp", expectedAddress: address, expectedNetwork: "mainnet" }), /fresh/);
+  }
+  const slow = deferred(), f = fixture(t, { balanceRead: () => slow.promise });
+  const read = f.service.call("wallet.maxSend", { token: "koin", expectedAddress: address, expectedNetwork: "mainnet" });
+  f.setAddress(recipient); slow.resolve({ koin: "100", mana: "100", vhp: "100" });
+  await assert.rejects(read, /wallet changed/);
+});

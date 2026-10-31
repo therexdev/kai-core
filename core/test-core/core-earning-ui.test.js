@@ -205,3 +205,16 @@ test("Earn's mounted page warms without navigation, pauses hidden, and purges da
  window.kaiCore.call=()=>new Promise(()=>{});events.get("kai-credit-identity-changed")();assert.equal(node("earn-wallet-kai").textContent,"—");
  document.hidden=true;documentEvents.get("visibilitychange")();
 });
+
+test("visible Earn checks verified increments every five seconds; other pages use fifteen", async () => {
+  const f = fixture(); f.controller.setForeground(true); await f.enter();
+  const count = () => f.calls.filter(c => c.action === "provider-public-earnings").length;
+  assert.equal(count(), 1); await f.advance(4999); assert.equal(count(), 1);
+  await f.advance(1); assert.equal(count(), 2);
+  f.controller.setForeground(false); await flush(); const before = count();
+  await f.advance(5000); assert.equal(count(), before); await f.advance(10000); assert.equal(count(), before + 1);
+  let done; f.setRewards(() => new Promise(resolve => done = resolve));
+  f.controller.setForeground(true); await flush(); const waiting = count();
+  await f.advance(5000); assert.equal(count(), waiting, "No overlapping reward read");
+  f.controller.leave(); done(rewards({ observedAt: start + 25000 })); await flush(); assert.equal(f.timers.size, 0);
+});

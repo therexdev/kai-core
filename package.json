@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.11",
+  "version": "0.7.12",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
@@ -27,7 +27,8 @@
     "test:alpha-migration": "node scripts/foundation/alpha-migration-smoke.js",
     "test:credit-reconnect": "node scripts/foundation/credit-reconnect-smoke.js",
     "test:dialogs": "node scripts/foundation/dialogs-smoke.js",
-    "test:updates": "node scripts/foundation/updates-smoke.js"
+    "test:updates": "node scripts/foundation/updates-smoke.js",
+    "test:wallet-send": "node scripts/foundation/wallet-send-smoke.js"
   },
   "devDependencies": {
     "electron": "^43.8.1",

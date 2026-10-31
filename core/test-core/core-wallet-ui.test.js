@@ -117,3 +117,15 @@ test("timed out read releases loading state and cannot overwrite a newer refresh
   f.setSummary(summary({ koin: "7", observedAt: NOW + 20001 })); f.setHistory(history({ observedAt: NOW + 20001 })); await f.controller.refresh();
   slow.resolve(summary({ koin: "999" })); await flush(); assert.equal(f.latest().state.summary.koin, "7");
 });
+
+test("Send All binds the filled amount to the selected token, wallet and network", async () => {
+  const f = fixture(); await f.enter({ exists: true, address: ADDRESS, unlocked: true });
+  f.action(async () => ({ address: ADDRESS, network: "mainnet", token: "vhp", amount: "184467440737.09551615", observedAt: NOW }));
+  assert.equal((await f.controller.perform("wallet.maxSend", { token: "vhp" })).amount, "184467440737.09551615");
+  assert.deepEqual(f.calls.at(-1).input, { token: "vhp", expectedAddress: ADDRESS, expectedNetwork: "mainnet" });
+  for (const patch of [{ token: "koin" }, { network: "harbinger" }, { observedAt: NOW - 30001 }, { amount: "1e10" }, { address: "other" }]) {
+    f.action(async () => ({ address: ADDRESS, network: "mainnet", token: "vhp", amount: "1", observedAt: NOW, ...patch }));
+    assert.equal(await f.controller.perform("wallet.maxSend", { token: "vhp" }), null);
+  }
+  assert.equal(f.calls.filter(c => c.method === "wallet.send").length, 0);
+});

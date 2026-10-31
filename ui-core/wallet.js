@@ -77,15 +77,16 @@
     }
     async function perform(method, input = {}) {
       if (state.busy || !state.active || !state.wallet?.address) return null;
-      const isReveal = method === "wallet.reveal", isSend = method === "wallet.send";
-      if ((isReveal || isSend) && !state.wallet.unlocked) { notice("Unlock your wallet to continue.", true); return null; }
-      if (isSend && !fresh()) { notice("Refresh your wallet balance before sending.", true); return null; }
+      const isReveal = method === "wallet.reveal", isSend = method === "wallet.send", isMaximum = method === "wallet.maxSend";
+      if ((isReveal || isSend || isMaximum) && !state.wallet.unlocked) { notice("Unlock your wallet to continue.", true); return null; }
+      if ((isSend || isMaximum) && !fresh()) { notice("Refresh your wallet balance before sending.", true); return null; }
       const version = generation, secretVersion = secretGeneration, address = state.wallet.address;
       const current = () => state.active && generation === version && state.wallet?.address === address && (!isReveal || secretVersion === secretGeneration && state.wallet.unlocked);
-      const payload = { ...input, expectedAddress: address, ...(["wallet.send", "wallet.openExplorer"].includes(method) ? { expectedNetwork: state.summary?.network } : {}) };
+      const payload = { ...input, expectedAddress: address, ...(["wallet.send", "wallet.maxSend", "wallet.openExplorer"].includes(method) ? { expectedNetwork: state.summary?.network } : {}) };
       state.busy = true; notice(isSend ? "Review the exact transfer in the approval window." : "", false);
       try {
         const result = await call(method, payload); if (!current()) return null;
+        if (isMaximum && (!state.wallet.unlocked || result?.address !== address || result?.network !== payload.expectedNetwork || state.summary?.network !== payload.expectedNetwork || result?.token !== input.token || !validAmount(result?.amount) || !Number.isSafeInteger(result?.observedAt) || now() - result.observedAt > 30000 || result.observedAt > now() + 5000)) throw Error("The available amount changed. Check the wallet and try Send All again.");
         if (isSend) {
           notice(result?.state === "cancelled" ? "Transfer cancelled. No transaction was submitted." : result?.state === "submitted" ? `${result.confirmed === true ? "Confirmed" : "Submitted; confirmation pending"}. Transaction ${result.txId || "pending"}. Check history for updates.` : "The transfer result could not be verified. Check history before trying again.", !["cancelled", "submitted"].includes(result?.state));
           if (result?.state === "submitted") void refresh();
@@ -103,7 +104,7 @@
   function mount() {
     const document = root.document, $ = id => document.getElementById(id), page = document.querySelector('[data-panel="wallet"]');
     if (!page) return;
-    let lastNotice = -1, lastRead = -1, historyMarkup = "";
+    let lastNotice = -1, lastRead = -1, historyMarkup = "", sendRevision = 0, sendIdentity = null;
     const notice = root.KaiCoreNotice.create({ container: $("wallet-notice"), message: $("wallet-message"), close: $("wallet-message-close"), focusTarget: () => $("wallet-refresh") });
     const balanceNotice = root.KaiCoreNotice.create({ container: $("wallet-balance-error"), message: $("wallet-balance-error-text"), close: $("wallet-balance-error-close"), focusTarget: () => $("wallet-refresh") });
     const historyNotice = root.KaiCoreNotice.create({ container: $("wallet-history-error"), message: $("wallet-history-error-text"), close: $("wallet-history-error-close"), focusTarget: () => $("wallet-history-refresh") });
@@ -147,6 +148,10 @@
       $("wallet-history-more").hidden = !state.cursor; $("wallet-history-more").disabled = state.loading;
       $("wallet-copy").disabled = !wallet?.address || state.busy; $("wallet-explorer").hidden = summary?.network !== "mainnet"; $("wallet-explorer").disabled = state.busy;
       $("wallet-open-send").disabled = !view.canSend; $("wallet-send-submit").disabled = !view.canSend; $("wallet-reveal-submit").disabled = state.busy || !wallet?.unlocked;
+      $("wallet-send-all").disabled = !view.canSend;
+      for (const id of ["wallet-send-token", "wallet-send-to", "wallet-send-amount", "wallet-send-password", "wallet-send-close", "wallet-send-cancel"]) $(id).disabled = state.busy;
+      if ($("wallet-send-panel").open && (!wallet?.unlocked || sendIdentity !== JSON.stringify([wallet.address, summary?.network]))) $("wallet-send-panel").close();
+      text("wallet-send-message", state.notice); $("wallet-send-message").hidden = !state.notice; $("wallet-send-message").classList.toggle("error", state.noticeError);
       $("wallet-send-token").options[0].textContent = summary?.tokenSymbol || "KOIN";
       paintHistory(state);
       balanceNotice.show(state.balanceError, { error: true, force: state.readVersion !== lastRead });
@@ -158,15 +163,33 @@
     $("wallet-explorer").onclick = () => void controller.perform("wallet.openExplorer");
     $("wallet-refresh").onclick = $("wallet-history-refresh").onclick = () => void controller.refresh();
     $("wallet-history-more").onclick = () => void controller.refresh(true);
-    $("wallet-open-send").onclick = () => { if ($("wallet-open-send").disabled) return; $("wallet-send-panel").open = true; $("wallet-send-panel").scrollIntoView({ block: "nearest" }); $("wallet-send-to").focus({ preventScroll: true }); };
-    $("wallet-send-panel").addEventListener("toggle", () => { if (!$("wallet-send-panel").open) controller.clearSecrets(); });
+    $("wallet-open-send").onclick = () => {
+      if ($("wallet-open-send").disabled) return;
+      const state = controller.snapshot(); sendIdentity = JSON.stringify([state.wallet.address, state.summary.network]); controller.notice("");
+      $("wallet-send-panel").showModal(); $("wallet-send-to").focus({ preventScroll: true });
+    };
+    $("wallet-send-close").onclick = $("wallet-send-cancel").onclick = () => { if (!controller.snapshot().busy) $("wallet-send-panel").close(); };
+    $("wallet-send-panel").addEventListener("cancel", event => { if (controller.snapshot().busy) event.preventDefault(); });
+    $("wallet-send-panel").addEventListener("close", () => {
+      ++sendRevision; sendIdentity = null; $("wallet-send-form").reset(); controller.clearSecrets();
+      if (!page.hidden) $("wallet-open-send").focus({ preventScroll: true });
+    });
+    $("wallet-send-token").onchange = () => { ++sendRevision; $("wallet-send-amount").value = ""; controller.notice(""); };
+    $("wallet-send-amount").oninput = () => { ++sendRevision; };
+    $("wallet-send-all").onclick = async () => {
+      const revision = ++sendRevision, token = $("wallet-send-token").value;
+      const result = await controller.perform("wallet.maxSend", { token });
+      if (!result || revision !== sendRevision || !$("wallet-send-panel").open || token !== $("wallet-send-token").value) return;
+      $("wallet-send-amount").value = result.amount;
+      controller.notice(result.amount === "0" ? "No tokens are available to send right now." : result.manaLimited ? "Filled the amount available with your current mana, leaving room for the transaction’s resource cost." : "");
+    };
     $("wallet-reveal-panel").addEventListener("toggle", () => { if (!$("wallet-reveal-panel").open) controller.clearSecrets(); });
     $("wallet-send-form").onsubmit = async event => {
       event.preventDefault();
       const input = { token: $("wallet-send-token").value, to: $("wallet-send-to").value.trim(), amount: $("wallet-send-amount").value.trim(), password: $("wallet-send-password").value };
       $("wallet-send-password").value = "";
       const result = await controller.perform("wallet.send", input);
-      if (result?.state === "submitted") { $("wallet-send-to").value = ""; $("wallet-send-amount").value = ""; }
+      if (result?.state === "submitted") $("wallet-send-panel").close();
     };
     $("wallet-reveal-form").onsubmit = async event => {
       event.preventDefault(); const password = $("wallet-reveal-password").value; $("wallet-reveal-password").value = "";
@@ -174,7 +197,7 @@
       if (result && typeof result.wif === "string" && result.wif.length < 200) { text("wallet-backup", `Save this backup key privately:\n${result.wif}`); $("wallet-backup").hidden = false; $("hide-backup").hidden = false; }
     };
     const leave = controller.leave;
-    controller.leave = () => { leave(); $("wallet-send-panel").open = false; $("wallet-reveal-panel").open = false; $("restore-wallet").open = false; };
+    controller.leave = () => { leave(); $("wallet-send-panel").close(); $("wallet-reveal-panel").open = false; $("restore-wallet").open = false; };
     root.KaiCoreWallet = controller;
     document.addEventListener("visibilitychange", () => { if (document.hidden) controller.leave(); else if (!page.hidden) controller.enter(); });
     root.addEventListener("kai-core-privacy-changed", event => controller.observe(controller.snapshot().wallet, event.detail?.mode));
