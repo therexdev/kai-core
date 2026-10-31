@@ -8,7 +8,6 @@ const globalNotice = makeNotice("notice", "notice-message", "notice-close", () =
 const notices = {
   "model-message": makeNotice("model-notice", "model-message", "model-message-close", () => $("import-model")),
   "purchase-state": makeNotice("purchase-notice", "purchase-state", "purchase-close", () => $("usd")),
-  "update-state": makeNotice("update-notice", "update-state", "update-close", () => $("check-updates")),
 };
 let noticeSource = "action";
 const text = (id, value) => { if (notices[id]) notices[id].show(value); else if ($(id).textContent !== String(value ?? "")) $(id).textContent = value ?? ""; };
@@ -55,6 +54,7 @@ function showPage(next, app) {
     if (page === "network") window.KaiCoreNetwork?.leave();
     if (page === "wallet") window.KaiCoreWallet?.leave();
     if (page === "credits") window.KaiCreditConnection?.leave();
+    if (page === "settings") window.KaiCoreUpdates?.leave();
     if (page === "app") void bridge.call("plugins.hide").catch(error => notify(error.message, true));
     priceGeneration++;
   }
@@ -75,7 +75,7 @@ function showPage(next, app) {
   if (next === "network") window.KaiCoreNetwork?.enter();
   if (next === "wallet") window.KaiCoreWallet?.enter();
   if (next === "plugins") void checkPluginCatalog();
-  if (next === "settings") window.KaiCoreAccount?.enter();
+  if (next === "settings") { window.KaiCoreAccount?.enter(); void window.KaiCoreUpdates?.enter(); }
   if (next === "credits") { renderCredits(); void refreshCreditActivity(); void window.KaiCreditConnection?.enter(); }
   if (next === "buy-credits") void price();
 }
@@ -115,6 +115,7 @@ async function refresh() {
     notices["model-message"].show(s.importing ? `Importing model · ${Math.round(s.importing.pct || 0)}%` : s.importError || "",
       { error: !s.importing && !!s.importError, dismissible: !s.importing });
     modelCards.update(s);
+    window.KaiCoreUpdates?.observe(s.appUpdates);
     renderInstalledPlugins();
     apps?.update(s);
     if (activeAppId && !s.plugins.some(plugin => plugin.id === activeAppId && plugin.enabled)) showPage("plugins");
@@ -277,9 +278,6 @@ $("purchase-retry").onclick = e => action(e.currentTarget, async () => {
   notices["purchase-state"].show("Checking saved purchase…", { dismissible: false });
   try { const r = await bridge.credit("credit-purchase-retry"); text("purchase-state", r.detail || r.state); await window.KaiCredits.refresh(); }
   catch (error) { text("purchase-state", error.message); throw error; }
-});
-$("check-updates").onclick = e => action(e.currentTarget, async () => {
-  text("update-state", (await bridge.call("updates.check")).message);
 });
 async function refreshCreditActivity() {
   await window.KaiCredits.refresh();

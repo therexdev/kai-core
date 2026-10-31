@@ -1,10 +1,18 @@
 # KAI Core Beta
 
-KAI Core Beta 0.7.4 is the desktop foundation for independently installed plugins. Each plugin owns its interface, feature engines, dependencies, assets and saved work. Core exposes documented services that are available to every publisher; there are no private first-party feature APIs.
+KAI Core Beta is the desktop foundation for independently installed plugins. Each plugin owns its interface, feature engines, dependencies, assets and saved work. Core exposes documented services that are available to every publisher; there are no private first-party feature APIs.
 
 This is a new architecture and a new profile. It does not automatically adopt older data. Settings offers an explicit **Migrate from Koinos AI Alpha** tool for copying **Models**, **Wallet**, or both. An optional cleanup checkbox removes verified Alpha model originals after transfer. Documents, plugin data, connected accounts and settings are excluded. Existing Koinos AI/Core 0.6 data is left untouched. On Windows the new profile is `%APPDATA%\KAI Core\foundation-v1`. The Koinos Node plugin owns a **separate Node wallet**, clearly labelled in its interface.
 
-The Beta name is display branding. Core keeps the `io.koinosai.core` application ID, the internal `KAI Core` OS identity and the existing `KAI Core/foundation-v1` data location. Windows keeps its `KAI Core.exe` executable and Linux keeps `kai-core`; installer and portable download filenames include `KAI-Core-Beta`. Updates remain manual.
+The Beta name is display branding. Core keeps the `io.koinosai.core` application ID, the internal `KAI Core` OS identity and the existing `KAI Core/foundation-v1` data location. Windows keeps its `KAI Core.exe` executable and Linux keeps `kai-core`; installer and portable download filenames include `KAI-Core-Beta`.
+
+## Application updates
+
+Settings shows the installed version, checks for new Core releases, and offers an optional automatic-check setting (on by default). Local-Only privacy pauses checks and downloads. An update badge appears on Settings when a newer release is available.
+
+The installed Windows Setup version can download a verified update inside Core. **Restart and install** is an explicit action that stops Core's services before launching the installer. Closing to the tray, exiting normally, or finding an update never installs or restarts automatically. Portable, macOS and Linux builds check for new releases and open the official downloads page for manual installation. Plugin updates remain separate in Plugins.
+
+Version 0.7.7 and earlier need one manual installation of the updater-enabled version. Application updates preserve the Core profile, wallet, models, installed plugins and plugin data. See [Windows signing and release setup](docs/foundation/WINDOWS_UPDATES.md) for the required Azure signing configuration and release verification.
 
 ## Ownership
 
@@ -55,7 +63,7 @@ npm run test:apps
 npm run dist -- --win --x64
 ```
 
-The all-app smoke requires sibling plugin checkouts and Assistant's prepared payload. It uses a disposable profile and test signing key, not live wallet/account credentials. Live Docker, OAuth, microphone hardware and blockchain transactions require separate explicit testing. Preview builds do not publish an automatic update feed; Core updates remain manual.
+The all-app smoke requires sibling plugin checkouts and Assistant's prepared payload. It uses a disposable profile and test signing key, not live wallet/account credentials. Live Docker, OAuth, microphone hardware and blockchain transactions require separate explicit testing. Main releases publish the Windows update feed only after signature, publisher, timestamp and exact-artifact verification. Preview branch builds do not publish releases.
 
 The original application lives in `therexdev/kaiapp` and is not modified by this project. Foundation is a clean plugin platform, not a compatibility layer for its old internal objects.
 

@@ -34,7 +34,7 @@
     </nav>
     <div class="sidebar-status"><span class="dot"></span><span>KAI Core Beta</span></div>
     <div class="rail-icons" aria-label="App controls">
-      <button class="rail-icon" data-page="settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3-.6 2.3-2 .9-2.1-.7-2 3.5L4 10.7v2.6L2.3 15l2 3.5 2.1-.7 2 .9L9 21h4l.6-2.3 2-.9 2.1.7 2-3.5-1.7-1.7v-2.6L19.7 9l-2-3.5-2.1.7-2-.9L13 3Z"/></svg><span>Settings</span></button>
+      <button id="settings-nav" class="rail-icon" data-page="settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3-.6 2.3-2 .9-2.1-.7-2 3.5L4 10.7v2.6L2.3 15l2 3.5 2.1-.7 2 .9L9 21h4l.6-2.3 2-.9 2.1.7 2-3.5-1.7-1.7v-2.6L19.7 9l-2-3.5-2.1.7-2-.9L13 3Z"/></svg><span>Settings</span><span id="core-update-badge" class="core-update-badge" aria-hidden="true" hidden></span></button>
       <button class="rail-icon" data-page="network" aria-label="Network" title="Network"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><circle cx="4.8" cy="18" r="2.2"/><circle cx="19.2" cy="18" r="2.2"/><path d="M12 6.7v4.8M12 11.5 6.3 16.3M12 11.5l5.7 4.8"/></svg><span>Network</span></button>
     </div>
     <footer class="sidebar-foot"><span id="version"></span></footer>
@@ -165,7 +165,14 @@
 
         </article>
         <article><h2>Closing the window</h2><p id="closing-window-detail">Checking system tray availability…</p></article>
-        <article><h2>Application updates</h2><p>Core updates are installed manually. Download the latest release and run its installer.</p><button id="check-updates">Open downloads</button><div id="update-notice" class="dismissible-notice inline-notice" hidden><p id="update-state" role="status" aria-atomic="true"></p><button id="update-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div></article>
+        <article id="application-updates" class="application-updates" aria-labelledby="updates-heading">
+          <div class="core-updates-heading"><div><h2 id="updates-heading">Application updates</h2><p id="updates-version" class="muted">KAI Core Beta</p></div><span id="updates-badge" class="pill" hidden></span></div>
+          <label class="core-updates-toggle" for="updates-automatic"><span><strong>Check for updates automatically</strong><span>Look for new Core releases while KAI is open or in the tray.</span></span><input id="updates-automatic" class="product-switch-input" type="checkbox" role="switch" checked></label>
+          <div id="updates-status" class="core-updates-status" role="status" aria-live="polite" aria-atomic="true"><strong id="updates-title">Ready to check for updates</strong><p id="updates-detail">You choose when to download and restart.</p></div>
+          <div id="updates-progress-row" class="core-updates-progress" hidden><progress id="updates-progress" max="100" aria-label="Core update download progress"></progress><span id="updates-progress-value"></span></div>
+          <div id="update-notice" class="dismissible-notice inline-notice error" hidden><p id="update-state" role="status" aria-atomic="true"></p><button id="update-close" class="notice-close" type="button" aria-label="Dismiss update message" title="Dismiss message"><span aria-hidden="true">×</span></button></div>
+          <div class="core-updates-footer"><div class="core-updates-actions"><button id="check-updates" type="button">Check for updates</button><button id="updates-download" class="primary" type="button" hidden>Download update</button><button id="updates-install" class="primary" type="button" hidden>Restart and install</button><button id="updates-open-release" class="text-button" type="button">View downloads</button></div><p id="updates-last-checked" class="muted">Not checked yet</p></div>
+        </article>
         <article id="alpha-migration-settings"><h2>Migrate from Koinos AI Alpha</h2><p>Bring your downloaded models and encrypted wallet into KAI Core Beta. Choose what to migrate, with an option to remove old model files after each verified transfer. Plugin data and connected accounts are not included.</p><button id="alpha-migration-open" type="button">Migrate</button><p id="alpha-migration-last-result" class="muted" role="status" hidden></p></article>
       </section>
     </div>
@@ -189,6 +196,6 @@
       <footer class="alpha-migration-footer"><span id="alpha-migration-selection-note" class="muted">Select Models, Wallet, or both.</span><div><button id="alpha-migration-cancel" type="button">Cancel</button><button id="alpha-migration-submit" class="primary" type="submit">Migrate</button></div></footer>
     </form>
   </dialog>
-  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="apps.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="account.js"></script><script src="models.js"></script><script src="core.js"></script><script src="credit-connection.js"></script><script src="alpha-migration.js"></script>
+  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="apps.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="account.js"></script><script src="models.js"></script><script src="updates.js"></script><script src="core.js"></script><script src="credit-connection.js"></script><script src="alpha-migration.js"></script>
 </body>
 </html>

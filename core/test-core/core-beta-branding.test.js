@@ -30,11 +30,12 @@ test("Beta installer metadata retains Windows upgrade identity and executable pa
   assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false); assert.equal(pkg.build.nsis.shortcutName, "KAI Core Beta");
 });
 
-test("Beta branding is visible in downloads and release titles without changing manual update policy", () => {
+test("Beta branding is visible in downloads and release titles while packaging leaves publication to verified CI", () => {
   assert.equal(pkg.productName, "KAI Core Beta"); assert.equal(pkg.build.productName, "KAI Core Beta");
   for (const configuration of [pkg.build, pkg.build.nsis, pkg.build.portable, pkg.build.mac]) assert.match(configuration.artifactName, /^KAI-Core-Beta-/);
   assert.equal(pkg.build.linux.desktop.entry.Name, "KAI Core Beta");
   const workflow = fs.readFileSync(path.join(__dirname, "../../.github/workflows/core-build.yml"), "utf8"), html = fs.readFileSync(path.join(__dirname, "../../ui-core/index.html"), "utf8");
-  assert.match(workflow, /--title "KAI Core Beta \$version"/); assert.doesNotMatch(workflow, /--prerelease|latest\.yml/);
+  const publication = fs.readFileSync(path.join(__dirname, "../../scripts/foundation/publish-core-release.js"), "utf8");
+  assert.match(workflow, /publish-core-release\.js/); assert.match(publication, /"--title", `KAI Core Beta \$\{version\}`/); assert.doesNotMatch(workflow, /--prerelease/);
   assert.match(pkg.scripts.dist, /--publish never/); assert.match(html, /<title>KAI Core Beta<\/title>/); assert.match(html, /<span>KAI Core Beta<\/span>/);
 });

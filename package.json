@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
@@ -26,12 +26,12 @@
     "test:foundation-native": "node scripts/foundation/native-smoke.js",
     "test:alpha-migration": "node scripts/foundation/alpha-migration-smoke.js",
     "test:credit-reconnect": "node scripts/foundation/credit-reconnect-smoke.js",
-    "test:dialogs": "node scripts/foundation/dialogs-smoke.js"
+    "test:dialogs": "node scripts/foundation/dialogs-smoke.js",
+    "test:updates": "node scripts/foundation/updates-smoke.js"
   },
   "devDependencies": {
     "electron": "^43.8.1",
     "electron-builder": "^26.15.3",
-    "js-yaml": "^4.3.2",
     "playwright-core": "^1.62.1"
   },
   "main": "electron/core-main.js",
@@ -140,6 +140,8 @@
       "electron/core-preload.js",
       "electron/core-renderer-dialogs.js",
       "electron/core-tray.js",
+      "electron/core-update-install.js",
+      "electron/core-updates.js",
       "electron/core-wallet.js",
       "electron/credit-model-pricing.js",
       "electron/credit-models.js",
@@ -254,7 +256,8 @@
     "ethers": "^6.17.0",
     "koilib": "^9.4.0",
     "semver": "7.8.5",
-    "builder-util-runtime": "9.7.0"
+    "builder-util-runtime": "9.7.0",
+    "js-yaml": "^4.3.2"
   },
   "kaiChannel": "core"
 }

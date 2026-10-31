@@ -7,7 +7,7 @@ const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 const { channelConfig, configureDesktop } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, alphaMigration, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
+let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, appUpdates, alphaMigration, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
 const messageDialogs = require("./core-dialogs").createCoreDialogs({ electron, getWindow: () => win, isClosing: () => shuttingDown });
 // Electron is shared with native plugins. Every existing message-box caller gets
 // the same trusted Core presentation while keeping its approval/result contract.
@@ -18,7 +18,7 @@ function stop() {
   if (!stopping) stopping = (async () => {
     pluginDownload?.abort(); messageDialogs.dispose(); const errors = [];
     // Finish every cleanup even if an earlier service cannot stop normally.
-    for (const dispose of [() => alphaMigration?.dispose(), () => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
+    for (const dispose of [() => appUpdates?.dispose(), () => alphaMigration?.dispose(), () => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
       try { await dispose(); } catch (error) { errors.push(error); }
     }
     desktopTray?.dispose();
@@ -83,10 +83,40 @@ async function start() {
   const wakeCatalog = () => { if (!shuttingDown) void catalogMonitor.wake(); };
   win.on("focus", wakeCatalog); win.on("show", wakeCatalog);
   electron.powerMonitor.on("resume", wakeCatalog);
+  appUpdates = require("./core-updates").createCoreUpdates({ app, settings: core.settings,
+    isLocalOnly: () => core.gateway.network.status().privacyMode === "local-only",
+    openExternal: url => electron.shell.openExternal(url),
+    approveInstall: async version => {
+      if (shuttingDown || !win.isVisible() || win.isMinimized()) return false;
+      if (installBusy) throw Error("Finish the current plugin installation before restarting to update Core.");
+      if (alphaMigration?.running) throw Error("Finish or pause migration before restarting to update Core.");
+      const answer = await dialog.showMessageBox(win, { type: "question", title: "Restart to update KAI Core Beta", message: `Install KAI Core Beta ${version}?`,
+        detail: "KAI will stop its running apps and services, install the verified update, and reopen. Your wallet, models, plugins and saved data stay in place.",
+        buttons: ["Not now", "Restart and install"], defaultId: 0, cancelId: 0 });
+      return answer.response === 1 && !shuttingDown && !installBusy && !alphaMigration?.running;
+    },
+    performInstall: async updater => {
+      if (shuttingDown) throw Error("Core is already closing.");
+      if (installBusy) throw Error("Finish the current plugin installation before restarting to update Core.");
+      if (alphaMigration?.running) throw Error("Finish or pause migration before restarting to update Core.");
+      shuttingDown = true;
+      try { await stop(); }
+      catch (error) {
+        // Do not replace files under a service that failed to stop. Always
+        // release this stopped app's profile lock instead of stranding it.
+        console.error("[update-shutdown]", error.message); shutdownComplete = true; app.quit();
+        throw Error("A running service could not fully stop. Core has closed without installing the update. Open it again and retry.");
+      }
+      shutdownComplete = true;
+      require("./core-update-install").installAndQuit({ updater, app, dialog });
+    },
+  });
+  const wakeUpdates = () => { if (!shuttingDown) void appUpdates.wake(); };
+  win.on("focus", wakeUpdates); win.on("show", wakeUpdates); electron.powerMonitor.on("resume", wakeUpdates);
   async function setPrivacyMode(mode) {
     const state = core.gateway.network.configure({ privacyMode: mode });
     if (state.privacyMode === "local-only") pluginDownload?.abort();
-    catalogMonitor.privacyChanged(); coreWallet?.privacyChanged(state.privacyMode);
+    catalogMonitor.privacyChanged(); appUpdates.privacyChanged(); coreWallet?.privacyChanged(state.privacyMode);
     await features?.privacyChanged(state.privacyMode); return state;
   }
   async function openCoreView(view, section) {
@@ -136,7 +166,7 @@ async function start() {
           .map(plugin => ({ ...plugin, backgroundError: features.backgroundErrors?.get(plugin.id) || null }));
         return { version: app.getVersion(), desktop: { trayAvailable: desktopTray.available }, profile: report, wallet: core.account.wallet.status(), network: core.gateway.network.status(),
           models: core.models.aliases(), storage: core.models.storageUsage(), runtime: core.runtime.status(), download: core.models.downloadProgress(), modelQueue: core.gateway.modelQueueSnapshot(), importing: core.models.importStatus?.() ?? null, importError: core.gateway._lastImportError ?? null, ensure: core.gateway._ensureJob ? { alias: core.gateway._ensureJob.alias, state: core.gateway._ensureJob.state, error: core.gateway._ensureJob.error } : null,
-          plugins: installed, pluginsOrder: appOrder.read(), catalog: entries, registry: registry.status(), pluginUpdates: require("../core/lib/plugins/updates").pluginUpdates(installed, entries), catalogCheck: catalogMonitor.status() };
+          plugins: installed, pluginsOrder: appOrder.read(), catalog: entries, registry: registry.status(), pluginUpdates: require("../core/lib/plugins/updates").pluginUpdates(installed, entries), catalogCheck: catalogMonitor.status(), appUpdates: appUpdates.status() };
       }
       case "plugins.registry.refresh": {
         await catalogMonitor.refresh(); return registry.status();
@@ -207,10 +237,12 @@ async function start() {
         const choice = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "GGUF model", extensions: ["gguf"] }] });
         return choice.canceled ? null : { file: choice.filePaths[0] };
       }
-      case "updates.check": {
-        await electron.shell.openExternal("https://github.com/therexdev/kai-core/releases/latest");
-        return { message: "Downloads opened in your browser. Choose the installer for your computer; Core updates are installed manually." };
-      }
+      case "updates.status": return appUpdates.status();
+      case "updates.check": return appUpdates.check();
+      case "updates.configure": return appUpdates.configure(input);
+      case "updates.download": return appUpdates.download();
+      case "updates.install": return appUpdates.install();
+      case "updates.openRelease": return appUpdates.openRelease();
       case "desktop.openExternal": {
         if (typeof input?.url !== "string" || input.url.length > 4000) throw Error("Invalid website address");
         const url = new URL(input.url);
@@ -224,5 +256,6 @@ async function start() {
   });
   await win.loadURL(origin + "/");
   if (!shuttingDown) catalogMonitor.start();
+  if (!shuttingDown) appUpdates.start();
   if (!shuttingDown) void features.startInstalledBackground(manager).catch(error => console.warn("[plugin-startup]", error.message));
 }

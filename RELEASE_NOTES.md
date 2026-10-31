@@ -1,9 +1,9 @@
-# KAI Core Beta 0.7.7
+# KAI Core Beta 0.7.8
 
-Liquid LFM3 1.7B is now available in the Model Library alongside the existing models. Its official Q4_K_M GGUF download is approximately 1.1 GB. The managed inference engine is updated to support LFM3, with verified downloads and CPU fallback. Existing model files and saved selections stay in place.
+Settings now checks for Core updates and can check automatically in the background. A badge on Settings makes new releases visible, with the current version, update status and download progress in the app.
 
-Download and preparation progress now appear inside each model card, where its action button normally sits. Select several models to queue them; KAI downloads and prepares them one at a time while it remains open or in the tray. Queued items can be removed individually, active model downloads can be cancelled, and each completed card returns to Load model. The persistent top-of-page Cancel download button is removed.
+The installed Windows Setup version can download a verified update, then offers **Restart and install** when you are ready. Updates do not restart KAI automatically, install on normal exit, or interrupt work while KAI stays in the tray. Local-Only privacy pauses update checks and downloads. Portable, macOS and Linux builds check for new releases and open the official downloads page for manual installation.
 
-LFM3 is a local model option. Listing it in the library does not automatically make it available for paid network inference.
+Windows releases use the established **Michael Milas** Azure signing identity. Publication requires valid signatures, trusted timestamps, matching publisher and verified installer hashes. The in-app updater verifies the expected publisher and download before installation.
 
-Core updates remain manual. Plugin updates are managed separately in Plugins.
+Install this version manually if you are on 0.7.7 or earlier. Your Core profile, wallet, models and installed plugins stay in place. Plugin updates continue to be managed separately in Plugins.
