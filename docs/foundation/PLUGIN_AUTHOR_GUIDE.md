@@ -85,7 +85,7 @@ Never write into `api.plugin.root`. Code is materialized from the signed package
 | --- | --- | --- |
 | `api.settings.get/set` | `storage.read/write` | Plugin-scoped JSON preferences; atomic writes, 4 MiB total. Dot-separated keys address nested objects. This is distinct from renderer `storage.get/set`. |
 | `api.models.list`, `api.runtime.status` | `models.read` | Shared model/runtime snapshots. |
-| `api.models.ensure({alias})` | `models.manage` | Requests a model load with a user review. |
+| `api.models.ensure({alias}, signal?)` | `models.manage` | Requests a model load with a user review. The optional AbortSignal cancels the review and this caller’s preparation. |
 | `api.models.request/chat` | `inference.local` or `inference.network` | OpenAI-style messages. `request` returns a `Response`; `chat` returns parsed JSON and throws for failed responses. |
 | `api.models.embeddings` | `inference.local` | Text/token embeddings from a ready local model; no network aliases. |
 | `api.network.status/configure` | `network.status/configure` | Read privacy status or request a reviewed change. |
@@ -110,7 +110,7 @@ The package permission vocabulary includes some descriptive permissions such as 
 
 ## Local inference, network inference and credits
 
-Use an explicit installed local alias with `api.models.chat({model, messages, max_tokens})` for local work. No network fallback is implicit. For streaming local responses, use `api.models.request({...input, stream: true})` and consume/cancel its body.
+Use an explicit installed local alias with `api.models.chat({model, messages, max_tokens})` for local work. No network fallback is implicit. For streaming local responses, use `api.models.request({...input, stream: true}, signal)` and consume/cancel its body. Pass a per-operation AbortSignal to model requests and loads so Stop cancels work before headers, during preparation, and while queued. Local generations run one at a time in request order. Cancelling one caller never cancels a load another caller still needs. `api.runtime.status()` includes `loadingAlias`, `loadingStage`, and `inference: {activeAlias, queued}` for preparation and queue feedback.
 
 Local model metadata includes its catalog `blurb` and expected weights `sizeBytes`. Core 0.7.5 adds `downloadSizeBytes` for the full expected weights/projector bundle and `diskBytes` for current local files, including partial downloads. `diskBytes: 0` means no files are present; `null` means the size is unknown. Imported models are measured at their existing referenced file, without copying it. These sizes are file lengths, displayed as decimal GB in Core, and do not establish model verification or readiness.
 

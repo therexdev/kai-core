@@ -158,7 +158,8 @@ function removeCrtBeside(binPath) {
   return removed;
 }
 
-async function selfTest(binPath) {
+async function selfTest(binPath, { signal } = {}) {
+  signal?.throwIfAborted();
   const { spawn } = require("child_process");
   ensureCrtBeside(binPath);
   // NOTE: the Electron dir is deliberately NOT prepended to PATH — its
@@ -185,23 +186,27 @@ async function selfTest(binPath) {
       }
       let stdout = "";
       let stderr = "";
+      const abort = () => { try { child.kill("SIGKILL"); } catch {} };
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
       let timedOut = false;
       const timer = setTimeout(() => {
         timedOut = true;
         try { child.kill("SIGKILL"); } catch { /* already gone */ }
       }, 15000);
-      child.stdout?.on("data", (d) => { stdout += d; });
-      child.stderr?.on("data", (d) => { stderr += d; });
+      child.stdout?.on("data", (d) => { stdout = (stdout + d).slice(-8192); });
+      child.stderr?.on("data", (d) => { stderr = (stderr + d).slice(-8192); });
       child.on("error", (e) => {
-        clearTimeout(timer);
+        clearTimeout(timer); signal?.removeEventListener("abort", abort);
         resolve({ error: e, status: null, stdout, stderr });
       });
       child.on("close", (status) => {
-        clearTimeout(timer);
+        clearTimeout(timer); signal?.removeEventListener("abort", abort);
         resolve({ status, stdout, stderr, ...(timedOut ? { error: new Error("spawn ETIMEDOUT") } : {}) });
       });
     });
   let r = await attempt();
+  signal?.throwIfAborted();
   // llama-server prints its version and exits 0 (some builds exit 1 after
   // printing usage); a loader crash gives a big NTSTATUS code and no output.
   const crashed = (x) => x.error || (`${x.stdout || ""}${x.stderr || ""}`.trim().length === 0 && x.status !== 0);
@@ -209,6 +214,7 @@ async function selfTest(binPath) {
     // Self-heal: if OUR planted CRT is what kills the loader, the binary
     // runs fine on the machine's own redist — try once without it.
     r = await attempt();
+    signal?.throwIfAborted();
   }
   if (crashed(r)) {
     const code = r.status;
@@ -254,9 +260,10 @@ class LlamaCppRuntime {
     };
   }
 
-  async _waitHealthy(timeoutMs = HEALTH_TIMEOUT_MS) {
+  async _waitHealthy(timeoutMs = HEALTH_TIMEOUT_MS, signal) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      signal?.throwIfAborted();
       if (this._startError) throw this._startError;
       if (!this.child) {
         const code = this._lastExit?.code;
@@ -272,21 +279,33 @@ class LlamaCppRuntime {
         throw new Error(`llama-server exited during startup${hint}`);
       }
       try {
-        const r = await fetch(`${this.endpoint}/health`, { signal: AbortSignal.timeout(2000) });
+        const r = await fetch(`${this.endpoint}/health`, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(2000)]) });
+        await r.body?.cancel();
         if (r.ok) return;
       } catch {
         /* not up yet */
       }
-      await new Promise((r) => setTimeout(r, HEALTH_POLL_MS));
+      signal?.throwIfAborted();
+      await new Promise((resolve, reject) => {
+        const finish = () => { signal?.removeEventListener("abort", abort); clearTimeout(timer); resolve(); };
+        const abort = () => { signal?.removeEventListener("abort", abort); clearTimeout(timer); reject(signal.reason); };
+        const timer = setTimeout(finish, HEALTH_POLL_MS);
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) abort();
+      });
     }
     throw new Error("llama-server did not become healthy in time");
   }
 
-  async start({ modelPath, contextSize = 4096, gpuLayers = 0, extraArgs = [], sizeBytes = 0 }) {
+  async start({ modelPath, contextSize = 4096, gpuLayers = 0, extraArgs = [], sizeBytes = 0, signal }) {
+    signal?.throwIfAborted();
+    if (this._stopPromise) await this._stopPromise;
+    signal?.throwIfAborted();
     if (this.child) throw new Error("Runtime already running — stop it first");
     this._stopping = false;
     this._startError = null;
     this.port = this._fixedPort ?? (await freePort(this.host));
+    signal?.throwIfAborted();
     const args = [
       "--model", modelPath,
       "--host", this.host,
@@ -335,6 +354,8 @@ class LlamaCppRuntime {
       this.model = null;
       this.onEvent({ type: "runtime:crashed", kind: "llamacpp", code: error.code, message: error.message });
     });
+    // Consume both pipes. Leaving stdout unread can block a verbose engine.
+    child.stdout?.resume();
     let stderrTail = "";
     child.stderr.on("data", (d) => {
       stderrTail = (stderrTail + d.toString()).slice(-4000);
@@ -361,10 +382,12 @@ class LlamaCppRuntime {
       // compilation on Intel/AMD GPUs — legitimately take minutes. Scale
       // the patience with the weights instead of failing a healthy load.
       const budget = Math.max(HEALTH_TIMEOUT_MS, Math.ceil((sizeBytes / 1e9) * 30000));
-      await this._waitHealthy(budget);
+      await this._waitHealthy(budget, signal);
+      signal?.throwIfAborted();
     } catch (e) {
       const tail = stderrTail.slice(-600);
-      this.stop();
+      await this.stop();
+      signal?.throwIfAborted();
       throw new Error(`${e.message}${tail ? `\nllama-server said: ${tail}` : ""}`);
     }
     this.onEvent({ type: "runtime:ready", kind: "llamacpp", endpoint: this.endpoint });
@@ -372,15 +395,31 @@ class LlamaCppRuntime {
   }
 
   stop() {
-    if (!this.child) return;
+    if (!this.child) return this._stopPromise || Promise.resolve();
+    const child = this.child;
     this._stopping = true;
-    try {
-      this.child.kill();
-    } catch {
-      /* already gone */
-    }
     this.child = null;
     this.model = null;
+    // Wait for the old process to leave before loading another model. Merely
+    // sending SIGTERM let two model-sized processes overlap during switches.
+    const stopped = new Promise(resolve => {
+      let done = false, forceTimer, finalTimer;
+      const finish = () => {
+        if (done) return; done = true;
+        clearTimeout(forceTimer); clearTimeout(finalTimer);
+        child.removeListener("close", finish); child.removeListener("error", finish);
+        resolve();
+      };
+      child.once("close", finish); child.once("error", finish);
+      forceTimer = setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch {}
+        finalTimer = setTimeout(finish, 1000); finalTimer.unref?.();
+      }, 2500); forceTimer.unref?.();
+      try { if (!child.kill()) finish(); } catch { finish(); }
+    });
+    this._stopPromise = stopped;
+    stopped.finally(() => { if (this._stopPromise === stopped) this._stopPromise = null; });
+    return stopped;
   }
 }
 

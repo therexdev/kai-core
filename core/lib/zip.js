@@ -123,14 +123,27 @@ function extractZip(zipPath, destDir) {
 }
 
 /** extractZip in a worker thread — the main process stays responsive. */
-function extractZipAsync(zipPath, destDir) {
+function extractZipAsync(zipPath, destDir, { signal } = {}) {
   const { Worker } = require("worker_threads");
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     const w = new Worker(__filename, { workerData: { zipPath, destDir } });
-    w.once("message", (m) => (m.ok ? resolve(m.files) : reject(new Error(m.error))));
-    w.once("error", reject);
+    let done = false;
+    const finish = (error, value) => {
+      if (done) return; done = true;
+      signal?.removeEventListener("abort", abort);
+      if (error) reject(error); else resolve(value);
+    };
+    // Wait until the worker has stopped writing before its staging directory
+    // can be removed or another preparation can start there.
+    const abort = () => { w.terminate().then(() => finish(signal.reason), error => finish(error)); };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    w.once("message", (m) => { if (!signal?.aborted) finish(m.ok ? null : new Error(m.error), m.files); });
+    w.once("error", error => { if (!signal?.aborted) finish(error); });
     w.once("exit", (code) => {
-      if (code !== 0) reject(new Error(`zip worker exited with code ${code}`));
+      if (signal?.aborted) finish(signal.reason);
+      else if (!done) finish(new Error(`zip worker exited before reporting a result (${code})`));
     });
   });
 }

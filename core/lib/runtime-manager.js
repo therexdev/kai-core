@@ -36,6 +36,19 @@ function generationArgs(options) {
   return args;
 }
 
+// Waiting for one consumer must not cancel work still owned by another.
+function waitWithSignal(promise, signal) {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const clean = () => signal.removeEventListener("abort", abort);
+    const abort = () => { clean(); reject(signal.reason); };
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(promise).then(value => { clean(); resolve(value); }, error => { clean(); reject(error); });
+    if (signal.aborted) abort();
+  });
+}
+
 class RuntimeManager {
   constructor({ models, makeRuntime, hardware, provisioner, makeFallback, preferFallback, onEvent, state }) {
     this.models = models; // ModelManager
@@ -62,6 +75,9 @@ class RuntimeManager {
     this._localCheckActive = false;
     this._admissionWaiters = new Set();
     this._networkPauseListeners = new Set();
+    this._generationQueue = [];
+    this._generationActive = null;
+    this._stopEpoch = 0;
   }
 
   /** Name the active runtime serves the model under (null = passthrough). */
@@ -145,6 +161,9 @@ class RuntimeManager {
     return {
       activeAlias: this.activeAlias,
       loading: !!this._loading,
+      loadingAlias: this._loading?.alias || null,
+      loadingStage: this._loading?.stage || null,
+      inference: { activeAlias: this._generationActive?.alias || null, queued: this._generationQueue.length },
       runtime: this.runtime ? this.runtime.status() : null,
       // Why the last load failed (null after a success) — the UI shows
       // this instead of a bare "Model load failed" nobody can act on.
@@ -157,7 +176,8 @@ class RuntimeManager {
    *  platform with no managed build (today: Linux without Ollama) fails in
    *  plain language up front instead of after a gigabyte. A forced binary
    *  or a working fallback engine counts as viable. */
-  async preflight() {
+  async preflight({ signal } = {}) {
+    signal?.throwIfAborted();
     if (!this.provisioner) return; // forced binary (KAI_LLAMA_BIN) — viable
     try {
       this.provisioner.selectBuild("llamacpp");
@@ -165,7 +185,14 @@ class RuntimeManager {
     } catch {
       /* no managed build — check the fallback before refusing */
     }
-    if (this.makeFallback && (await Promise.resolve(this.makeFallback()).catch(() => null))) return;
+    if (this.makeFallback) {
+      const fallback = await Promise.resolve(this.makeFallback({ signal })).catch(() => {
+        signal?.throwIfAborted();
+        return null;
+      });
+      signal?.throwIfAborted();
+      if (fallback) return;
+    }
     throw new Error(
       process.platform === "linux"
         ? "Koinos AI on Linux currently needs Ollama installed (free, from ollama.com) — install it and relaunch, and Koinos AI will use it as the engine."
@@ -173,80 +200,115 @@ class RuntimeManager {
     );
   }
 
-  async ensure(alias) {
+  async ensure(alias, { signal } = {}) {
+    const epoch = this._stopEpoch;
+    this._assertDemand(epoch, signal);
     this._stopped = false; // new demand revives the manager
-    // §32: consult the catalog EVERY time — the already-running fast path
-    // below must never keep serving a model that was quarantined after it
-    // loaded. If this engine is the one running the revoked package, take
-    // it down on the spot before refusing.
-    try {
-      this.models.resolveAlias(alias);
-    } catch (e) {
+    try { this.models.resolveAlias(alias); }
+    catch (error) {
       if (this.activeAlias === alias && this.runtime?.status().running) this.stop();
-      throw e;
+      throw error;
     }
-    if (this.activeAlias === alias && this.runtime?.status().running) {
-      return this.runtime.endpoint;
+    // A cancelled caller can leave the queue immediately. It must not start
+    // an orphan model load when the preceding model eventually becomes ready.
+    for (;;) {
+      this._assertDemand(epoch, signal);
+      const loading = this._loading;
+      if (!loading) break;
+      if (loading.alias === alias && !loading.controller.signal.aborted) return this._joinLoad(loading, signal);
+      await waitWithSignal(loading.promise.catch(() => {}), signal);
     }
-    // Single-flight: concurrent requests for the same alias share the load.
-    // A different model mid-load (one runtime slot) is WAITED OUT rather
-    // than refused — a boot warm-start racing the first chat message used
-    // to throw here, which the §7 router would read as a real capability
-    // miss and overflow a locally-servable request to the paid network.
-    while (this._loading && this._loading.alias !== alias) {
-      await this._loading.promise.catch(() => {});
-    }
-    if (this._loading) return this._loading.promise;
-    if (this.activeAlias === alias && this.runtime?.status().running) {
-      return this.runtime.endpoint;
-    }
-
-    const promise = this._load(alias);
-    this._loading = { alias, promise };
-    try {
-      return await promise;
-    } finally {
-      this._loading = null;
-    }
+    this._assertDemand(epoch, signal);
+    if (this.activeAlias === alias && this.runtime?.status().running) return this.runtime.endpoint;
+    const loading = { alias, stage: "waiting", controller: new AbortController(), waiters: new Set(), settled: false };
+    this._loading = loading;
+    loading.promise = Promise.resolve().then(() => this._load(alias, loading.controller.signal)).finally(() => {
+      loading.settled = true;
+      if (this._loading === loading) this._loading = null;
+    });
+    return this._joinLoad(loading, signal);
   }
 
-  /**
-   * ensure() plus a hold on the runtime: while the hold is open, a model
-   * switch WAITS instead of stopping the engine. Field report: answers cut
-   * off mid-sentence while serving the network — a job for another class
-   * called ensure(), which stopped the llama-server the previous answer was
-   * still streaming from. Every serving path takes a hold now.
-   */
-  async acquireFor(alias) {
-    for (;;) {
-      const endpoint = await this.ensure(alias);
-      // ensure() awaited — but a switch may have won the race in between.
-      // The check-and-increment below is synchronous, so once it passes,
-      // _load()'s drain sees this hold.
-      if (this.activeAlias === alias && this.runtime?.status().running) {
+  _assertDemand(epoch, signal) {
+    signal?.throwIfAborted();
+    if (epoch !== this._stopEpoch) throw new DOMException("Local model request stopped", "AbortError");
+  }
+
+  _joinLoad(loading, signal) {
+    const owner = {};
+    loading.waiters.add(owner);
+    return waitWithSignal(loading.promise, signal).finally(() => {
+      loading.waiters.delete(owner);
+      if (!loading.settled && !loading.waiters.size) loading.controller.abort(new DOMException("Model preparation cancelled", "AbortError"));
+    });
+  }
+
+  _loadStage(signal, stage) {
+    signal?.throwIfAborted();
+    if (this._loading?.controller.signal === signal) this._loading.stage = stage;
+  }
+
+  _pumpGenerations() {
+    if (this._generationActive || this._inflight || !this._generationQueue.length) return;
+    const next = this._generationQueue.shift();
+    next.signal?.removeEventListener("abort", next.abort);
+    this._generationActive = next;
+    next.resolve(() => {
+      if (this._generationActive !== next) return;
+      this._generationActive = null;
+      this._pumpGenerations();
+    });
+  }
+
+  _generationSlot(alias, signal) {
+    signal?.throwIfAborted();
+    if (this._generationQueue.length >= 64) throw Object.assign(Error("The local model queue is full. Stop an existing request or try again shortly."), { code: "runtime_busy" });
+    return new Promise((resolve, reject) => {
+      const entry = { alias, signal, resolve, reject, abort: null };
+      entry.abort = () => {
+        const index = this._generationQueue.indexOf(entry);
+        if (index < 0) return;
+        this._generationQueue.splice(index, 1);
+        signal.removeEventListener("abort", entry.abort);
+        reject(signal.reason);
+        this._pumpGenerations();
+      };
+      this._generationQueue.push(entry);
+      signal?.addEventListener("abort", entry.abort, { once: true });
+      if (signal?.aborted) entry.abort();
+      this._pumpGenerations();
+    });
+  }
+
+  /** One local generation at a time, in request order. A second plugin cannot
+   * consume the first request's memory/compute or repeatedly switch its model. */
+  async acquireFor(alias, { signal } = {}) {
+    const epoch = this._stopEpoch;
+    const releaseSlot = await this._generationSlot(alias, signal);
+    try {
+      for (;;) {
+        this._assertDemand(epoch, signal);
+        const endpoint = await this.ensure(alias, { signal });
+        this._assertDemand(epoch, signal);
+        if (this.activeAlias !== alias || !this.runtime?.status().running) continue;
         this._inflight += 1;
         let done = false;
-        return {
-          endpoint,
-          release: () => {
-            if (done) return; // release() in a finally can run twice
-            done = true;
-            this._inflight -= 1;
-            if (this._inflight <= 0) {
-              this._inflight = 0;
-              for (const w of this._drainWaiters.splice(0)) w();
-            }
-          },
-        };
+        return { endpoint, release: () => {
+          if (done) return;
+          done = true;
+          this._inflight = Math.max(0, this._inflight - 1);
+          if (!this._inflight) for (const wake of this._drainWaiters.splice(0)) wake();
+          releaseSlot();
+        } };
       }
-    }
+    } catch (error) { releaseSlot(); throw error; }
   }
 
   // Local evidence collection observes the existing process only. It must not
   // download, reload or switch models after a stale status observation.
   acquireCurrent(alias) {
     this.models.resolveAlias(alias);
-    if (this._loading || this.activeAlias !== alias || !this.runtime?.status().running) throw new Error("The current model changed before the local check started");
+    if (this._loading || this._generationActive || this._generationQueue.length || this._inflight || this.activeAlias !== alias || !this.runtime?.status().running) throw new Error("The current model changed before the local check started");
     this._inflight += 1;
     let released = false;
     return { endpoint: this.runtime.endpoint, release: () => {
@@ -254,32 +316,45 @@ class RuntimeManager {
       released = true;
       this._inflight = Math.max(0, this._inflight - 1);
       if (!this._inflight) for (const waiter of this._drainWaiters.splice(0)) waiter();
+      this._pumpGenerations();
     } };
   }
 
-  /** Wait until nothing is streaming, or the cap runs out — a switch must
-   *  never hang forever behind an abandoned connection. */
-  async _drain() {
+  /** A slow answer keeps its engine. A waiting model switch can be cancelled
+   * or fail clearly; it must never kill someone else's active generation. */
+  async _drain(signal) {
+    signal?.throwIfAborted();
     if (this._inflight <= 0) return;
     this.onEvent({ type: "runtime:draining", inflight: this._inflight });
-    await new Promise((resolve) => {
-      // NOT unref'd: this bounded timer is the switch's only guaranteed
-      // exit, so it must keep the event loop alive until it fires.
-      const timer = setTimeout(resolve, this.drainMaxMs);
-      this._drainWaiters.push(() => {
-        clearTimeout(timer);
-        resolve();
-      });
+    await new Promise((resolve, reject) => {
+      const clean = () => {
+        clearTimeout(timer); signal?.removeEventListener("abort", abort);
+        const index = this._drainWaiters.indexOf(done);
+        if (index >= 0) this._drainWaiters.splice(index, 1);
+      };
+      const done = () => { clean(); resolve(); };
+      const abort = () => { clean(); reject(signal.reason); };
+      const timer = setTimeout(() => {
+        clean(); reject(Object.assign(Error("Another local model request is still running. Let it finish or stop it before loading a different model."), { code: "runtime_busy" }));
+      }, this.drainMaxMs);
+      this._drainWaiters.push(done);
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
     });
   }
 
-  async _load(alias) {
+  async _load(alias, signal) {
+    signal?.throwIfAborted();
+    await this._runtimeStopPromise;
+    signal?.throwIfAborted();
     const resolved = this.models.resolveAlias(alias);
     const fallbackAllowed = resolved.allowFallback !== false;
     if (this.preferFallback && !fallbackAllowed) {
       throw new Error("This model requires KAI’s managed llama.cpp engine. Turn off the forced Ollama runtime to load it.");
     }
-    const modelPath = await this.models.ensurePackage(resolved.packageId);
+    this._loadStage(signal, "downloading");
+    const modelPath = await this.models.ensurePackage(resolved.packageId, { signal });
+    signal?.throwIfAborted();
     const kind = resolved.runtime || "llamacpp";
     const wantGpu = !!this.hardware?.capabilities?.cudaEligible;
 
@@ -290,13 +365,19 @@ class RuntimeManager {
     // starved the worker's own presence signals while jobs kept serving).
     if (fallbackAllowed && this._llamaDead && this.runtime?.status().kind === "ollama" && this.runtime.status().running) {
       const rt = this.runtime;
+      let switching = false;
       try {
         // A queued switch must preserve the model name held by an active
         // caller, just as switching the managed engine waits for its leases.
-        await this._drain();
+        this._loadStage(signal, "waiting");
+        await this._drain(signal);
+        signal?.throwIfAborted();
         this.onEvent({ type: "runtime:fast-switch", from: this.activeAlias, to: alias, via: "ollama" });
         const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
-        await rt.start({ modelPath, sha256: resolved.sha256, modelName });
+        this._loadStage(signal, "starting");
+        switching = true;
+        await rt.start({ modelPath, sha256: resolved.sha256, modelName, signal });
+        signal?.throwIfAborted();
         if (this._stopped) {
           this.stop();
           throw new Error("Core is stopping");
@@ -305,7 +386,9 @@ class RuntimeManager {
         this.lastLoadError = null;
         return rt.endpoint;
       } catch (e) {
-        if (this._stopped) throw e;
+        if (signal?.aborted && switching) { await rt.stop(); if (this.runtime === rt) { this.runtime = null; this.activeAlias = null; } }
+        signal?.throwIfAborted();
+        if (this._stopped || e.code === "runtime_busy") throw e;
         // The daemon died under us: fall through to the full path, which
         // rebuilds the fallback from scratch. That path is instant now —
         // every crashing binary is cached, nothing re-tests.
@@ -316,9 +399,12 @@ class RuntimeManager {
     if (this.runtime) {
       // Let whatever is still streaming from this engine finish first —
       // stopping it here is what cut answers off mid-sentence.
-      await this._drain();
+      this._loadStage(signal, "waiting");
+      await this._drain(signal);
+      signal?.throwIfAborted();
       this.onEvent({ type: "runtime:switching", from: this.activeAlias, to: alias });
-      this.runtime.stop();
+      await this.runtime.stop();
+      signal?.throwIfAborted();
       this.runtime = null;
       this.activeAlias = null;
     }
@@ -345,22 +431,25 @@ class RuntimeManager {
       }
       try {
         try {
-          return await selfTest(binPath);
+          return await selfTest(binPath, { signal });
         } catch (e1) {
+          signal?.throwIfAborted();
           if (typeof this.provisioner?.reprovision !== "function" || this._healed.has(binPath)) {
             throw new Error(`${e1.message} [beside: ${dirSnapshot(binPath)}]`);
           }
           this._healed.add(binPath);
           this.onEvent({ type: "runtime:heal", step: "reprovision", binPath, reason: String(e1.message) });
-          await this.provisioner.reprovision(kind, { cap });
+          await this.provisioner.reprovision(kind, { cap, signal });
           try {
-            return await selfTest(binPath);
+            return await selfTest(binPath, { signal });
           } catch (e2) {
+            signal?.throwIfAborted();
             if (stripCpuVariants(binPath)) {
               this.onEvent({ type: "runtime:heal", step: "strip-cpu-variants", binPath });
               try {
-                return await selfTest(binPath);
+                return await selfTest(binPath, { signal });
               } catch (e3) {
+                signal?.throwIfAborted();
                 throw new Error(`${e3.message} [after reprovision + variant strip; beside: ${dirSnapshot(binPath)}]`);
               }
             }
@@ -368,6 +457,7 @@ class RuntimeManager {
           }
         }
       } catch (terminal) {
+        signal?.throwIfAborted();
         this._failedTests.set(binPath, String(terminal.message).slice(0, 600));
         throw terminal;
       }
@@ -379,7 +469,7 @@ class RuntimeManager {
     let mmprojPath = null;
     if (resolved.vision && resolved.mmproj) {
       try {
-        mmprojPath = await this.models.ensureMmproj(resolved.packageId);
+        mmprojPath = await this.models.ensureMmproj(resolved.packageId, { signal });
       } catch (e) {
         // Cancelling a projector download cancels the requested load too.
         if (e?.name === "AbortError" || e?.code === "ABORT_ERR") throw e;
@@ -387,18 +477,22 @@ class RuntimeManager {
       }
     }
     const boot = async (binPath, gpuLayers, cap) => {
+      this._loadStage(signal, "testing");
       if (binPath && !this._testedBins.has(binPath)) {
         await testHard(binPath, cap);
         this._testedBins.add(binPath);
       }
       const runtime = this.makeRuntime(binPath);
-      await runtime.start({
+      this._loadStage(signal, "starting");
+      try { await runtime.start({
         modelPath,
         contextSize: resolved.contextSize || 4096,
         gpuLayers,
         sizeBytes: resolved.sizeBytes || 0,
+        signal,
         extraArgs: [...(mmprojPath ? ["--mmproj", mmprojPath] : []), ...generationArgs(resolved.generation)],
-      });
+      }); signal?.throwIfAborted(); }
+      catch (error) { await runtime.stop(); throw error; }
       return runtime;
     };
 
@@ -416,7 +510,8 @@ class RuntimeManager {
       for (let i = 0; i < caps.length; i++) {
         const cap = caps[i];
         try {
-          const binPath = await this.provisioner.ensure(kind, { cap });
+          this._loadStage(signal, "provisioning");
+          const binPath = await this.provisioner.ensure(kind, { cap, signal });
           // A build that crashed its self-test on this machine stays
           // skipped for the rest of THIS app version — each app update
           // retries once, because updates ship loader fixes (the v0.22.1
@@ -430,6 +525,7 @@ class RuntimeManager {
           }
           return await boot(binPath, cap === "cpu" ? 0 : 999, cap);
         } catch (e) {
+          signal?.throwIfAborted();
           rungErrors.push(`[${cap}] ${String(e.message)}`);
           // Two machine-stable signatures are worth remembering: a crashed
           // self-test, and a HARD crash at real startup (Windows access
@@ -443,7 +539,7 @@ class RuntimeManager {
           if (this.state && (hardCrash || /self-test failed/i.test(String(e.message))) && cap !== "cpu") {
             const bad = this.state.get("badBuilds", {});
             try {
-              bad[await this.provisioner.ensure(kind, { cap })] = {
+              bad[await this.provisioner.ensure(kind, { cap, signal })] = {
                 reason: String(e.message).slice(0, 160),
                 appVersion: this.appVersion || null,
               };
@@ -462,11 +558,15 @@ class RuntimeManager {
 
     const bootFallback = async (why) => {
       if (!fallbackAllowed) throw new Error(`${why ? why + " · " : ""}This model requires KAI’s managed llama.cpp engine; Ollama fallback is unavailable for this model.`);
-      const fb = this.makeFallback ? await this.makeFallback() : null;
+      signal?.throwIfAborted();
+      const fb = this.makeFallback ? await this.makeFallback({ signal }) : null;
+      signal?.throwIfAborted();
       if (!fb) return null;
       if (why) this.onEvent({ type: "runtime:fallback", from: "llamacpp", to: fb.status().kind, reason: why });
       const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
-      await fb.start({ modelPath, sha256: resolved.sha256, modelName });
+      this._loadStage(signal, "starting");
+      try { await fb.start({ modelPath, sha256: resolved.sha256, modelName, signal }); signal?.throwIfAborted(); }
+      catch (error) { await fb.stop(); throw error; }
       return fb;
     };
 
@@ -479,6 +579,7 @@ class RuntimeManager {
         try {
           runtime = await bootLlama();
         } catch (e) {
+          signal?.throwIfAborted();
           // A machine-incompatibility signature (crashing self-tests) is a
           // session-stable fact: stop paying the ladder on every switch and
           // go straight to the fallback from here on. Transient failures
@@ -490,10 +591,12 @@ class RuntimeManager {
       }
       this.lastLoadError = null;
     } catch (e) {
+      signal?.throwIfAborted();
       this.lastLoadError = { alias, message: String(e.message), at: new Date().toISOString() };
       throw e;
     }
 
+    if (signal?.aborted) { await runtime.stop(); signal.throwIfAborted(); }
     this.runtime = runtime;
     this.activeAlias = alias;
     // stop() may have run while this load was in flight (quick app quit
@@ -506,10 +609,18 @@ class RuntimeManager {
   }
 
   stop() {
+    const loading = this._loading;
+    this._stopEpoch++;
     this._stopped = true;
-    if (this.runtime) this.runtime.stop();
+    this._loading?.controller.abort(new DOMException("Model preparation stopped", "AbortError"));
+    for (const entry of this._generationQueue.splice(0)) {
+      entry.signal?.removeEventListener("abort", entry.abort);
+      entry.reject(new DOMException("Local model request stopped", "AbortError"));
+    }
+    if (this.runtime) this._runtimeStopPromise = Promise.resolve(this.runtime.stop());
     this.runtime = null;
     this.activeAlias = null;
+    return Promise.all([this._runtimeStopPromise, loading?.promise.catch(() => {})]).then(() => undefined);
   }
 }
 

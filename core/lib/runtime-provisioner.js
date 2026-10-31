@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const fsp = require("fs/promises");
 const path = require("path");
 const os = require("os");
 
@@ -10,28 +11,35 @@ const { extractZipAsync } = require("./zip");
 /** Extract a .tar.gz via the system tar (universal on the Linux/macOS
  *  machines these archives target; Windows builds stay zips). Async spawn —
  *  never blocks the app process. */
-function extractTarGzAsync(file, destDir) {
+function extractTarGzAsync(file, destDir, { signal } = {}) {
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     fs.mkdirSync(destDir, { recursive: true });
     // Runtime files belong to the current app user, not the archive builder's
     // numeric UID (which can be unavailable inside a Linux user namespace).
     const child = require("child_process").spawn("tar", ["--no-same-owner", "-xzf", file, "-C", destDir], { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
-    child.stderr.on("data", (c) => (err += c));
-    child.on("error", (e) => reject(new Error(`tar unavailable: ${e.message}`)));
-    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`tar failed (${code}): ${err.slice(0, 200)}`))));
+    const abort = () => child.kill("SIGKILL");
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    child.stderr.on("data", (c) => (err = (err + c).slice(-2000)));
+    child.on("error", (e) => { signal?.removeEventListener("abort", abort); reject(new Error(`tar unavailable: ${e.message}`)); });
+    child.on("close", (code) => {
+      signal?.removeEventListener("abort", abort);
+      if (signal?.aborted) reject(signal.reason);
+      else if (code === 0) resolve();
+      else reject(new Error(`tar failed (${code}): ${err.slice(0, 200)}`));
+    });
   });
 }
 
 /** Streaming sha256 of a file — never loads it whole. */
-function sha256File(file) {
-  return new Promise((resolve, reject) => {
-    const h = require("crypto").createHash("sha256");
-    fs.createReadStream(file)
-      .on("data", (c) => h.update(c))
-      .on("error", reject)
-      .on("end", () => resolve(h.digest("hex")));
-  });
+async function sha256File(file, signal) {
+  signal?.throwIfAborted();
+  const h = require("crypto").createHash("sha256");
+  for await (const chunk of fs.createReadStream(file, { signal })) h.update(chunk);
+  signal?.throwIfAborted();
+  return h.digest("hex");
 }
 
 /*
@@ -48,7 +56,7 @@ class RuntimeProvisioner {
     this.runtimesDir = runtimesDir;
     this.hardware = hardware;
     this.onEvent = onEvent || (() => {});
-    this._active = null; // in-flight provision promise
+    this._active = null; // one identified build, with independently cancellable waiters
     this._progress = null;
   }
 
@@ -86,35 +94,61 @@ class RuntimeProvisioner {
 
   /** Ensure the runtime binary exists locally; download + extract if not. */
   async ensure(kind, opts = {}) {
+    return this._request(kind, opts, false);
+  }
+
+  async _request(kind, opts, force) {
     opts.signal?.throwIfAborted();
-    if (this._active) {
-      if (!opts.signal) return this._active;
-      // A voice setup can join an already-running model-runtime setup. Its
-      // own cancellation must release its waiter without stopping that other
-      // operation or keeping plugin disposal blocked behind the download.
-      return new Promise((resolve, reject) => {
-        const cleanup = () => opts.signal.removeEventListener("abort", abort);
-        const abort = () => { cleanup(); reject(opts.signal.reason); };
-        opts.signal.addEventListener("abort", abort, { once: true });
-        this._active.then(value => { cleanup(); if (opts.signal.aborted) reject(opts.signal.reason); else resolve(value); }, error => { cleanup(); reject(error); });
-      });
+    const build = this.selectBuild(kind, opts), key = `${kind}/${build.version}/${build.key}`;
+    while (this._active) {
+      const active = this._active;
+      // Only an identical engine build may share its result. Returning an
+      // unrelated setup's binary used to launch the wrong executable.
+      if (!force && active.key === key && !active.controller.signal.aborted) return this._join(active, opts.signal);
+      await this._wait(active.promise, opts.signal).catch(() => { opts.signal?.throwIfAborted(); });
     }
-    const run = this._ensure(kind, opts);
-    this._active = run;
-    try {
-      return await run;
-    } finally {
-      this._active = null;
-    }
+    opts.signal?.throwIfAborted();
+    const job = { key, controller: new AbortController(), waiters: new Set() };
+    this._active = job;
+    this._progress = { kind, build: build.key, phase: "preparing" };
+    job.promise = Promise.resolve().then(() => this._ensure(kind, { ...opts, signal: job.controller.signal, force })).finally(() => {
+      if (this._active === job) { this._active = null; this._progress = null; }
+    });
+    return this._join(job, opts.signal);
+  }
+
+  _wait(promise, signal, cleanup = () => {}) {
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (error, value) => {
+        if (done) return; done = true;
+        signal?.removeEventListener("abort", abort); cleanup();
+        if (error) reject(error); else resolve(value);
+      };
+      const abort = () => finish(signal.reason);
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
+      promise.then(value => finish(null, value), error => finish(error));
+    });
+  }
+
+  _join(job, signal) {
+    const waiter = {}; job.waiters.add(waiter);
+    return this._wait(job.promise, signal, () => {
+      job.waiters.delete(waiter);
+      if (!job.waiters.size && this._active === job) job.controller.abort(new DOMException("Engine preparation cancelled", "AbortError"));
+    });
   }
 
   async _ensure(kind, opts) {
     opts.signal?.throwIfAborted();
     const build = this.selectBuild(kind, opts);
     const bin = path.join(this.runtimesDir, kind, build.version, build.key, ...build.binPath.split("/"));
-    if (fs.existsSync(bin)) return bin;
+    if (!opts.force && fs.existsSync(bin)) return bin;
 
     const installDir = path.dirname(path.join(this.runtimesDir, kind, build.version, build.key, "x"));
+    if (opts.force) await fsp.rm(installDir, { recursive: true, force: true });
+    opts.signal?.throwIfAborted();
     this.onEvent({ type: "runtime:provisioning", kind, build: build.key, version: build.version });
 
     // Main archive first, then companion archives (e.g. CUDA's cudart
@@ -135,67 +169,78 @@ class RuntimeProvisioner {
       if (String(e.message).includes("free disk space")) throw e;
       /* statfs unsupported — proceed */
     }
-    for (let i = 0; i < archives.length; i++) {
-      opts.signal?.throwIfAborted();
-      const a = archives[i];
-      // llama.cpp ships Windows builds as .zip and Linux builds as .tar.gz —
-      // keep the downloaded file's real extension so extraction picks the
-      // right tool (the arm64/Pi support runs on tarballs).
-      const isTar = /\.t(ar\.)?gz$/i.test(String(a.url));
-      const zipPath = path.join(os.tmpdir(), `kai-runtime-${kind}-${build.version}-${build.key}-${i}.${isTar ? "tar.gz" : "zip"}`);
-      // A finished download that never got extracted (app closed mid-setup)
-      // is reused after hash verification — nobody re-downloads gigabytes.
-      const reusable = fs.existsSync(zipPath) && (await sha256File(zipPath)) === String(a.sha256).toLowerCase();
-      opts.signal?.throwIfAborted();
-      if (!reusable) {
-        let lastPct = -1;
-        await downloadFile(a.url, zipPath, {
-          signal: opts.signal,
-          sha256: a.sha256,
-          sizeBytes: a.sizeBytes,
-          onProgress: (p) => {
-            this._progress = { kind, archive: i + 1, archives: archives.length, ...p };
-            // Emit (and therefore log) only on whole-percent changes — the raw
-            // callback fires per network chunk and would flood core.log.
-            if (p.pct !== null && p.pct !== lastPct) {
-              lastPct = p.pct;
-              this.onEvent({ type: "runtime:download", kind, ...p });
-            }
-          },
-        });
+    await fsp.mkdir(path.dirname(installDir), { recursive: true });
+    const stage = await fsp.mkdtemp(path.join(path.dirname(installDir), `.${build.key}-`));
+    const cachedArchives = [];
+    try {
+      for (let i = 0; i < archives.length; i++) {
+        opts.signal?.throwIfAborted();
+        const a = archives[i];
+        // llama.cpp ships Windows builds as .zip and Linux builds as .tar.gz —
+        // keep the downloaded file's real extension so extraction picks the
+        // right tool (the arm64/Pi support runs on tarballs).
+        const isTar = /\.t(ar\.)?gz$/i.test(String(a.url));
+        const zipPath = path.join(os.tmpdir(), `kai-runtime-${kind}-${build.version}-${build.key}-${i}.${isTar ? "tar.gz" : "zip"}`);
+        cachedArchives.push(zipPath);
+        // A finished download that never got extracted (app closed mid-setup)
+        // is reused after hash verification — nobody re-downloads gigabytes.
+        this._progress = { kind, build: build.key, phase: "verifying", archive: i + 1, archives: archives.length };
+        const reusable = fs.existsSync(zipPath) && (await sha256File(zipPath, opts.signal)) === String(a.sha256).toLowerCase();
+        opts.signal?.throwIfAborted();
+        if (!reusable) {
+          let lastPct = -1;
+          await downloadFile(a.url, zipPath, {
+            signal: opts.signal,
+            sha256: a.sha256,
+            sizeBytes: a.sizeBytes,
+            onProgress: (p) => {
+              this._progress = { kind, build: build.key, archive: i + 1, archives: archives.length, ...p };
+              // Emit (and therefore log) only on whole-percent changes — the raw
+              // callback fires per network chunk and would flood core.log.
+              if (p.pct !== null && p.pct !== lastPct) {
+                lastPct = p.pct;
+                this.onEvent({ type: "runtime:download", kind, ...p });
+              }
+            },
+          });
+        }
+        opts.signal?.throwIfAborted();
+        // Unpacking runs off the main thread — Core shares the app's main
+        // process, and a synchronous 1.4 GB extract froze the window for
+        // minutes (field finding). The UI shows "Setting up engine…".
+        this._progress = { kind, build: build.key, phase: "extracting", archive: i + 1, archives: archives.length };
+        this.onEvent({ type: "runtime:extracting", kind, archive: i + 1, archives: archives.length });
+        opts.signal?.throwIfAborted();
+        if (isTar) await extractTarGzAsync(zipPath, stage, opts);
+        else await extractZipAsync(zipPath, stage, opts);
+        opts.signal?.throwIfAborted();
       }
       opts.signal?.throwIfAborted();
-      // Unpacking runs off the main thread — Core shares the app's main
-      // process, and a synchronous 1.4 GB extract froze the window for
-      // minutes (field finding). The UI shows "Setting up engine…".
-      this._progress = { kind, phase: "extracting" };
-      this.onEvent({ type: "runtime:extracting", kind, archive: i + 1, archives: archives.length });
+      const stagedBin = path.join(stage, ...build.binPath.split("/"));
+      if (!fs.existsSync(stagedBin)) {
+        throw new Error(
+          `Runtime archive for ${build.key} did not contain expected binary at ${build.binPath} — catalog binPath is wrong`
+        );
+      }
+      if (process.platform !== "win32") await fsp.chmod(stagedBin, 0o755);
       opts.signal?.throwIfAborted();
-      if (isTar) await extractTarGzAsync(zipPath, installDir);
-      else await extractZipAsync(zipPath, installDir);
+      // Never expose a half-extracted binary as an installed engine. An app
+      // exit or cancelled companion archive must leave setup retryable.
+      await fsp.rm(installDir, { recursive: true, force: true });
       opts.signal?.throwIfAborted();
-      fs.rmSync(zipPath, { force: true });
-      this._progress = null;
-    }
-    opts.signal?.throwIfAborted();
-    if (!fs.existsSync(bin)) {
-      throw new Error(
-        `Runtime archive for ${build.key} did not contain expected binary at ${build.binPath} — catalog binPath is wrong`
-      );
-    }
-    if (process.platform !== "win32") fs.chmodSync(bin, 0o755);
-    this.onEvent({ type: "runtime:provisioned", kind, bin });
-    return bin;
+      await fsp.rename(stage, installDir);
+      for (const file of cachedArchives) await fsp.rm(file, { force: true }).catch(() => {});
+      this.onEvent({ type: "runtime:provisioned", kind, bin });
+      return bin;
+    } finally { await fsp.rm(stage, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
   }
 
   /** Blow away an installed build and download+extract it fresh. The heal
    *  path for a corrupted extraction (§5: never strand the user). */
   async reprovision(kind, opts = {}) {
     const build = this.selectBuild(kind, opts);
-    const installDir = path.dirname(path.join(this.runtimesDir, kind, build.version, build.key, "x"));
-    fs.rmSync(installDir, { recursive: true, force: true });
     this.onEvent({ type: "runtime:reprovision", kind, build: build.key, version: build.version });
-    return this.ensure(kind, opts);
+    return this._request(kind, opts, true);
   }
 }
 

@@ -96,3 +96,19 @@ test("model metadata stays literal text and card updates retain size and full de
   assert.equal(sizeLabel({ status: "absent", downloadSizeBytes: 1.1e9, diskBytes: 0 }), "1.1 GB download");
   assert.equal(sizeLabel({ status: "ready", downloadSizeBytes: null, diskBytes: null }), "Size unavailable");
 });
+
+test("preparation shows the actual engine stage and offers cancellation without a stale completed progress bar", () => {
+  const f = fixture();
+  for (const [stage, expected] of [["waiting", "Waiting for model…"], ["engine-download", "Engine 42%"], ["verifying", "Checking 42%"], ["verifying-engine", "Checking engine…"], ["extracting", "Setting up engine…"], ["testing", "Checking engine…"], ["starting", "Loading model…"]]) {
+    f.update({ modelQueue: [{ alias: "small", state: "preparing", stage, pct: 42, cancellable: true }] });
+    assert.equal(f.button("small").textContent, expected); assert.equal(f.cancel("small").hidden, false);
+  }
+  assert.match(f.card("small").textContent, /Loading weights into memory/);
+  f.update({ modelQueue: [{ alias: "small", state: "preparing", stage: "waiting", cancellable: true }] });
+  assert.match(f.card("small").textContent, /current local task/);
+  f.update({ modelQueue: [{ alias: "small", state: "preparing", stage: "waiting", cancelling: true, cancellable: false }] });
+  assert.equal(f.button("small").textContent, "Cancelling…"); assert.equal(f.cancel("small").hidden, true);
+  f.update({ modelQueue: [{ alias: "small", state: "cancelled", stage: "engine-download", pct: 42, cancellable: false }] });
+  assert.equal(f.button("small").disabled, false); assert.equal(f.button("small").textContent, "Download & load");
+  assert.equal(presentation(models[0], { state: "done", stage: "engine-download", pct: 42 }).pct, null);
+});

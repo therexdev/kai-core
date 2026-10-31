@@ -12,13 +12,36 @@ const { pipeline } = require("node:stream/promises");
  * both the model manager and the runtime provisioner.
  */
 async function downloadFile(url, dest, { sha256, sizeBytes, onProgress, signal, idleMs = 60000 } = {}) {
+  signal?.throwIfAborted();
   if (!/^[0-9a-f]{64}$/i.test(String(sha256 || ""))) {
     throw new Error("downloadFile requires a pinned sha256 — refusing an unverifiable download");
   }
   const part = dest + ".part";
+  const verifyAndFinish = async total => {
+    signal?.throwIfAborted();
+    const hash = crypto.createHash("sha256");
+    let verified = 0;
+    onProgress?.({ done: 0, total, pct: 0, phase: "verifying" });
+    for await (const chunk of fs.createReadStream(part, { signal })) {
+      hash.update(chunk); verified += chunk.length;
+      onProgress?.({ done: verified, total, pct: total ? Math.floor(verified / total * 100) : null, phase: "verifying" });
+    }
+    signal?.throwIfAborted();
+    if (hash.digest("hex") !== String(sha256).toLowerCase()) {
+      await fsp.rm(part, { force: true });
+      throw new Error("Downloaded file failed SHA-256 verification — discarded. Retry; if it persists the catalog or mirror is wrong.");
+    }
+    fs.renameSync(part, dest);
+    return dest;
+  };
 
   let from = 0;
   if (fs.existsSync(part)) from = fs.statSync(part).size;
+  // A crash/cancellation after the last byte can leave a complete .part.
+  // Asking for bytes beyond EOF produces HTTP 416 forever; verify and finish
+  // those bytes locally instead of forcing another multi-gigabyte download.
+  if (sizeBytes && from === sizeBytes) return verifyAndFinish(from);
+  if (sizeBytes && from > sizeBytes) { await fsp.rm(part, { force: true }); from = 0; }
   const headers = {};
   if (from > 0) headers.range = `bytes=${from}-`;
 
@@ -47,6 +70,10 @@ async function downloadFile(url, dest, { sha256, sizeBytes, onProgress, signal, 
     throw idle.signal.aborted && !signal?.aborted ? stalled() : e;
   }
   const resumed = resp.status === 206;
+  if (resp.status === 416 && from > 0) {
+    clearTimeout(idleTimer); await resp.body?.cancel().catch(() => {});
+    return verifyAndFinish(from);
+  }
   if (!resp.ok && resp.status !== 206) {
     clearTimeout(idleTimer);
     await resp.body?.cancel().catch(() => {});
@@ -79,7 +106,7 @@ async function downloadFile(url, dest, { sha256, sizeBytes, onProgress, signal, 
       try {
         armIdle(); done += chunk.length;
         if (sizeBytes && done > sizeBytes) throw new Error("Download exceeds the expected file size");
-        if (onProgress) onProgress({ done, total, pct: total ? Math.floor((done / total) * 100) : null });
+        if (onProgress) onProgress({ done, total, pct: total ? Math.floor((done / total) * 100) : null, phase: "downloading" });
         callback(null, chunk);
       } catch (e) { callback(e); }
     } }), out, { signal: combined });
@@ -90,19 +117,7 @@ async function downloadFile(url, dest, { sha256, sizeBytes, onProgress, signal, 
     clearTimeout(idleTimer);
   }
 
-  const hash = crypto.createHash("sha256");
-  await new Promise((resolve, reject) => {
-    fs.createReadStream(part)
-      .on("data", (c) => hash.update(c))
-      .on("end", resolve)
-      .on("error", reject);
-  });
-  if (hash.digest("hex") !== String(sha256).toLowerCase()) {
-    await fsp.rm(part, { force: true });
-    throw new Error("Downloaded file failed SHA-256 verification — discarded. Retry; if it persists the catalog or mirror is wrong.");
-  }
-  fs.renameSync(part, dest);
-  return dest;
+  return verifyAndFinish(done);
 }
 
 module.exports = { downloadFile };

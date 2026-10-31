@@ -56,6 +56,20 @@ test("native approvals require this exact visible plugin document before and aft
   assert.equal(await f.api.desktop.confirm("Do work?","Bounded details"),false);
   f.wc.mainFrame={url:"kai-plugin://community.test/index.html"};await assert.rejects(f.api.desktop.confirm("Do work?","x".repeat(16001)),/too long/);
 });
+test("cancelling a reviewed model load dismisses its approval and cannot start the engine afterward",async t=>{
+  const f=fixture(t), controller=new AbortController();let loaded=false, reviewSignal;
+  f.context.core.runtime.ensure=async()=>{loaded=true;};
+  f.context.electron.dialog.showMessageBox=async(_window,options)=>{reviewSignal=options.signal;controller.abort();return{response:1};};
+  await assert.rejects(f.api.models.ensure({alias:"local-model"},controller.signal),{name:"AbortError"});
+  assert.equal(reviewSignal.aborted,true);assert.equal(loaded,false);assert.equal(f.controller.signal.aborted,false);
+});
+test("per-operation model load cancellation reaches preparation without disabling the plugin",async t=>{
+  const f=fixture(t), controller=new AbortController();let preparing;
+  f.context.core.runtime.ensure=async(alias,{signal})=>{assert.equal(alias,"local-model");preparing=signal;await new Promise((resolve,reject)=>signal.addEventListener("abort",()=>reject(signal.reason),{once:true}));};
+  const loading=f.api.models.ensure({alias:"local-model"},controller.signal),rejected=assert.rejects(loading,{name:"AbortError"});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(preparing.aborted,false);controller.abort();await rejected;
+  assert.equal(preparing.aborted,true);assert.equal(f.controller.signal.aborted,false);assert.equal(f.api.models.list().length,1);
+});
 test("external URLs and account paths cannot bypass destination validation",async t=>{
   const f=fixture(t);for(const url of ["file:///tmp/local","http://example.org","https://user:secret@example.org"])await assert.rejects(f.api.desktop.openExternal(url),/HTTPS/);
   f.setPrivacy("network");for(const url of ["https://evil.test/","//evil.test/","/\\evil.test/"])await assert.rejects(f.api.account.request(url),/path/);

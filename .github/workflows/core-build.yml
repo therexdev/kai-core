@@ -46,6 +46,25 @@ jobs:
       - run: node node_modules/electron/install.js
       - run: npm test
       - run: npm run test:services
+      - name: Checkout the reviewed Compare Models stream regression
+        uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai-plugin-model-compare
+          ref: 9a447d3f39b7b205fabe19e995505815502e01bd
+          path: .inference-plugins/compare
+          persist-credentials: false
+      - name: Checkout the reviewed Documents stream regression
+        uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai-plugin-documents
+          ref: 419199f38237fc38a080c890cdf87cec29a81b10
+          path: .inference-plugins/documents
+          persist-credentials: false
+      - name: Verify local inference ownership across Compare Models and Documents
+        run: node .inference-plugins/compare/scripts/test-inference-integration.cjs
+        env:
+          KAI_CORE_SOURCE: ${{ github.workspace }}
+          KAI_DOCUMENTS_SOURCE: ${{ github.workspace }}/.inference-plugins/documents
       - name: Configure Electron sandbox helper on Linux
         if: runner.os == 'Linux'
         run: |

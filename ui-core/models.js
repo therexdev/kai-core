@@ -16,13 +16,22 @@
   function presentation(model, job, pending, error, activeAlias) {
     const state = pending === "enqueue" ? "queued" : job?.state;
     const busy = ["queued", "downloading", "preparing"].includes(state) || !!pending;
-    const pct = state === "downloading" && typeof job?.pct === "number" && Number.isFinite(job.pct) ? Math.max(0, Math.min(100, Math.round(job.pct))) : null;
+    const stage = job?.stage;
+    const progressStage = busy && (state === "downloading" || ["engine-download", "verifying", "verifying-engine"].includes(stage));
+    const pct = progressStage && typeof job?.pct === "number" && Number.isFinite(job.pct) ? Math.max(0, Math.min(100, Math.round(job.pct))) : null;
     const queued = state === "queued";
     const jobError = state === "error" ? job.error || "The model could not be loaded. Try again." : "";
     const failure = error || jobError;
-    const label = pending === "cancel" ? "Cancelling…" : queued ? "Queued"
+    const preparing = stage === "waiting" ? "Waiting for model…"
+      : stage === "engine-download" ? pct === null ? "Downloading engine…" : `Engine ${pct}%`
+      : stage === "extracting" ? "Setting up engine…"
+      : stage === "verifying" ? pct === null ? "Checking model…" : `Checking ${pct}%`
+      : stage === "verifying-engine" ? "Checking engine…"
+      : stage === "testing" ? "Checking engine…"
+      : stage === "starting" ? "Loading model…" : "Preparing…";
+    const label = pending === "cancel" || job?.cancelling && busy ? "Cancelling…" : queued ? "Queued"
       : state === "downloading" ? pct === null ? "Downloading…" : `Downloading ${pct}%`
-      : state === "preparing" ? "Preparing…"
+      : state === "preparing" ? preparing
       : failure ? model.status === "ready" ? "Retry load" : "Retry download"
       : model.status === "ready" ? "Load model" : "Download & load";
     return { label, busy, pct, state: busy ? state : "idle", error: pending ? "" : failure,
@@ -30,7 +39,10 @@
       cancel: busy && !pending && job?.cancellable === true,
       cancelLabel: `${queued ? "Remove from queue" : state === "downloading" ? "Cancel download" : "Cancel preparation"} · ${model.label || model.alias}`,
       cancelTitle: queued ? "Remove from queue" : state === "downloading" ? "Cancel download" : "Cancel preparation",
-      detail: queued && Number.isInteger(job?.position) && job.position > 0 ? `Queue position ${job.position}` : "",
+      detail: queued && Number.isInteger(job?.position) && job.position > 0 ? `Queue position ${job.position}`
+        : busy && stage === "waiting" ? "Waiting for the current local task to finish."
+        : busy && stage === "starting" ? "Loading weights into memory; first startup can take longer."
+        : busy && stage === "extracting" ? "Installing the verified engine files." : "",
     };
   }
   function create({ document, container, request, refresh }) {
@@ -54,9 +66,10 @@
       const cancel = element("button", "model-cancel", controls); cancel.type = "button"; cancel.dataset.cancelModel = model.alias; cancel.hidden = true;
       const close = element("span", "", cancel); close.setAttribute("aria-hidden", "true"); close.textContent = "×";
       const error = element("p", "model-card-error", article); error.setAttribute("role", "alert"); error.hidden = true;
+      const detail = element("p", "model-card-progress", article); detail.hidden = true;
       button.onclick = () => { if (!button.disabled) void perform(model.alias, "enqueue"); };
       cancel.onclick = () => { if (!cancel.disabled && !cancel.hidden) void perform(model.alias, "cancel"); };
-      card = { article, title, status, blurb, size, controls, button, label, cancel, error };
+      card = { article, title, status, blurb, size, controls, button, label, cancel, error, detail };
       cards.set(model.alias, card); return card;
     }
     function paint() {
@@ -81,6 +94,7 @@
         if (!view.cancel && document.activeElement === card.cancel && !view.busy) card.button.focus();
         card.cancel.hidden = !view.cancel; card.cancel.disabled = !view.cancel;
         putText(card.error, view.error); card.error.hidden = !view.error;
+        putText(card.detail, view.detail); card.detail.hidden = !view.detail;
       }
       for (const [alias, card] of cards) if (!current.has(alias)) { card.article.remove(); cards.delete(alias); errors.delete(alias); }
     }

@@ -65,6 +65,40 @@ class PluginManager {
     try { write(this.stateFile, this.state); } catch (error) { this.state = previousState; fs.unlinkSync(path.join(dir, file)); throw error; }
     return this.list();
   }
+  async installAsync(input, { trustNative = false, signal } = {}) {
+    const verifier = require("./package-file-verifier"), verified = verifier.getVerifiedPackage(input);
+    if (!verified) throw Error("Asynchronous installation requires a reviewed package snapshot");
+    const { manifest: m, fingerprint } = verified;
+    if (m.runtime === "native" && trustNative !== true) throw Error("Native plugin installation requires explicit full-computer-access approval");
+    const old = this.state.installed[m.id], publisher = this.state.publishers[m.id], marker = JSON.stringify(old);
+    if (publisher !== undefined && publisher !== fingerprint) throw Error("Publisher changed. This plugin ID remains reserved to protect its saved data");
+    const dir = this.pluginDir(m.id), file = `${m.version}-${crypto.randomUUID()}.json`, target = path.join(dir, file);
+    await verifier.copyApprovedPackageAsync(verified.package, target, { signal });
+    try {
+      signal?.throwIfAborted();
+      if (JSON.stringify(this.state.installed[m.id]) !== marker || this.state.publishers[m.id] !== publisher) throw Error("Plugin changed during installation; review it again");
+      const previousState = structuredClone(this.state);
+      this.state.publishers[m.id] = fingerprint;
+      this.state.installed[m.id] = { name: m.name, version: m.version, fingerprint, digest: verified.digest, permissions: m.permissions, provides: m.provides || [], consumes: m.consumes || [], runtime: m.runtime, nativeApproved: m.runtime === "native" && trustNative, enabled: true, file, previous: old ? { ...old, previous: null } : null };
+      try { write(this.stateFile, this.state); } catch (error) { this.state = previousState; throw error; }
+      return this.list();
+    } catch (error) { await fs.promises.rm(target, { force: true }); throw error; }
+  }
+  async loadAsync(id, { signal, materialize = false } = {}) {
+    if (!safeId(id)) throw Error("Invalid plugin ID");
+    const row = this.state.installed[id]; if (!row?.enabled) throw Error("Plugin is disabled or not installed");
+    if (!/^[0-9]+\.[0-9]+\.[0-9]+-[a-f0-9-]+\.json$/.test(row.file)) throw Error("Invalid installed package path");
+    const marker = JSON.stringify(row), publisher = this.state.publishers[id], dir = this.pluginDir(id);
+    let codeRoot;
+    if (materialize) { const parent = path.join(dir, "code"); directory(parent); codeRoot = path.join(parent, row.digest); }
+    const v = await require("./package-file-verifier").verifyPackageFileAsync(path.join(dir, row.file), { directory: dir, codeRoot, expectedDigest: row.digest, signal });
+    try {
+      signal?.throwIfAborted();
+      if (JSON.stringify(this.state.installed[id]) !== marker || this.state.publishers[id] !== publisher || v.manifest.id !== id || v.fingerprint !== publisher || v.fingerprint !== row.fingerprint || v.manifest.version !== row.version || v.digest !== row.digest || JSON.stringify(v.manifest.permissions) !== JSON.stringify(row.permissions) || v.manifest.runtime !== row.runtime || v.manifest.runtime === "native" && row.nativeApproved !== true) throw Error("Installed plugin identity, code or approval changed");
+      return { ...v, digest: row.digest, dataDir: this.dataDir(id) };
+    } catch (error) { await v.dispose(); throw error; }
+  }
+  materializeAsync(id, options = {}) { return this.loadAsync(id, { ...options, materialize: true }); }
   assertActive(id, expectedDigest, expectedFingerprint) {
     if (!safeId(id)) throw Error("Invalid plugin ID");
     const row = this.state.installed[id];

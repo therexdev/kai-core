@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",

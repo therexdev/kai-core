@@ -575,7 +575,7 @@ class Worker {
     // Runtime loading is shared with local Chat. Stop must release any late
     // lease without terminating another local caller's engine or advertising
     // readiness after this provider request has expired.
-    const acquiring = Promise.resolve().then(() => { current(); return this.runtime.acquireFor(checked.model); }).then(lease => {
+    const acquiring = Promise.resolve().then(() => { current(); return this.runtime.acquireFor(checked.model, { signal }); }).then(lease => {
       if (!accepting || signal.aborted) { lease.release(); throw signal.reason || Error("Provider preparation stopped"); }
       return lease;
     });

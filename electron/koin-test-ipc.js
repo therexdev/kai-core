@@ -387,7 +387,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         workerAbort = new AbortController(); workerTrack = core.gateway.network.trackShadowRequest(workerAbort);
         workerAbort.signal.addEventListener("abort", () => worker.stop().catch(() => {}), { once: true });
         try {
-          const hold = await core.runtime.acquireFor(config.model); hold.release(); workerAbort.signal.throwIfAborted();
+          const hold = await core.runtime.acquireFor(config.model, { signal: workerAbort.signal }); hold.release(); workerAbort.signal.throwIfAborted();
           if (!active()) throw Error("Provider startup cancelled; return to the app and turn it on again");
           await worker.start(); workerAbort.signal.throwIfAborted(); return { state: "test_worker_running" };
         }

@@ -17,7 +17,7 @@ async function executeShadow({ job, catalog, runtime, signal, onChunk, onStage =
   abort.throwIfAborted();
   if (typeof runtime.acquireFor !== "function") throw Error("Shadow work requires a managed runtime lease");
   onStage("loading");
-  const hold = await runtime.acquireFor(j.model);
+  const hold = await runtime.acquireFor(j.model, { signal: abort });
   try {
     abort.throwIfAborted();
     if (runtime.status()?.runtime?.kind !== "llamacpp") throw Error("Shadow metering currently requires llama.cpp");

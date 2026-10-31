@@ -4,13 +4,13 @@
     {
       "id": "kai.assistant",
       "name": "KAI Assistant",
-      "version": "0.3.1",
+      "version": "0.3.3",
       "repository": "therexdev/kai-plugin-assistant",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-assistant/releases/download/v0.3.1/kai-plugin-assistant-0.3.1.kaiplugin",
+      "url": "https://github.com/therexdev/kai-plugin-assistant/releases/download/v0.3.3/kai-plugin-assistant-0.3.3.kaiplugin",
       "description": "The original KAI chat workspace, advanced agents and research, desktop providers, voice and animated desktop companion.",
-      "minCoreVersion": "0.7.3"
+      "minCoreVersion": "0.7.9"
     },
     {
       "id": "kai.brain",
@@ -26,11 +26,11 @@
     {
       "id": "kai.connections",
       "name": "KAI Connections",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "repository": "therexdev/kai-plugin-connections",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-connections/releases/download/v0.3.1/kai-plugin-connections-0.3.1.kaiplugin",
+      "url": "https://github.com/therexdev/kai-plugin-connections/releases/download/v0.3.2/kai-plugin-connections-0.3.2.kaiplugin",
       "description": "Connected app accounts, OAuth, API actions and event subscriptions, with credentials stored by this plugin.",
       "minCoreVersion": "0.7.3"
     },
@@ -59,24 +59,24 @@
     {
       "id": "kai.documents",
       "name": "Documents",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "repository": "therexdev/kai-plugin-documents",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-documents/releases/download/v0.3.0/kai-plugin-documents-0.3.0.kaiplugin",
+      "url": "https://github.com/therexdev/kai-plugin-documents/releases/download/v0.3.1/kai-plugin-documents-0.3.1.kaiplugin",
       "description": "The original local writing workspace with autosave, selection-aware AI edits, streamed suggestions, Apply/Discard/Stop, and native document import/export.",
-      "minCoreVersion": "0.7.0"
+      "minCoreVersion": "0.7.9"
     },
     {
       "id": "kai.model-compare",
       "name": "KAI Model Compare",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "repository": "therexdev/kai-plugin-model-compare",
       "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
       "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
-      "url": "https://github.com/therexdev/kai-plugin-model-compare/releases/download/v0.3.0/kai-plugin-model-compare-0.3.0.kaiplugin",
+      "url": "https://github.com/therexdev/kai-plugin-model-compare/releases/download/v0.3.1/kai-plugin-model-compare-0.3.1.kaiplugin",
       "description": "The original blind A/B model comparison: prompt presets, local and network models, streaming responses, timings, reveal and saved voting scores.",
-      "minCoreVersion": "0.7.0"
+      "minCoreVersion": "0.7.9"
     },
     {
       "id": "kai.code",
@@ -121,6 +121,17 @@
       "url": "https://github.com/therexdev/kai-plugin-remote-access/releases/download/v0.3.0/kai-plugin-remote-access-0.3.0.kaiplugin",
       "description": "The original Local API workspace with API keys, budgets, usage, privacy controls and optional remote relay access.",
       "minCoreVersion": "0.7.0"
+    },
+    {
+      "id": "kai.master-kai-koinos-node",
+      "name": "Master KAI Koinos Node",
+      "version": "0.1.0",
+      "repository": "therexdev/kai-plugin-master-kai-koinos-node",
+      "fingerprint": "c0f3c78f6e5a04d9ff4a4d8702ac8e2a66a7f9f0cad3287c46a80823304be440",
+      "publicKey": "MCowBQYDK2VwAyEAujPt2xYcqLkorZIdmrBEa0ZlLml+yEERDhP+YtI2t5o=",
+      "url": "https://github.com/therexdev/kai-plugin-master-kai-koinos-node/releases/download/v0.1.0/kai-plugin-master-kai-koinos-node-0.1.0.kaiplugin",
+      "description": "Developer node workspace with the full Master Node dashboard, wallet, block production, Node API and community distribution.",
+      "minCoreVersion": "0.7.3"
     }
   ]
 }

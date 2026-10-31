@@ -2,7 +2,7 @@
 const fs=require("node:fs/promises"),os=require("node:os"),path=require("node:path");
 const { assertPublicTarget, publicPageRequest } = require("../public-http");
 const { MAX_BYTES } = require("./package");
-const { verifyPackageFile } = require("./package-file-verifier");
+const { verifyPackageFileAsync } = require("./package-file-verifier");
 async function downloadPackage(url, { signal = AbortSignal.timeout(900000), lookup, request = publicPageRequest, onProgress = () => {} } = {}) {
   for (let redirects=0;redirects<=5;redirects++) {
     signal.throwIfAborted();const u=new URL(url);
@@ -21,7 +21,7 @@ async function downloadPackage(url, { signal = AbortSignal.timeout(900000), look
       for(;;){signal.throwIfAborted();const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>MAX_BYTES)throw Error("Plugin exceeds 512 MB");let offset=0;while(offset<value.length){const written=await handle.write(value,offset,value.length-offset);if(!written.bytesWritten)throw Error("Plugin download could not be saved");offset+=written.bytesWritten;}
         if(Date.now()-last>500){last=Date.now();onProgress({received:size,total:length});}}
       await handle.close();handle=null;signal.throwIfAborted();onProgress({received:size,total:length,verifying:true});
-      verified=await verifyPackageFile(file,{extract:false});signal.throwIfAborted();retained=true;
+      verified=await verifyPackageFileAsync(file,{extract:false,signal});signal.throwIfAborted();retained=true;
       return Object.freeze({...verified,dispose:async()=>{try{await verified.dispose();}finally{await fs.rm(directory,{recursive:true,force:true});}}});
     }finally{await reader?.cancel().catch(()=>{});await handle?.close().catch(()=>{});if(!retained){try{await verified?.dispose();}finally{await fs.rm(directory,{recursive:true,force:true});}}}
   }

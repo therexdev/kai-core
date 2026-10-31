@@ -40,6 +40,7 @@ class FoundationPluginServices {
     Object.assign(this, { manager, createApi, onDisposeError, onError });
     this.services = new Map(); this.records = new Map(); this.starting = new Map(); this.closeTasks = new Map(); this.backgroundErrors = new Map(); this.exports = new Map(); this.pending = new Set(); this.closing = new Set(); this.stopped = false;
     this.execution = new AsyncLocalStorage();
+    this.startControllers = new Map(); this.uiLoads = new Set(); this.lifetime = new AbortController();
   }
   permission() { return null; } // Native UI method names belong to the plugin.
   active(record) { if (this.stopped || record.controller.signal.aborted || this.closing.has(record.manifest.id) || this.records.get(record.manifest.id) !== record) throw Error("Plugin is closing"); }
@@ -87,7 +88,18 @@ class FoundationPluginServices {
     const row = this.manager.state.installed[id];
     // Native runtime and UI share one immutable verified package snapshot.
     // Large native assets must not be parsed into a second retained copy.
-    return row?.runtime === "native" ? this.ensure(id) : this.manager.load(id);
+    if (row?.runtime === "native") return this.ensure(id);
+    if (this.stopped || this.closing.has(id)) throw Error("Plugin is closing");
+    const controller = new AbortController(), signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
+    const loading = { id, controller, promise: null };
+    loading.promise = Promise.resolve().then(async () => {
+      signal.throwIfAborted();
+      const verified = this.manager.materializeAsync ? await this.manager.materializeAsync(id, { signal }) : this.manager.load(id);
+      try { signal.throwIfAborted(); return verified; }
+      catch (error) { await verified.dispose?.(); throw error; }
+    });
+    this.uiLoads.add(loading);
+    try { return await loading.promise; } finally { this.uiLoads.delete(loading); }
   }
   async ensure(id) {
     if (this.stopped || this.closing.has(id)) throw Error("Plugin is closing");
@@ -98,29 +110,44 @@ class FoundationPluginServices {
       this.active(running); return running;
     }
     if (this.starting.has(id)) return this.starting.get(id);
-    const verified = this.manager.materialize(id);
-    if (verified.manifest.runtime !== "native") throw Error("This plugin has no native service");
-    const record = { ...verified, controller: new AbortController(), service: null, loader: null, cleanup: [] };
-    record.invocation = () => this.execution.getStore()?.initiator || null;
-    this.records.set(id, record);
+    const controller = new AbortController(); let record, verified;
+    // Register the lifetime before starting I/O so disable, update and quit can
+    // cancel a pending verification just as they can cancel a running service.
+    this.startControllers.set(id, controller);
     const start = Promise.resolve().then(async () => {
+      controller.signal.throwIfAborted();
+      verified = this.manager.materializeAsync ? await this.manager.materializeAsync(id, { signal: controller.signal }) : this.manager.materialize(id);
+      controller.signal.throwIfAborted();
+      if (this.stopped || this.closing.has(id)) throw Error("Plugin is closing");
+      if (verified.manifest.runtime !== "native") throw Error("This plugin has no native service");
+      this.manager.assertActive(id, verified.digest, verified.fingerprint);
+      record = { ...verified, controller, service: null, loader: null, cleanup: [] };
+      record.invocation = () => this.execution.getStore()?.initiator || null;
+      this.records.set(id, record);
       this.active(record);
       const api = await this.createApi(record);
       this.active(record);
-      record.api = Object.freeze({ ...api, version: 1, plugin: Object.freeze({ id, version: record.manifest.version, root: record.root, dataDir: record.dataDir }), signal: record.controller.signal, services: this.serviceAPI(record) });
+      record.api = Object.freeze({ ...api, version: 1, plugin: Object.freeze({ id, version: record.manifest.version, root: record.root, dataDir: record.dataDir }), signal: controller.signal, services: this.serviceAPI(record) });
       record.loader = loadNative(path.join(record.root, record.manifest.service), record.root);
       if (typeof record.loader.exports?.create !== "function") throw Error("Plugin service must export create(api)");
       record.service = await record.loader.exports.create(record.api);
       if (!record.service || typeof record.service.call !== "function") throw Error("Plugin service must implement call(method, input, signal)");
       this.active(record); this.services.set(id, record.service); this.backgroundErrors.delete(id); return record;
     }).catch(async error => {
-      record.controller.abort(error); this.removeExports(record); this.services.delete(id);
-      try { await this.cleanupRecord(record, "startup-error"); if (this.records.get(id) === record) this.records.delete(id); }
-      catch (cleanupError) { this.onError(id, cleanupError); }
+      controller.abort(error);
+      if (record) {
+        this.removeExports(record); this.services.delete(id);
+        try { await this.cleanupRecord(record, "startup-error"); if (this.records.get(id) === record) this.records.delete(id); }
+        catch (cleanupError) { this.onError(id, cleanupError); }
+      } else { await verified?.dispose?.(); }
       throw error;
-    }).finally(() => { if (this.starting.get(id) === start) this.starting.delete(id); });
+    }).finally(() => {
+      if (this.starting.get(id) === start) this.starting.delete(id);
+      if (this.startControllers.get(id) === controller) this.startControllers.delete(id);
+    });
     this.starting.set(id, start); return start;
   }
+
   async call(rendererRecord, method, input) {
     if (!validMethod(method)) throw Error("Invalid plugin method");
     const id = rendererRecord.manifest.id, record = await this.ensure(id);
@@ -146,7 +173,7 @@ class FoundationPluginServices {
       try { await record.service?.dispose?.({ reason }); } catch (error) { errors.push(error); }
       try { await record.api?.dispose?.(); } catch (error) { errors.push(error); }
       if (errors.length) throw new AggregateError(errors, `Plugin ${record.manifest.id} could not completely stop`);
-      record.loader?.dispose(); record.dispose?.();
+      record.loader?.dispose(); await record.dispose?.();
     });
     record.cleanupTask = task;
     void task.catch(() => { if (record.cleanupTask === task) record.cleanupTask = null; });
@@ -154,13 +181,19 @@ class FoundationPluginServices {
   }
   close(id, { reason = "disable" } = {}) {
     if (this.closeTasks.has(id)) return this.closeTasks.get(id);
-    const record = this.records.get(id); if (!record) return Promise.resolve();
-    this.closing.add(id); record.controller.abort(Error("Plugin stopped")); this.removeExports(record);
+    const pending = this.starting.get(id), record = this.records.get(id), controller = this.startControllers.get(id), uiLoads = [...this.uiLoads].filter(load => load.id === id);
+    if (!record && !pending && !uiLoads.length) return Promise.resolve();
+    this.closing.add(id); controller?.abort(Error("Plugin stopped")); record?.controller.abort(Error("Plugin stopped"));
+    for (const load of uiLoads) load.controller.abort(Error("Plugin stopped"));
+    if (record) this.removeExports(record);
     const task = (async () => {
-      await this.starting.get(id)?.catch(() => {});
+      await pending?.catch(() => {});
+      await Promise.allSettled(uiLoads.map(load => load.promise));
+      const current = this.records.get(id);
+      if (!current) return;
       try {
-        await this.cleanupRecord(record, reason); this.services.delete(id);
-        if (this.records.get(id) === record) this.records.delete(id);
+        await this.cleanupRecord(current, reason); this.services.delete(id);
+        if (this.records.get(id) === current) this.records.delete(id);
       } catch (error) { this.services.delete(id); await this.onDisposeError(id, error); throw error; }
     })().finally(() => { this.closing.delete(id); this.closeTasks.delete(id); });
     this.closeTasks.set(id, task); return task;
@@ -170,8 +203,10 @@ class FoundationPluginServices {
     const failure = results.find(result => result.status === "rejected"); if (failure) throw failure.reason;
   }
   async dispose() {
-    this.stopped = true;
-    const results = await Promise.allSettled([...this.records.keys()].map(id => this.close(id, { reason: "quit" })));
+    this.stopped = true; this.lifetime.abort(Error("Core is closing"));
+    const ids = new Set([...this.records.keys(), ...this.starting.keys(), ...[...this.uiLoads].map(load => load.id)]);
+    const results = await Promise.allSettled([...ids].map(id => this.close(id, { reason: "quit" })));
+    await Promise.allSettled([...this.uiLoads].map(load => load.promise));
     this.exports.clear();
     const failures = results.filter(result => result.status === "rejected"); if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Some plugin services could not stop");
   }

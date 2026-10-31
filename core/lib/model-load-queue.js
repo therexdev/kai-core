@@ -20,7 +20,7 @@ class ModelLoadQueue {
     const resolved = this.models.resolveAlias(alias);
     const existing = this.entries.get(alias);
     if (existing === this.current || this.pending.includes(existing)) return { duplicate: true, job: this._snapshot(existing) };
-    const job = { alias, packageId: resolved.packageId, state: "queued", error: null, cancelRequested: false };
+    const job = { alias, packageId: resolved.packageId, kind: resolved.runtime || "llamacpp", state: "queued", error: null, cancelRequested: false, controller: new AbortController() };
     this.entries.set(alias, job);
     this.pending.push(job);
     this._pump();
@@ -35,17 +35,25 @@ class ModelLoadQueue {
   _snapshot(job) {
     const active = this.current === job;
     const progress = active ? this._download(job) : null;
-    // Runtime setup can report a percentage, but it has no safe per-model
-    // cancellation boundary. Do not present its global download as cancellable.
-    const setup = active && this.runtime._loading?.alias === job.alias ? this.runtime.provisioner?.downloadProgress?.() : null;
+    const runtime = this.runtime.status?.() || {};
+    const loadingAlias = runtime.loadingAlias ?? this.runtime._loading?.alias;
+    const currentSetup = active && loadingAlias === job.alias ? this.runtime.provisioner?.downloadProgress?.() : null;
+    const setup = currentSetup?.kind === job.kind ? currentSetup : null;
+    const stage = progress ? progress.phase === "verifying" ? "verifying" : "downloading"
+      : setup?.phase === "extracting" ? "extracting"
+      : setup?.phase === "verifying" ? "verifying-engine"
+      : setup?.phase === "downloading" ? "engine-download"
+      : loadingAlias && loadingAlias !== job.alias ? "waiting"
+      : runtime.loadingStage || "preparing";
     const pct = (progress || setup)?.pct;
     return {
       alias: job.alias,
-      state: active ? (progress ? "downloading" : "preparing") : job.state,
+      state: active ? (stage === "downloading" ? "downloading" : "preparing") : job.state,
+      ...(active ? { stage, elapsedMs: Math.max(0, Date.now() - job.startedAt), cancelling: job.cancelRequested } : {}),
       pct: active && typeof pct === "number" && Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.round(pct))) : null,
       ...(job.state === "queued" ? { position: this.pending.indexOf(job) + 1 } : {}),
       error: job.error,
-      cancellable: job.state === "queued" || (active && !!progress && !job.cancelRequested),
+      cancellable: job.state === "queued" || (active && !job.cancelRequested),
     };
   }
 
@@ -58,32 +66,33 @@ class ModelLoadQueue {
     if (index !== -1) {
       this.pending.splice(index, 1);
       job.state = "cancelled";
+      job.controller.abort(); this.onChange(job);
       return { cancelled: true, alias: job.alias };
     }
-    if (job !== this.current || job.cancelRequested || !this._download(job)) return { cancelled: false, alias: job.alias };
-    // Match this job's weights/projector rather than cancelling a voice setup,
-    // Alpha migration, or an unrelated model download from another caller.
-    const result = this.models.cancelDownload();
-    if (result?.cancelled) job.cancelRequested = true;
-    return { cancelled: !!result?.cancelled, alias: job.alias };
+    if (job !== this.current || job.cancelRequested) return { cancelled: false, alias: job.alias };
+    // RuntimeManager releases this request's interest in the load. Shared
+    // callers keep their work; the final owner cancels download/setup/start.
+    job.cancelRequested = true;
+    job.controller.abort(new DOMException("Model preparation cancelled", "AbortError"));
+    this.onChange(job);
+    return { cancelled: true, alias: job.alias };
   }
 
   _pump() {
     if (this.closed || this.current || !this.pending.length) return;
     const job = this.current = this.pending.shift();
     job.state = "preparing";
+    job.startedAt = Date.now();
     this.onChange(job);
     job.promise = Promise.resolve().then(async () => {
       if (this.closed) throw Error("Core is stopping");
       if (this.models._alphaMigration) throw Error("Wait for Alpha model migration to finish");
+      job.controller.signal.throwIfAborted();
       this.models.resolveAlias(job.alias); // recheck revocation before its turn
-      await this.runtime.preflight?.();
-      // Wait here rather than leaving a request parked inside ensure(): Core
-      // may quit while a warm-start or another caller is loading a model.
-      // A closed queue must not start its own download when that load settles.
-      while (this.runtime._loading && !this.closed) await this.runtime._loading.promise.catch(() => {});
+      await this.runtime.preflight?.({ signal: job.controller.signal });
+      job.controller.signal.throwIfAborted();
       if (this.closed) throw Error("Core is stopping");
-      return this.runtime.ensure(job.alias);
+      return this.runtime.ensure(job.alias, { signal: job.controller.signal });
     }).then(() => {
       job.state = job.cancelRequested || this.closed ? "cancelled" : "done";
     }, error => {

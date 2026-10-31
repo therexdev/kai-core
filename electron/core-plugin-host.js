@@ -6,7 +6,7 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
 class PluginHost {
   constructor({ electron, manager, core, features, getContainerWindow, onActivate }) {
     Object.assign(this, { electron, manager, core, features, getContainerWindow, onActivate });
-    this.windows = new Map(); this.openings = new Map(); this.active = 0; this.selected = null; this.activation = 0; this.bounds = null;
+    this.windows = new Map(); this.openings = new Map(); this.generations = new Map(); this.active = 0; this.selected = null; this.activation = 0; this.bounds = null;
     electron.ipcMain.handle("kai-plugin:call", (event, method, input) => this.call(event, method, input));
     electron.ipcMain.handle("kai-plugin:dialog", (event, kind, input) => this.rendererDialog(event, kind, input));
     const container = getContainerWindow?.();
@@ -23,15 +23,17 @@ class PluginHost {
   async open(id, bounds) {
     if (typeof id !== "string") throw Error("Choose an installed app");
     const activation = ++this.activation;
+    const generation = this.generations.get(id) || 0;
     if (this.getContainerWindow) { this.selected = null; this.hideViews(); }
     await this.features?.closeTasks?.get(id);
+    if (activation !== this.activation || generation !== (this.generations.get(id) || 0)) return { opened: false };
     // A running view uses the exact signed bytes already verified at launch.
     // Recheck installed identity/grants; avoid rehashing large voice payloads on
     // every navigation. New views always verify the signed package again.
     const current = this.windows.get(id);
     if (current) this.manager.assertActive(id, current.digest, current.fingerprint);
-    const verified = current || (this.features?.verifiedForUI ? await this.features.verifiedForUI(id) : this.manager.load(id));
-    if (activation !== this.activation) { if (!current && verified.manifest.runtime === "sandboxed") verified.dispose?.(); return { opened: false }; }
+    const verified = current || (this.features?.verifiedForUI ? await this.features.verifiedForUI(id) : await (this.manager.loadAsync ? this.manager.loadAsync(id) : this.manager.load(id)));
+    if (activation !== this.activation || generation !== (this.generations.get(id) || 0)) { if (!current && verified.manifest.runtime === "sandboxed") await verified.dispose?.(); return { opened: false }; }
     if (this.getContainerWindow) {
       this.hideViews(); this.selected = id;
       if (bounds) this.setBounds(bounds, id);
@@ -44,7 +46,7 @@ class PluginHost {
     }
     try { if (pending) await pending; }
     catch (error) {
-      if (!current && verified.manifest.runtime === "sandboxed") verified.dispose?.();
+      if (!current && verified.manifest.runtime === "sandboxed") await verified.dispose?.();
       if (activation === this.activation && this.getContainerWindow) { this.hide(); this.onActivate?.({ page: "plugins", error: error.message }); }
       throw error;
     }
@@ -123,7 +125,7 @@ class PluginHost {
       if (this.windows.get(id) === record) this.windows.delete(id);
       if (view && !window.isDestroyed()) window.contentView.removeChildView(view);
       if (!record.closingReason) void (this.features?.detachWindow?.(id) || this.features?.close(id))?.catch(error => console.warn("[plugin]", error.message));
-      session.protocol.unhandle("kai-plugin"); if (manifest.runtime === "sandboxed") releasePackage?.(); void session.clearStorageData().catch(() => {});
+      session.protocol.unhandle("kai-plugin"); if (manifest.runtime === "sandboxed") void Promise.resolve(releasePackage?.()).catch(error => console.warn("[plugin-cleanup]", error.message)); void session.clearStorageData().catch(() => {});
     };
     record.cleanup = cleanup;
     if (view) webContents.once("destroyed", cleanup); else window.once("closed", cleanup);
@@ -141,6 +143,7 @@ class PluginHost {
     else record.window.destroy();
   }
   close(id, reason = "disable") {
+    this.generations.set(id, (this.generations.get(id) || 0) + 1);
     if (this.selected === id) { this.hide(); this.onActivate?.({ page: "plugins" }); }
     const record = this.windows.get(id); if (record) record.closingReason = reason;
     this.destroyRecord(record); return this.features?.close(id, { reason }) || Promise.resolve();

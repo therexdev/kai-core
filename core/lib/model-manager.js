@@ -259,7 +259,8 @@ class ModelManager {
    * Ensure a package is present and verified; downloads (with resume) when
    * absent. Returns the on-disk path. Single-flight per Core instance.
    */
-  async ensurePackage(packageId) {
+  async ensurePackage(packageId, { signal } = {}) {
+    signal?.throwIfAborted();
     if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     if (String(packageId).startsWith("custom:")) {
       const sha = packageId.slice(7);
@@ -292,6 +293,7 @@ class ModelManager {
 
     fs.mkdirSync(this.modelsDir, { recursive: true });
     const controller = new AbortController();
+    const downloadSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     this._active = { alias: packageId, controller };
     this._progress = { packageId, pct: 0, done: 0, total: pkg.sizeBytes || null };
     this.state.set("modelDownload", { packageId, startedAt: new Date().toISOString() });
@@ -301,16 +303,16 @@ class ModelManager {
       await downloadFile(pkg.url, file, {
         sha256: pkg.sha256,
         sizeBytes: pkg.sizeBytes,
-        signal: controller.signal,
-        onProgress: ({ pct, done, total }) => {
-          this._progress = { packageId, pct, done, total };
+        signal: downloadSignal,
+        onProgress: ({ pct, done, total, phase }) => {
+          this._progress = { packageId, pct, done, total, phase };
           if (pct !== null && pct !== lastPct) {
             lastPct = pct;
             this.onEvent({ type: "model:download", packageId, pct, done, total });
           }
         },
       });
-      controller.signal.throwIfAborted();
+      downloadSignal.throwIfAborted();
       this.onEvent({ type: "model:ready", packageId, path: file });
       return file;
     } finally {
@@ -329,7 +331,8 @@ class ModelManager {
    *  (--mmproj). Same fail-closed rules as the weights themselves — pinned
    *  sha256 or no download, quarantine honored via the parent package.
    *  Returns the local path, or null when the package has no projector. */
-  async ensureMmproj(packageId) {
+  async ensureMmproj(packageId, { signal } = {}) {
+    signal?.throwIfAborted();
     if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     const pkg = this.catalog.packages[packageId];
     const mm = pkg && pkg.mmproj;
@@ -345,19 +348,20 @@ class ModelManager {
     if (this._active) throw new Error(`Another download is in progress (${this._active.alias})`);
     fs.mkdirSync(this.modelsDir, { recursive: true });
     const controller = new AbortController();
+    const downloadSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     this._active = { alias: `${packageId}#mmproj`, controller };
     this._progress = { packageId: `${packageId}#mmproj`, pct: 0, done: 0, total: mm.sizeBytes || null };
     try {
       await downloadFile(mm.url, file, {
         sha256: mm.sha256,
         sizeBytes: mm.sizeBytes,
-        signal: controller.signal,
-        onProgress: ({ pct, done, total }) => {
-          this._progress = { packageId: `${packageId}#mmproj`, pct, done, total };
+        signal: downloadSignal,
+        onProgress: ({ pct, done, total, phase }) => {
+          this._progress = { packageId: `${packageId}#mmproj`, pct, done, total, phase };
           this.onEvent({ type: "model:download", packageId: `${packageId}#mmproj`, pct, done, total });
         },
       });
-      controller.signal.throwIfAborted();
+      downloadSignal.throwIfAborted();
       return file;
     } finally {
       this._active = null;

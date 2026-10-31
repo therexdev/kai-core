@@ -268,7 +268,7 @@ class CreditProvider {
       const worker = this.worker;
       this.abort.signal.addEventListener("abort", () => { this.stopWorker(worker).catch(() => {}); }, { once: true });
       const combined = AbortSignal.any([signal, this.abort.signal]);
-      const hold = await this.core.runtime.acquireFor(model.id); hold.release(); current(); this.guard(c, combined);
+      const hold = await this.core.runtime.acquireFor(model.id, { signal: combined }); hold.release(); current(); this.guard(c, combined);
       await this.worker.start(combined); current(); this.guard(c, combined); return { state: "running" };
   }
   stopWorker(worker = this.worker) {

@@ -92,11 +92,11 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     // otherwise Core provisions its own portable build (hash-pinned like
     // every engine) — used when the managed llama.cpp build can't run here,
     // or forced via KAI_RUNTIME. Nobody is ever sent to a website.
-    makeFallback: async () =>
+    makeFallback: async ({ signal } = {}) =>
       (await OllamaRuntime.ensureRunning({
-        ...ollamaAddr,
+        ...ollamaAddr, signal,
         onEvent: events,
-        provision: () => provisioner.ensure("ollama", { cap: "cpu" }),
+        provision: () => provisioner.ensure("ollama", { cap: "cpu", signal }),
         modelsDir: path.join(dataDir, "ollama-models"),
       }))
         ? new OllamaRuntime({ ...ollamaAddr, onEvent: events })
@@ -369,8 +369,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     async start() {
       const p = await gateway.listen();
       events({ type: "core:ready", message: `gateway on http://127.0.0.1:${p}` });
-      const ready = models.aliases().filter(a => a.status === "ready");
-      if (ready.length === 1) runtime.ensure(ready[0].alias).catch(error => events({type:"runtime:warmstart-failed",message:error.message}));
+      // Opening Core should not allocate model/GPU memory. Explicit Load,
+      // Chat and provider requests prepare the engine when it is needed.
       syncKillSwitch().catch(() => {});
       this._policyTimer = setInterval(() => syncKillSwitch().catch(() => {}), 5 * 60 * 1000);
       this._policyTimer.unref?.();
@@ -382,7 +382,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
       wallet.disposeCreditStorage();
       if (this._policyTimer) clearInterval(this._policyTimer);
       await earn.stop({userIntent:false}).catch(() => {});
-      runtime.stop();
+      await runtime.stop();
       await gateway.close();
     },
   };

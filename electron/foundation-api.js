@@ -23,7 +23,8 @@ function createFoundationApi(ctx, record) {
     if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw Error("Unreadable plugin preferences; file preserved");
   }
   const settingKey = key => { if (typeof key !== "string" || !key || key.length > 180 || key.split(".").some(p => ["__proto__", "constructor", "prototype", ""].includes(p))) throw Error("Invalid preference key"); return key.split("."); };
-  async function confirm(title, detail) {
+  async function confirm(title, detail, extraSignal) {
+    extraSignal?.throwIfAborted();
     active(); const initiator = record.invocation?.();
     const requester = initiator || null;
     const ownerId = requester?.id || id, w = window(), wc = requester?.webContents || contents(), frame = requester?.frame || wc?.mainFrame;
@@ -33,7 +34,7 @@ function createFoundationApi(ctx, record) {
     if (!reviewable()) return false;
     const message = String(title), text = typeof detail === "string" ? detail : JSON.stringify(detail, null, 2);
     if (!message || message.length > 180 || typeof text !== "string" || text.length > 16000) throw Error("Action details are too long to review");
-    const dialogSignal = AbortSignal.any([signal, ...(requester?.signal ? [requester.signal] : []), ...(ctx.getDialogSignal?.(ownerId) ? [ctx.getDialogSignal(ownerId)] : [])]);
+    const dialogSignal = AbortSignal.any([signal, ...(extraSignal ? [extraSignal] : []), ...(requester?.signal ? [requester.signal] : []), ...(ctx.getDialogSignal?.(ownerId) ? [ctx.getDialogSignal(ownerId)] : [])]);
     const result = await electron.dialog.showMessageBox(w, { type: "question", title: "KAI · Review action", message,
       detail: `${record.manifest.name}${requester && requester.id !== id ? ` · Requested by ${requester.name}` : ""}\n\n${text}`, buttons: ["Cancel", "Allow once"], defaultId: 0, cancelId: 0, noLink: true, signal: dialogSignal });
     active(); return result.response === 1 && !dialogSignal.aborted && reviewable();
@@ -106,7 +107,15 @@ function createFoundationApi(ctx, record) {
     version:1, plugin:Object.freeze({id,version:record.manifest.version,root:record.root,dataDir:record.dataDir}), signal, settings,
     models:Object.freeze({
       list(){requireGrant("models.read");return structuredClone(core.models.aliases());},
-      async ensure({alias}){requireGrant("models.manage");if(!await confirm("Load this model?",String(alias)))throw Error("Model load cancelled");active();return core.runtime.ensure(alias);},
+      async ensure({alias}, extraSignal) {
+        requireGrant("models.manage");
+        const requestSignal = AbortSignal.any([signal, ...(extraSignal ? [extraSignal] : [])]);
+        requestSignal.throwIfAborted();
+        const approved = await confirm("Load this model?", String(alias), requestSignal);
+        requestSignal.throwIfAborted(); active();
+        if (!approved) throw Error("Model load cancelled");
+        return core.runtime.ensure(alias, { signal: requestSignal });
+      },
       request:modelRequest,
       async embeddings(input, extraSignal) {
         requireGrant("inference.local");

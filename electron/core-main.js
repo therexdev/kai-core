@@ -8,6 +8,8 @@ const { channelConfig, configureDesktop } = require("../core/lib/release-channel
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
 let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, appUpdates, alphaMigration, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
+const pluginIO = new Set();
+async function trackPluginIO(task) { pluginIO.add(task); try { return await task; } finally { pluginIO.delete(task); } }
 const messageDialogs = require("./core-dialogs").createCoreDialogs({ electron, getWindow: () => win, isClosing: () => shuttingDown });
 // Electron is shared with native plugins. Every existing message-box caller gets
 // the same trusted Core presentation while keeping its approval/result contract.
@@ -18,7 +20,7 @@ function stop() {
   if (!stopping) stopping = (async () => {
     pluginDownload?.abort(); messageDialogs.dispose(); const errors = [];
     // Finish every cleanup even if an earlier service cannot stop normally.
-    for (const dispose of [() => appUpdates?.dispose(), () => alphaMigration?.dispose(), () => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
+    for (const dispose of [() => appUpdates?.dispose(), () => alphaMigration?.dispose(), () => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => Promise.allSettled([...pluginIO]), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
       try { await dispose(); } catch (error) { errors.push(error); }
     }
     desktopTray?.dispose();
@@ -173,7 +175,7 @@ async function start() {
       }
       case "plugins.registry.check": await catalogMonitor.wake(); return registry.status();
       case "plugins.install": {
-        if (installBusy) throw Error("Finish the current plugin operation first"); installBusy = true;
+        if (installBusy) throw Error("Finish the current plugin operation first"); installBusy = true; pluginDownload = new AbortController();
         let verified;
         try {
           await catalogMonitor.waitForIdle();
@@ -184,8 +186,7 @@ async function start() {
           if (input?.id && !listed && !official) throw Error("Unknown catalog plugin");
           if (input?.url || official || listed) {
             if (core.gateway.network.status().privacyMode === "local-only") throw Error("Local-Only blocks plugin downloads. Install a local package or change Privacy.");
-            pluginDownload = new AbortController();
-            verified = await require("../core/lib/plugins/download").downloadPackage(listed?.url || official?.url || input.url, { signal: AbortSignal.any([pluginDownload.signal, AbortSignal.timeout(900000)]), onProgress: progress => { if(!shuttingDown && !win.isDestroyed()) win.webContents.send("kai-core:plugin-download-progress", progress); } });
+            verified = await trackPluginIO(require("../core/lib/plugins/download").downloadPackage(listed?.url || official?.url || input.url, { signal: AbortSignal.any([pluginDownload.signal, AbortSignal.timeout(900000)]), onProgress: progress => { if(!shuttingDown && !win.isDestroyed()) win.webContents.send("kai-core:plugin-download-progress", progress); } }));
             if (core.gateway.network.status().privacyMode === "local-only") throw Error("Plugin download cancelled by Local-Only privacy");
             if (listed) verifyRegistryPackage(listed, verified);
             if (official && (verified.manifest.id !== official.id || verified.manifest.version !== official.version || verified.fingerprint !== official.fingerprint)) throw Error("Downloaded plugin does not match the reviewed publisher and release");
@@ -194,7 +195,7 @@ async function start() {
             if (chosen.canceled) return null;
             const file = chosen.filePaths[0];
             if (fs.statSync(file).size > require("../core/lib/plugins/package").MAX_BYTES) throw Error("Plugin exceeds the package size limit");
-            verified = await require("../core/lib/plugins/package-file-verifier").verifyPackageFile(file, {extract:false});
+            verified = await trackPluginIO(require("../core/lib/plugins/package-file-verifier").verifyPackageFileAsync(file, {extract:false, signal: pluginDownload.signal}));
           }
           const m = verified.manifest;
           const approved = await pluginReview.review(verified, manager.list().find(plugin => plugin.id === m.id)?.version || null,
@@ -202,8 +203,8 @@ async function start() {
           if (!approved || shuttingDown || win.isDestroyed() || !trustedMainDocument(event, win, origin)) return null;
           await pluginHost.close(m.id, "update");
           if (shuttingDown || !trustedMainDocument(event, win, origin)) return null;
-          const installed = manager.install(verified.package, {trustNative: m.runtime === "native"});
-          void features.startInstalledBackground(manager, m.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed;
+          const installed = await trackPluginIO(manager.installAsync(verified.package, {trustNative: m.runtime === "native", signal: pluginDownload.signal}));
+          if (!shuttingDown) void features.startInstalledBackground(manager, m.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed;
         } finally { try { await verified?.dispose?.(); } finally { installBusy = false; pluginDownload = null; } }
       }
       case "plugins.open": return pluginHost.open(input?.id, input?.bounds);

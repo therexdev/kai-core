@@ -158,6 +158,7 @@ class Gateway {
   stopModelQueue() { this._modelQueue.close(); }
 
   _json(res, status, body) {
+    if (res.destroyed || res.writableEnded) return;
     if (res.headersSent) return res.end();
     const data = JSON.stringify(body);
     res.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(data) });
@@ -355,14 +356,8 @@ class Gateway {
       } catch (e) {
         return this._json(res, 400, { ok: false, error: String(e.message) });
       }
-      // Platform preflight BEFORE the gigabyte model download: a machine
-      // with no inference engine build (today: Linux without Ollama) must
-      // hear that up front, not after the download completes.
-      try {
-        await this.runtime.preflight?.();
-      } catch (e) {
-        return this._json(res, 400, { ok: false, error: String(e.message) });
-      }
+      // Engine preflight runs inside the queued job before model download,
+      // so even fallback setup is visible and can be cancelled from its card.
       try {
         const { duplicate, job } = this._modelQueue.enqueue(alias);
         return this._json(res, 202, { ok: true, started: !duplicate, alias, job, modelQueue: this.modelQueueSnapshot() });
@@ -635,20 +630,19 @@ class Gateway {
       } catch {
         return this._json(res, 400, { error: { message: "Body must be JSON", type: "invalid_request_error" } });
       }
-      let endpoint;
+      const lifetime = this._localRequestLifetime(req, res);
       let releaseHold = () => {};
       try {
+        let endpoint;
         if (this.runtime.acquireFor) {
-          const hold = await this.runtime.acquireFor(alias);
-          endpoint = hold.endpoint;
-          releaseHold = hold.release;
-        } else {
-          endpoint = await this.runtime.ensure(alias);
-        }
-      } catch (e) {
-        return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
-      }
-      return this._proxy(endpoint, "/v1/embeddings", raw, req, res).finally(releaseHold);
+          const hold = await this.runtime.acquireFor(alias, { signal: lifetime.signal });
+          endpoint = hold.endpoint; releaseHold = hold.release;
+        } else endpoint = await this.runtime.ensure(alias, { signal: lifetime.signal });
+        lifetime.signal.throwIfAborted();
+        return await this._proxy(endpoint, "/v1/embeddings", raw, req, res);
+      } catch (error) {
+        if (!lifetime.signal.aborted && !res.destroyed) return this._json(res, error.code === "runtime_busy" ? 503 : 400, { error: { message: String(error.message), type: "invalid_request_error" } });
+      } finally { releaseHold(); lifetime.dispose(); }
     }
 
     if (path.startsWith("/v1/")) {
@@ -777,6 +771,7 @@ class Gateway {
       });
     }
 
+    const lifetime = this._localRequestLifetime(req, res);
     let endpoint;
     // Hold the engine for the life of this response: without the hold, a
     // network job for another model class stops the llama-server this chat
@@ -784,13 +779,16 @@ class Gateway {
     let releaseHold = () => {};
     try {
       if (this.runtime.acquireFor) {
-        const hold = await this.runtime.acquireFor(alias);
+        const hold = await this.runtime.acquireFor(alias, { signal: lifetime.signal });
         endpoint = hold.endpoint;
         releaseHold = hold.release;
       } else {
-        endpoint = await this.runtime.ensure(alias);
+        endpoint = await this.runtime.ensure(alias, { signal: lifetime.signal });
       }
     } catch (e) {
+      lifetime.dispose();
+      if (lifetime.signal.aborted || res.destroyed) return;
+      if (e.code === "runtime_busy") return this._json(res, 503, { error: { message: e.message, type: "runtime_busy" } });
       // §7 routing order: privacy → spending → capability. Capability just
       // failed locally; the network is used only when the privacy mode
       // permits it (Local-First and Network — never Local-Only, where the
@@ -802,34 +800,37 @@ class Gateway {
       }
       return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
     }
-    if (localMessages !== body.messages) {
-      body.messages = localMessages;
-      raw = Buffer.from(JSON.stringify(body));
-    }
-    // Some runtimes (Ollama) serve the model under their own registered name
-    // — rewrite the body so callers keep using the Koinos alias.
-    const served = this.runtime.servedModelName?.();
-    if (served && body.model !== served) {
-      body.model = served;
-      raw = Buffer.from(JSON.stringify(body));
-    }
-    // Local inference: tokens are metered per key, cost is zero (§24).
-    const localKey = req._apiKey || null;
-    return this._proxy(endpoint, "/v1/chat/completions", raw, req, res, {
-      meter: localKey
-        ? (usage) =>
-            this.keys.recordUsage(localKey.id, {
-              inTok: Number(usage.prompt_tokens || 0),
-              outTok: Number(usage.completion_tokens || 0),
-              costMicro: 0,
-            })
-        : null,
-      // Citations ride BOTH ways: the header works for streaming and
-      // non-streaming alike, the body field is the convenient one for the
-      // ordinary JSON call. A caller who never asked for grounding gets
-      // neither, and the response is byte-for-byte what it always was.
+    try {
+      lifetime.signal.throwIfAborted();
+      if (localMessages !== body.messages) {
+        body.messages = localMessages;
+        raw = Buffer.from(JSON.stringify(body));
+      }
+      // Some runtimes (Ollama) serve the model under their own registered name
+      // — rewrite the body so callers keep using the Koinos alias.
+      const served = this.runtime.servedModelName?.();
+      if (served && body.model !== served) {
+        body.model = served;
+        raw = Buffer.from(JSON.stringify(body));
+      }
+      // Local inference: tokens are metered per key, cost is zero (§24).
+      const localKey = req._apiKey || null;
+      return await this._proxy(endpoint, "/v1/chat/completions", raw, req, res, {
+        meter: localKey
+          ? (usage) =>
+              this.keys.recordUsage(localKey.id, {
+                inTok: Number(usage.prompt_tokens || 0),
+                outTok: Number(usage.completion_tokens || 0),
+                costMicro: 0,
+              })
+          : null,
+        // Citations ride BOTH ways: the header works for streaming and
+        // non-streaming alike, the body field is the convenient one for the
+        // ordinary JSON call. A caller who never asked for grounding gets
+        // neither, and the response is byte-for-byte what it always was.
 
-    }).finally(releaseHold);
+      });
+    } finally { releaseHold(); lifetime.dispose(); }
   }
 
   /**
@@ -1080,6 +1081,14 @@ class Gateway {
     });
   }
 
+  _localRequestLifetime(req, res) {
+    const controller = new AbortController();
+    const stop = () => controller.abort(new DOMException("Local model request stopped", "AbortError"));
+    req.once("aborted", stop); res.once("close", stop);
+    if (req.aborted || res.destroyed) stop();
+    return { signal: controller.signal, dispose: () => { req.removeListener("aborted", stop); res.removeListener("close", stop); } };
+  }
+
   /**
    * Raw byte proxy to the runtime. Streaming (SSE) and non-streaming both
    * pass through untouched, so OpenAI SDK clients behave identically against
@@ -1087,6 +1096,23 @@ class Gateway {
    */
   _proxy(endpoint, upstreamPath, bodyBuffer, req, res, { meter = null, extraHeaders = null, injectJson = null } = {}) {
     return new Promise((resolve) => {
+      if (req.aborted || res.destroyed) { resolve(); return; }
+      let settled = false, upstream = null;
+      const finish = () => {
+        if (settled) return; settled = true;
+        res.removeListener("close", cancel); req.removeListener("aborted", cancel);
+        resolve();
+      };
+      const cancel = () => { upstream?.destroy(); up.destroy(); finish(); };
+      const failed = error => {
+        if (settled) return;
+        upstream?.destroy(); up.destroy();
+        if (!res.destroyed) {
+          if (res.headersSent) res.destroy();
+          else this._json(res, 502, { error: { message: `Local model response interrupted: ${error.message}`, type: "server_error" } });
+        }
+        finish();
+      };
       const target = new URL(upstreamPath, endpoint);
       const up = http.request(
         target,
@@ -1099,6 +1125,11 @@ class Gateway {
           },
         },
         (upRes) => {
+          upstream = upRes;
+          if (settled || res.destroyed) { upRes.destroy(); finish(); return; }
+          upRes.once("aborted", () => failed(Error("the model stopped before completing its reply")));
+          upRes.once("error", failed);
+          upRes.once("close", () => { if (!upRes.complete) failed(Error("the model connection closed early")); });
           const head = () =>
             res.writeHead(upRes.statusCode || 502, {
               "content-type": upRes.headers["content-type"] || "application/json",
@@ -1150,6 +1181,7 @@ class Gateway {
             upRes.pipe(res);
           }
           upRes.on("end", () => {
+            if (settled) return;
             if (buffering && !flushed) {
               flushed = true;
               const ctype = String(upRes.headers["content-type"] || "application/json");
@@ -1190,17 +1222,17 @@ class Gateway {
                 /* metering never breaks the response */
               }
             }
-            resolve();
+            finish();
           });
         }
       );
-      up.on("error", (e) => {
-        this._json(res, 502, { error: { message: `Runtime unreachable: ${e.message}`, type: "server_error" } });
-        resolve();
-      });
-      // Client abort (e.g. user stops generation) cancels the upstream too.
-      res.on("close", () => up.destroy());
-      up.end(bodyBuffer);
+      up.on("error", failed);
+      // Socket inactivity and disconnects end the hold even after SSE headers.
+      // A silent engine must not pin every later plugin behind it indefinitely.
+      up.setTimeout(180000, () => failed(Error("the model stopped responding; try a smaller model or a shorter request")));
+      res.once("close", cancel); req.once("aborted", cancel);
+      if (req.aborted || res.destroyed) cancel();
+      else up.end(bodyBuffer);
     });
   }
 

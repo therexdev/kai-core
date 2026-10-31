@@ -26,21 +26,114 @@ function verifyMetadata({manifest:m,entries,publicKey,signature}){
 function hashFile(file){const stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw Error("Expected a regular plugin file");const fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0)),hash=crypto.createHash("sha256"),buffer=Buffer.allocUnsafe(256*1024);try{const opened=fs.fstatSync(fd);if(opened.dev!==stat.dev||opened.ino!==stat.ino)throw Error("Plugin file changed while opening");let length,total=0;while((length=fs.readSync(fd,buffer,0,buffer.length,null))>0){total+=length;if(total>MAX_BYTES)throw Error("Plugin file exceeds its byte limit");hash.update(buffer.subarray(0,length));}return{sha256:hash.digest("hex"),bytes:total};}finally{fs.closeSync(fd);}}
 function verifyCodeRoot(root,entries){const expected=new Map(entries.map(entry=>[entry.path,entry])),seen=new Set();function walk(directory,prefix=""){const st=fs.lstatSync(directory);if(!st.isDirectory()||st.isSymbolicLink())throw Error("Unsafe plugin code directory");for(const name of fs.readdirSync(directory)){const relative=prefix?`${prefix}/${name}`:name,file=path.join(directory,name),stat=fs.lstatSync(file);if(stat.isSymbolicLink())throw Error("Plugin code contains a symbolic link");if(stat.isDirectory()){walk(file,relative);continue;}const entry=expected.get(relative);if(!entry)throw Error("Plugin code contains an unverified file");const actual=hashFile(file);if(actual.bytes!==entry.bytes||actual.sha256!==entry.sha256)throw Error("Installed plugin code was modified; reinstall this plugin");seen.add(relative);}}walk(root);if(seen.size!==expected.size)throw Error("Installed plugin code is incomplete; reinstall this plugin");}
 function getVerifiedPackage(input){const info=input&&typeof input==="object"?verifiedPackages.get(input):null;if(!info)return null;if(info.disposed)throw Error("Verified plugin package was released");return info.record;}
+function snapshot(candidate,{extracted=true,temporary=true}={}) {
+ const verified=verifyMetadata(candidate),info={root:candidate.root,temporary,disposed:false,extracted,candidate,record:null};
+ const files=Object.create(null);
+ for(const entry of verified.entries)Object.defineProperty(files,entry.path,{enumerable:true,get(){if(info.disposed)throw Error("Verified plugin package was released");if(!info.extracted)throw Error("Plugin assets were not extracted");return fs.readFileSync(path.join(info.root,...entry.path.split("/"))).toString(entry.encoding);}});
+ const pkg=Object.freeze({manifest:verified.manifest,files:Object.freeze(files),publicKey:candidate.publicKey,signature:candidate.signature});
+ const record=Object.freeze({...verified,package:pkg,get root(){return info.root;},sourceFile:candidate.sourceFile,sourceDigest:candidate.sourceDigest,sourceBytes:candidate.sourceBytes,dispose(){if(info.disposed)return;info.disposed=true;if(info.temporary)return candidate.dispose();}});
+ info.record=record;verifiedPackages.set(pkg,info);return record;
+}
 function verifyPackageFile(file,options={}){
  const candidate=require("./package-file").readPackageFile(file,options);
- try{
-  const verified=verifyMetadata(candidate),info={root:candidate.root,temporary:true,disposed:false,extracted:options.extract!==false,candidate,record:null};
-  const files=Object.create(null);
-  for(const entry of verified.entries)Object.defineProperty(files,entry.path,{enumerable:true,get(){if(info.disposed)throw Error("Verified plugin package was released");if(!info.extracted)throw Error("Plugin assets were not extracted");return fs.readFileSync(path.join(info.root,...entry.path.split("/"))).toString(entry.encoding);}});
-  const pkg=Object.freeze({manifest:verified.manifest,files:Object.freeze(files),publicKey:candidate.publicKey,signature:candidate.signature});
-  const record=Object.freeze({...verified,package:pkg,get root(){return info.root;},sourceFile:candidate.sourceFile,sourceDigest:candidate.sourceDigest,sourceBytes:candidate.sourceBytes,dispose(){if(info.disposed)return;info.disposed=true;if(info.temporary)candidate.dispose();}});
-  info.record=record;verifiedPackages.set(pkg,info);return record;
- }catch(error){candidate.dispose();throw error;}
+ try{return snapshot(candidate,{extracted:options.extract!==false});}
+ catch(error){candidate.dispose();throw error;}
 }
-function bindCodeRoot(pkg,destination){const info=verifiedPackages.get(pkg);if(!info||info.disposed||!info.extracted)throw Error("A live extracted package is required");let exists=true;try{fs.lstatSync(destination);}catch(error){if(error.code!=="ENOENT")throw error;exists=false;}
- if(exists){verifyCodeRoot(destination,info.record.entries);if(info.temporary)info.candidate.dispose();}
- else{fs.renameSync(info.root,destination);for(const entry of info.record.entries)fs.chmodSync(path.join(destination,...entry.path.split("/")),/\.(?:bin|exe)$/i.test(entry.path)?0o500:0o400);verifyCodeRoot(destination,info.record.entries);}
- info.root=destination;info.temporary=false;return info.record;
+function bindCodeRoot(pkg,destination){const info=verifiedPackages.get(pkg);if(!info||info.disposed)throw Error("A live verified package is required");let exists=true;try{fs.lstatSync(destination);}catch(error){if(error.code!=="ENOENT")throw error;exists=false;}
+ if(exists){verifyCodeRoot(destination,info.record.entries);for(const entry of info.record.entries)fs.chmodSync(path.join(destination,...entry.path.split("/")),/\.(?:bin|exe)$/i.test(entry.path)?0o500:0o400);if(info.temporary)info.candidate.dispose();}
+ else{if(!info.extracted)throw Error("An extracted package is required for new code");fs.renameSync(info.root,destination);for(const entry of info.record.entries)fs.chmodSync(path.join(destination,...entry.path.split("/")),/\.(?:bin|exe)$/i.test(entry.path)?0o500:0o400);verifyCodeRoot(destination,info.record.entries);}
+ info.root=destination;info.temporary=false;info.extracted=true;return info.record;
 }
 function copyApprovedPackage(pkg,destination){const verified=getVerifiedPackage(pkg);if(!verified)throw Error("A verified package snapshot is required");let created=false;try{fs.copyFileSync(verified.sourceFile,destination,fs.constants.COPYFILE_EXCL);created=true;const copied=hashFile(destination);if(copied.bytes!==verified.sourceBytes||copied.sha256!==verified.sourceDigest)throw Error("Plugin package changed after review; review it again");fs.chmodSync(destination,0o600);}catch(error){if(created)fs.rmSync(destination,{force:true});throw error;}}
-module.exports={verifyPackageFile,verifyMetadata,getVerifiedPackage,bindCodeRoot,copyApprovedPackage,hashFile,verifyCodeRoot};
+
+
+// Package parsing, decoding, extraction and cold-launch hashing can involve
+// hundreds of MB. Keep that work off Electron's main thread. A single worker
+// slot bounds memory and disk contention when all installed apps start at once.
+const workQueue=[];
+let workerActive=false;
+function queuedWork(run,signal){
+ return new Promise((resolve,reject)=>{
+  const job={run,resolve,reject,signal,started:false};
+  const abort=()=>{if(job.started)return;const index=workQueue.indexOf(job);if(index!==-1)workQueue.splice(index,1);reject(signal.reason);};
+  job.detach=()=>signal?.removeEventListener("abort",abort);
+  if(signal?.aborted){reject(signal.reason);return;}
+  signal?.addEventListener("abort",abort,{once:true});workQueue.push(job);pump();
+ });
+}
+function pump(){
+ if(workerActive)return;
+ const job=workQueue.shift();if(!job)return;
+ job.detach();if(job.signal?.aborted){job.reject(job.signal.reason);pump();return;}
+ workerActive=true;job.started=true;
+ Promise.resolve().then(job.run).then(job.resolve,job.reject).finally(()=>{workerActive=false;pump();});
+}
+async function operationDirectory(parent){
+ const real=await fs.promises.realpath(parent),directory=await fs.promises.mkdtemp(path.join(real,"kai-plugin-operation-"));
+ await fs.promises.chmod(directory,0o700);const identity=await fs.promises.lstat(directory);
+ let disposal;
+ return {directory,dispose(){return disposal||=(async()=>{let current;try{current=await fs.promises.lstat(directory);}catch(error){if(error.code==="ENOENT")return;throw error;}
+  if(!current.isDirectory()||current.isSymbolicLink()||current.dev!==identity.dev||current.ino!==identity.ino)throw Error("Plugin staging directory identity changed; refusing cleanup");
+  await fs.promises.rm(directory,{recursive:true,force:true,maxRetries:3,retryDelay:50});})();}};
+}
+function workerResult(task,signal){
+ const {Worker}=require("node:worker_threads");
+ return new Promise((resolve,reject)=>{
+  signal?.throwIfAborted();const worker=new Worker(__filename,{workerData:{kind:"kai-package-verify",...task}});
+  let result,failure,aborted=false;
+  const abort=()=>{aborted=true;void worker.terminate().catch(error=>{failure=error;});};
+  signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
+  const timer=setTimeout(()=>{failure=Error("Plugin verification exceeded its time limit");abort();},5*60*1000);timer.unref?.();
+  worker.once("message",message=>{result=message;});worker.once("error",error=>{failure=error;});
+  worker.once("exit",code=>{clearTimeout(timer);signal?.removeEventListener("abort",abort);
+   if(aborted||signal?.aborted)reject(signal?.reason||failure||Error("Plugin verification stopped"));
+   else if(failure)reject(failure);
+   else if(code!==0||!result)reject(Error(`Plugin verifier exited before reporting a result (${code})`));
+   else if(!result.ok)reject(Error(result.error||"Plugin verification failed"));
+   else resolve(result.value);
+  });
+ });
+}
+async function verifyPackageFileAsync(file,{directory=require("node:os").tmpdir(),extract=true,codeRoot,expectedDigest,signal}={}){
+ if(typeof file!=="string"||typeof directory!=="string"||typeof extract!=="boolean"||codeRoot!==undefined&&typeof codeRoot!=="string")throw Error("Invalid plugin verification options");
+ const sourceFile=path.resolve(file),destination=codeRoot===undefined?undefined:path.resolve(codeRoot);
+ return queuedWork(async()=>{
+  signal?.throwIfAborted();const operation=await operationDirectory(directory);let retained=false;
+  try{
+   signal?.throwIfAborted();
+   const value=await workerResult({file:sourceFile,options:{directory:operation.directory,extract,codeRoot:destination,expectedDigest}},signal);
+   signal?.throwIfAborted();
+   const temporary=!destination,expectedRoot=temporary?operation.directory+path.sep:destination;
+   if(value.sourceFile!==sourceFile||(temporary?!value.root?.startsWith(expectedRoot):value.root!==expectedRoot))throw Error("Plugin verifier returned an unexpected snapshot");
+   if(!/^[a-f0-9]{64}$/.test(value.sourceDigest)||!Number.isSafeInteger(value.sourceBytes)||value.sourceBytes<1||value.sourceBytes>MAX_BYTES)throw Error("Plugin verifier returned invalid source metadata");
+   const verified=snapshot({...value,dispose:()=>operation.dispose()},{extracted:destination?true:extract,temporary});
+   if(expectedDigest!==undefined&&verified.digest!==expectedDigest){await verified.dispose();throw Error("Installed plugin code or approval changed");}
+   if(!temporary)await operation.dispose();
+   retained=temporary;return verified;
+  }finally{if(!retained)await operation.dispose();}
+ },signal);
+}
+async function copyApprovedPackageAsync(pkg,destination,{signal}={}){
+ const verified=getVerifiedPackage(pkg);if(!verified)throw Error("A verified package snapshot is required");let created=false;
+ try{
+  signal?.throwIfAborted();await fs.promises.copyFile(verified.sourceFile,destination,fs.constants.COPYFILE_EXCL);created=true;
+  const before=await fs.promises.lstat(destination);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1)throw Error("Expected a regular plugin file");
+  const hash=crypto.createHash("sha256");let bytes=0;
+  for await(const chunk of fs.createReadStream(destination,{flags:fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0),signal})){bytes+=chunk.length;if(bytes>MAX_BYTES)throw Error("Plugin file exceeds its byte limit");hash.update(chunk);}
+  const after=await fs.promises.lstat(destination);
+  if(!after.isFile()||after.nlink!==1||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size||after.mtimeMs!==before.mtimeMs||after.ctimeMs!==before.ctimeMs||after.isSymbolicLink()||bytes!==verified.sourceBytes||hash.digest("hex")!==verified.sourceDigest)throw Error("Plugin package changed after review; review it again");
+  signal?.throwIfAborted();await fs.promises.chmod(destination,0o600);
+ }catch(error){if(created)await fs.promises.rm(destination,{force:true});throw error;}
+}
+if(!require("node:worker_threads").isMainThread&&require("node:worker_threads").workerData?.kind==="kai-package-verify"){
+ const {workerData,parentPort}=require("node:worker_threads");let verified;
+ try{
+  const {codeRoot,expectedDigest,...options}=workerData.options;
+  if(codeRoot){let exists=true;try{fs.lstatSync(codeRoot);}catch(error){if(error.code!=="ENOENT")throw error;exists=false;}options.extract=!exists;}
+  verified=verifyPackageFile(workerData.file,options);
+  if(expectedDigest!==undefined&&verified.digest!==expectedDigest)throw Error("Installed plugin code or approval changed");
+  if(codeRoot)bindCodeRoot(verified.package,codeRoot);
+  parentPort.postMessage({ok:true,value:{manifest:verified.manifest,entries:verified.entries,publicKey:verified.package.publicKey,signature:verified.package.signature,root:verified.root,sourceFile:verified.sourceFile,sourceDigest:verified.sourceDigest,sourceBytes:verified.sourceBytes}});
+ }catch(error){verified?.dispose();parentPort.postMessage({ok:false,error:String(error.message)});}
+}
+module.exports={verifyPackageFile,verifyPackageFileAsync,verifyMetadata,getVerifiedPackage,bindCodeRoot,copyApprovedPackage,copyApprovedPackageAsync,hashFile,verifyCodeRoot};

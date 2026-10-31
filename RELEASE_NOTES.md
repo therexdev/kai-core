@@ -1,9 +1,11 @@
-# KAI Core Beta 0.7.8
+# KAI Core Beta 0.7.9
 
-Settings now checks for Core updates and can check automatically in the background. A badge on Settings makes new releases visible, with the current version, update status and download progress in the app.
+Local model requests now run in order across chat, Documents, Compare Models and other plugins. Stopping a request also cancels it while it is queued, loading a model or waiting for response headers. Interrupted streams release their model reservation, and stopping one plugin's request does not cancel another plugin's work.
 
-The installed Windows Setup version can download a verified update, then offers **Restart and install** when you are ready. Updates do not restart KAI automatically, install on normal exit, or interrupt work while KAI stays in the tray. Local-Only privacy pauses update checks and downloads. Portable, macOS and Linux builds check for new releases and open the official downloads page for manual installation.
+Model preparation now shows whether it is waiting, downloading an engine, extracting, verifying or starting the model. Cancel works throughout preparation. Interrupted engine setup stays staged until complete, and a completed model download can finish verification without repeatedly trying to resume past the end of the file.
 
-Windows releases use the established **Michael Milas** Azure signing identity. Publication requires valid signatures, trusted timestamps, matching publisher and verified installer hashes. The in-app updater verifies the expected publisher and download before installation.
+Core opens without automatically loading the sole installed model. Models load when requested. Large plugin package verification, extraction and reviewed copying run off the main app thread, with bounded worker use; signatures, exact approved contents and installed code are still verified before activation.
 
-Install this version manually if you are on 0.7.7 or earlier. Your Core profile, wallet, models and installed plugins stay in place. Plugin updates continue to be managed separately in Plugins.
+Update Assistant to 0.3.3, Documents to 0.3.1 and Compare Models to 0.3.1 in Plugins for their matching stream fixes and interface improvements. Existing profiles, wallets, models and plugin data remain in place.
+
+Windows Setup updates retain the established Michael Milas publisher signature and require your action to download and restart. Release checks cover Windows, macOS and Linux, native desktop behavior, cross-plugin inference ownership, and real LFM3/Qwen CPU inference. They do not reproduce every GPU or the reported machine's exact crash.

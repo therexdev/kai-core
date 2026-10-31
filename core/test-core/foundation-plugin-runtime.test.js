@@ -117,7 +117,7 @@ test("streamed package serialization preserves Unicode and refuses overwriting e
 
 test("background activation and verified snapshots are reused within one lifetime",async t=>{
   let starts=0;const {manager,services,renderer}=fixture(t,[pkg({source:"exports.create=api=>({call:()=>true,startBackground:()=>api.started()})"})],()=>({started(){starts++;}}));
-  const view=renderer("example.test");let loads=0;const original=manager.load.bind(manager);manager.load=id=>{loads++;return original(id);};
+  const view=renderer("example.test");let loads=0;const original=manager.loadAsync.bind(manager);manager.loadAsync=(id,options)=>{loads++;return original(id,options);};
   await Promise.all([services.startInstalledBackground(),services.startInstalledBackground()]);assert.equal(starts,1);assert.equal(loads,1);
   for(let i=0;i<5;i++)assert.equal(await services.call(view,"example.call",{}),true);assert.equal(loads,1);
   const verified=await services.verifiedForUI("example.test");assert.equal(verified,services.records.get("example.test"));

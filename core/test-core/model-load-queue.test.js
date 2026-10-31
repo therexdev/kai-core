@@ -24,7 +24,12 @@ function fixture() {
     cancelDownload() { this.cancelled++; const alias = this.progress.packageId.split("@")[0]; this.progress = null; work.get(alias).reject(new DOMException("Cancelled", "AbortError")); return { cancelled: true }; },
     aliases: () => [], storageUsage: () => ({}),
   };
-  const runtime = { preflight: async () => {}, status: () => ({}), ensure: alias => { calls.push(alias); const d = deferred(); work.set(alias, d); return d.promise; } };
+  const runtime = { preflight: async () => {}, status: () => ({}), ensure: (alias, { signal } = {}) => {
+    calls.push(alias); const d = deferred(); work.set(alias, d);
+    const abort = () => d.reject(signal.reason); signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    return d.promise.finally(() => signal?.removeEventListener("abort", abort));
+  } };
   const queue = new ModelLoadQueue({ models, runtime, onChange: job => changes.push({ alias: job.alias, state: job.state }) });
   const row = alias => queue.snapshot().find(job => job.alias === alias);
   return { models, runtime, queue, calls, work, changes, row };
@@ -38,27 +43,27 @@ test("model requests run FIFO, deduplicate clicks and expose per-model stages", 
   assert.equal(f.row("b").position, 1); assert.equal(f.row("c").position, 2);
   await tick(); assert.deepEqual(f.calls, ["a"]);
   f.models.progress = { packageId: "a@1", pct: 37 };
-  assert.deepEqual(f.row("a"), { alias: "a", state: "downloading", pct: 37, error: null, cancellable: true });
+  assert.equal(f.row("a").state, "downloading"); assert.equal(f.row("a").pct, 37); assert.equal(f.row("a").cancellable, true);
   f.models.progress = null;
-  assert.equal(f.row("a").state, "preparing"); assert.equal(f.row("a").cancellable, false);
+  assert.equal(f.row("a").state, "preparing"); assert.equal(f.row("a").cancellable, true);
   f.work.get("a").resolve(); await tick();
   assert.deepEqual(f.calls, ["a", "b"]); assert.equal(f.row("a").state, "done"); assert.equal(f.row("c").position, 1);
   f.work.get("b").resolve(); await tick(); f.work.get("c").resolve(); await tick();
   assert.deepEqual(f.calls, ["a", "b", "c"]); assert.ok(f.queue.snapshot().every(job => job.state === "done" && !job.cancellable && job.pct === null));
 });
 
-test("cancelling queued and active downloads advances remaining work without cancelling unrelated setup", async () => {
+test("cancelling queued or preparing requests advances work without cancelling unrelated downloads", async () => {
   const f = fixture(); f.queue.enqueue("a"); f.queue.enqueue("b"); f.queue.enqueue("c"); await tick();
   assert.equal(f.queue.cancel("b").cancelled, true); assert.equal(f.row("b").state, "cancelled"); assert.equal(f.row("c").position, 1);
   f.models.progress = { packageId: "different@1", pct: 70 };
   assert.equal(f.row("a").state, "preparing"); assert.equal(f.row("a").pct, null);
-  assert.equal(f.queue.cancel("a").cancelled, false); assert.equal(f.models.cancelled, 0);
-  f.models.progress = { packageId: "a@1#mmproj", pct: 20 };
   assert.equal(f.queue.cancel("a").cancelled, true);
+  assert.equal(f.models.cancelled, 0, "only the request's signal may cancel its work");
+  assert.equal(f.models.progress.packageId, "different@1");
   await tick(); assert.equal(f.row("a").state, "cancelled"); assert.deepEqual(f.calls, ["a", "c"]);
-  assert.equal(f.row("c").pct, null); assert.equal(f.row("c").cancellable, false);
+  assert.equal(f.row("c").pct, null); assert.equal(f.row("c").cancellable, true);
   f.work.get("c").resolve(); await tick();
-  assert.equal(f.queue.cancel("c").cancelled, false); assert.equal(f.models.cancelled, 1);
+  assert.equal(f.queue.cancel("c").cancelled, false); assert.equal(f.models.cancelled, 0);
 });
 
 test("a failed model does not strand the queue and can be retried once", async () => {
@@ -81,13 +86,13 @@ test("shutdown cancels pending work before a finishing load can start another en
   h.runtime._loading = { alias: "other", promise: otherLoad.promise };
   h.queue.enqueue("a"); await tick(); h.queue.close();
   h.runtime._loading = null; otherLoad.resolve(); await tick();
-  assert.deepEqual(h.calls, [], "a job waiting for another caller must not begin after shutdown");
+  assert.equal(h.row("a").state, "cancelled", "shutdown releases even a preparation waiting on another caller");
 });
 
 test("queued models are revalidated and migration is never mistaken for their download", async () => {
   const f = fixture(); f.queue.enqueue("a"); f.queue.enqueue("b"); await tick();
   f.models._alphaMigration = {}; f.models.progress = { phase: "copying", pct: 40 };
-  assert.equal(f.queue.cancel("a").cancelled, false);
+  assert.equal(f.row("a").pct, null); assert.equal(f.models.cancelled, 0);
   assert.throws(() => f.queue.enqueue("c"), /migration/);
   f.work.get("a").resolve(); await tick();
   assert.deepEqual(f.calls, ["a"]); assert.equal(f.row("b").state, "error"); assert.match(f.row("b").error, /migration/);
@@ -109,6 +114,36 @@ test("gateway accepts multiple jobs, returns the queue and scopes cancellation b
   assert.equal((await request("/core/models/download/cancel", { alias: "unknown" })).body.cancelled, false); assert.equal(f.models.cancelled, 0);
   f.work.get("a").resolve(); await tick(); await gateway.close();
   assert.deepEqual(f.calls, ["a"]);
+});
+
+test("fallback preflight is a visible cancellable job and does not hold the enqueue response", async () => {
+  const f = fixture(), gateway = new Gateway({ models: f.models, runtime: f.runtime });
+  gateway.coreToken = null;
+  const preflight = deferred(); let preflightSignal, preflightCalls = 0;
+  f.runtime.preflight = ({ signal } = {}) => {
+    preflightCalls++; preflightSignal = signal;
+    const abort = () => preflight.reject(signal.reason);
+    signal?.addEventListener("abort", abort, { once: true });
+    return preflight.promise.finally(() => signal?.removeEventListener("abort", abort));
+  };
+  const req = Readable.from([Buffer.from(JSON.stringify({ alias: "a" }))]);
+  Object.assign(req, { url: "/core/models/ensure", method: "POST", headers: { host: `127.0.0.1:${gateway.port}` } });
+  let status, result;
+  const request = gateway._route(req, { setHeader() {}, writeHead(code) { status = code; }, end(data) { result = JSON.parse(data); } });
+  try {
+    await tick();
+    assert.equal(status, 202, "request must return before fallback setup finishes");
+    assert.equal(result.job.alias, "a");
+    const job = gateway.modelQueueSnapshot().find(entry => entry.alias === "a");
+    assert.equal(job.state, "preparing"); assert.equal(job.cancellable, true);
+    assert.equal(gateway._modelQueue.cancel("a").cancelled, true);
+    await tick();
+    assert.equal(preflightSignal.aborted, true); assert.equal(preflightCalls, 1);
+    assert.equal(gateway.modelQueueSnapshot()[0].state, "cancelled");
+    assert.deepEqual(f.calls, [], "cancelled preflight must not continue to model loading");
+  } finally {
+    preflight.resolve(); await request; await gateway.close();
+  }
 });
 
 function realModels(t) {
@@ -145,4 +180,37 @@ test("cancellation after verified download still stops the subsequent model load
   assert.equal(models.downloadProgress(), null);
   await assert.rejects(models.ensureMmproj("a@1"), { name: "AbortError" });
   assert.equal(models.downloadProgress(), null);
+});
+
+test("queue progress distinguishes engine setup, model verification and another caller's work", async () => {
+  const f = fixture(); f.queue.enqueue("a"); await tick();
+  let status = { loadingAlias: "a", loadingStage: "provisioning" }, setup = { kind: "llamacpp", phase: "downloading", pct: 39 };
+  f.runtime.status = () => status; f.runtime.provisioner = { downloadProgress: () => setup };
+  assert.equal(f.row("a").stage, "engine-download"); assert.equal(f.row("a").pct, 39);
+  setup = { kind: "llamacpp", phase: "extracting" };
+  assert.equal(f.row("a").stage, "extracting"); assert.equal(f.row("a").pct, null);
+  status = { loadingAlias: "other", loadingStage: "provisioning" };
+  assert.equal(f.row("a").stage, "waiting"); assert.equal(f.row("a").pct, null);
+  status = { loadingAlias: "a", loadingStage: "testing" }; setup = null;
+  assert.equal(f.row("a").stage, "testing");
+  f.models.progress = { packageId: "a@1", phase: "verifying", pct: 65 };
+  assert.equal(f.row("a").stage, "verifying"); assert.equal(f.row("a").state, "preparing"); assert.equal(f.row("a").pct, 65);
+  f.models.progress = null; f.queue.cancel("a"); await tick();
+  assert.equal(f.row("a").state, "cancelled"); assert.equal(f.row("a").cancellable, false);
+});
+
+test("cancelling a model-library request preserves a shared real model download needed by chat", async t => {
+  const { RuntimeManager } = require("../lib/runtime-manager"), f = realModels(t); let stream;
+  t.mock.method(global, "fetch", async () => new Response(new ReadableStream({ start(controller) { stream = controller; } })));
+  const runtime = new RuntimeManager({ models: f.models, makeRuntime: () => {
+    let running = false; return { endpoint: "http://fixture", status: () => ({ running, kind: "llamacpp" }), start: async () => { running = true; }, stop: () => { running = false; } };
+  } });
+  t.after(() => runtime.stop());
+  const queue = new ModelLoadQueue({ models: f.models, runtime }); queue.enqueue("b");
+  while (!stream) await tick();
+  const chat = runtime.ensure("b");
+  assert.equal(queue.cancel("b").cancelled, true); await tick();
+  assert.equal(queue.snapshot()[0].state, "cancelled"); assert.ok(f.models.downloadProgress(), "chat still needs the shared download");
+  stream.enqueue(f.payload); stream.close(); assert.equal(await chat, "http://fixture");
+  assert.equal(f.models.packageStatus("b@1").status, "ready"); assert.equal(runtime.status().activeAlias, "b");
 });
