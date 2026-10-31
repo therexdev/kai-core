@@ -120,14 +120,16 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
     if (typeof id !== "string" || !/^[A-Za-z0-9_=-]{44,48}$/.test(id) || Buffer.from(id, "base64url").length !== 34 || (network === "mainnet") !== (id === MAINNET_CHAIN)) throw Error("The wallet RPC does not match the selected network");
   }
   async function networkRead(method, value) {
-    const request = input(value, method === "wallet.history" ? ["cursor"] : []);
+    const maximum = method === "wallet.maxSend";
+    const request = input(value, maximum ? ["token", "expectedAddress", "expectedNetwork"] : method === "wallet.history" ? ["cursor"] : []);
+    if (maximum && (!["koin", "vhp"].includes(request.token) || !validAddress(request.expectedAddress) || !Object.hasOwn(NETWORKS, request.expectedNetwork || ""))) throw Error("Check the token and wallet network before filling the amount");
     active();
     if (activeReads >= 2) throw Error("Wallet information is already loading");
     const config = configuration(), address = wallet.address || null;
     if (!address) return method === "wallet.history"
       ? { address: null, network: config.net.id, tokenSymbol: config.net.tokenSymbol, observedAt: clock(), rows: [], nextCursor: null, available: true }
       : { address: null, network: config.net.id, tokenSymbol: config.net.tokenSymbol, koin: null, vhp: null, mana: null, observedAt: null };
-    const ctx = context(address, config.net.id), controller = new AbortController(); controllers.add(controller); activeReads++;
+    const ctx = context(maximum ? request.expectedAddress : address, maximum ? request.expectedNetwork : config.net.id), controller = new AbortController(); controllers.add(controller); activeReads++;
     try {
       const chain = chainFor(ctx, controller);
       if (method === "wallet.history") {
@@ -136,6 +138,12 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
       }
       const balances = await chain.balances(address); ctx.assert();
       if (balances?.error || !integer(balances?.koin)) throw Error("Wallet balance could not be verified. Refresh to try again");
+      if (maximum) {
+        if (balances.stale || !integer(balances[request.token]) || !integer(balances.mana)) throw Error("A fresh token and mana balance is required for Send All");
+        const balance = BigInt(balances[request.token]), spendable = request.token === "koin" ? BigInt(ChainService.prototype.burnableFromMana(balances.mana)) : balance;
+        const available = balance < spendable ? balance : spendable;
+        return { address: ctx.address, network: ctx.net.id, token: request.token, amount: formatAmount(available.toString(), { grouping: false }), manaLimited: available < balance, observedAt: clock() };
+      }
       return { address, network: ctx.net.id, tokenSymbol: ctx.net.tokenSymbol,
         koin: formatAmount(balances.koin, { grouping: false }),
         vhp: integer(balances.vhp) ? formatAmount(balances.vhp, { grouping: false }) : null,
@@ -194,7 +202,7 @@ function createCoreWallet({ dataDir, core, electron, getWindow, withSpend, isClo
   return {
     async call(method, value = {}) {
       active();
-      if (method === "wallet.summary" || method === "wallet.history") return networkRead(method, value);
+      if (["wallet.summary", "wallet.history", "wallet.maxSend"].includes(method)) return networkRead(method, value);
       if (method === "wallet.send") {
         if (typeof withSpend !== "function") throw Error("Wallet spending is unavailable until payment coordination is ready");
         return withSpend(() => send(value));

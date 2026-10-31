@@ -217,6 +217,7 @@ async function start() {
         return setPrivacyMode(input.mode);
       }
       case "wallet.summary":
+      case "wallet.maxSend":
       case "wallet.history":
       case "wallet.copyAddress":
       case "wallet.openExplorer":
