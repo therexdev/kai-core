@@ -2,7 +2,7 @@
   "use strict";
   const POLL = 15000, REWARD_POLL = 5000, MAX_ATOMS = (1n << 64n) - 1n;
   const rewardStates = {
-    awaiting_review: ["Awaiting review", "pending"], reviewing: ["In 24-hour review", "pending"],
+    awaiting_review: ["Awaiting review", "pending"], reviewing: ["Review status pending", "pending"],
     finalizing: ["Finalizing reward", "pending"], queued: ["Queued", "pending"], signing: ["Preparing payment", "pending"],
     staged: ["Ready to submit", "pending"], unknown: ["Checking payment", "pending"], pending: ["Payment pending", "pending"],
     reversible: ["Awaiting finality", "pending"], needs_review: ["Needs attention", "attention"], paid: ["Paid", "paid"], paid_elsewhere: ["Paid", "paid"]
@@ -76,9 +76,21 @@
   function rewardMarkup(value) {
     const rows = [...(value?.payouts || []), ...(value?.summary?.pending || [])].sort((a, b) => Number(b.epoch) - Number(a.epoch));
     return rows.length ? rows.map(row => {
-      const [label, state] = rewardStates[row.state];
+      let [label, state] = rewardStates[row.state];
+      let reviewDetail = "";
+      if (row.state === "reviewing") {
+        // Use the last verified snapshot, not the wall clock: an offline page
+        // must not advance financial status just because time has passed.
+        const deadline = row.reviewUntil;
+        if (Number.isSafeInteger(deadline) && deadline > 0 && Number.isSafeInteger(value.observedAt)) {
+          const ended = value.observedAt >= deadline;
+          label = ended ? "Review complete · Awaiting finalization" : "In 24-hour review";
+          const date = new Date(deadline).toLocaleString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
+          reviewDetail = `${ended ? "Review ended" : "Review ends"}: ${date} UTC`;
+        } else reviewDetail = "Waiting for a confirmed review deadline.";
+      }
       const day = new Date(Number(row.epoch) * 86400000).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
-      return `<li class="product-reward-item"><div class="product-reward-item-head"><strong>${esc(amount(BigInt(row.availability) + BigInt(row.work)))} KOIN</strong><span class="product-reward-badge" data-state="${state}">${label}</span></div><span class="product-reward-day">${esc(day)} · UTC</span><small>Availability ${amount(row.availability)} · Work ${amount(row.work)}</small></li>`;
+      return `<li class="product-reward-item"><div class="product-reward-item-head"><strong>${esc(amount(BigInt(row.availability) + BigInt(row.work)))} KOIN</strong><span class="product-reward-badge" data-state="${state}">${label}</span></div><span class="product-reward-day">${esc(day)} · UTC</span>${reviewDetail ? `<small>${esc(reviewDetail)}</small>` : ""}<small>Availability ${amount(row.availability)} · Work ${amount(row.work)}</small></li>`;
     }).join("") : '<li class="product-reward-empty"><strong>Your rewards will appear here</strong><span>Recorded rewards and payment updates will appear here.</span></li>';
   }
   // Keep the original testnet drop calculation separate from paid KOIN rewards.
