@@ -218,3 +218,31 @@ test("visible Earn checks verified increments every five seconds; other pages us
   await f.advance(5000); assert.equal(count(), waiting, "No overlapping reward read");
   f.controller.leave(); done(rewards({ observedAt: start + 25000 })); await flush(); assert.equal(f.timers.size, 0);
 });
+
+test("reward reviews show each deadline and distinguish elapsed review from settlement", () => {
+  const deadline = Date.UTC(2026, 10, 1, 12);
+  const row = { epoch: "20756", availability: "1993533339", work: "0", state: "reviewing", reviewUntil: deadline };
+  const view = (observedAt, rows = [row], payouts = []) => rewardMarkup({ observedAt, summary: { pending: rows }, payouts });
+  assert.match(view(deadline - 1), /In 24-hour review/);
+  assert.match(view(deadline - 1), /Review ends: .*UTC/);
+  assert.doesNotMatch(view(deadline - 1), /Review complete|Paid/);
+  assert.match(view(deadline), /Review complete · Awaiting finalization/);
+  assert.match(view(deadline), /Review ended: .*UTC/);
+  assert.doesNotMatch(view(deadline), /In 24-hour review|Paid/);
+  // Multiple independent epochs can be reviewing or awaiting finalization.
+  const mixed = view(deadline, [row, { ...row, epoch: "20757", reviewUntil: deadline + 86400000 }]);
+  assert.match(mixed, /Review complete · Awaiting finalization/);
+  assert.match(mixed, /In 24-hour review/);
+  assert.match(mixed, /19\.93533339 KOIN/);
+  for (const missing of [null, undefined, 0, NaN]) {
+    const unknown = view(deadline, [{ ...row, reviewUntil: missing }]);
+    assert.match(unknown, /Review status pending/);
+    assert.match(unknown, /Waiting for a confirmed review deadline/);
+    assert.doesNotMatch(unknown, /Review complete|In 24-hour review/);
+  }
+  for (const [state, label] of [["awaiting_review", "Awaiting review"], ["needs_review", "Needs attention"], ["finalizing", "Finalizing reward"], ["pending", "Payment pending"], ["paid", "Paid"]]) {
+    const markup = view(deadline, [], [{ ...row, state }]);
+    assert.ok(markup.includes(`>${label}</span>`));
+    assert.doesNotMatch(markup, /Review complete|Review ends:/);
+  }
+});

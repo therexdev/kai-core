@@ -1,9 +1,5 @@
-# KAI Core Beta 0.7.14
+# KAI Core Beta 0.7.15
 
-Linux AppImages, including 64-bit Raspberry Pi OS, now support downloading updates in Settings and an explicit **Restart and install** action. Automatic checks remain optional; downloads and restarts require your action. Windows retains its existing signed installer flow, and macOS/unsupported builds keep manual downloads.
+Reward activity now distinguishes an active 24-hour review from an elapsed review awaiting finalization. Each confirmed review deadline is shown with its date and time in UTC. If the deadline is unavailable, Core shows “Review status pending” instead of implying that another 24-hour wait is underway.
 
-The Linux updater selects the exact architecture and stable release, verifies the official GitHub size and SHA-256 digest, stages on the same filesystem, and waits for Core to shut down before replacing the AppImage at the existing path. The previous app is retained, and immediate process-start failure restores it. Core profiles, wallets, models and plugins are outside the replacement path. Local-Only mode cancels update network activity.
-
-The included **Install-KAI-Core-Pi.sh** installs the latest stable ARM64/x64 AppImage with desktop/menu shortcuts. On Pi it preserves the GNOME Keyring launch option and uses a fixed app path with FUSE-free extraction. Existing Pi installs need to run this installer once to reach the updater-enabled version.
-
-Validation covers Core and service regressions, native public SDK and update UI checks, corrupted/cancelled downloads, target changes, helper failure, atomic replacement/rollback, and a disposable packaged x64 AppImage relaunch with retained test profile data. This does not claim real Pi hardware or live payment verification.
+The label uses the last verified reward snapshot, so a failed refresh does not advance payment status. Payment progress, paid rewards and attention states remain separate. Reward amounts and payout processing are unchanged. Longer badges wrap within the reward card.
