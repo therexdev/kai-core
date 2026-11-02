@@ -6,6 +6,8 @@ Transfer your models, Core wallet and regular Koinos Node from Koinos AI Alpha.
 
 Screens checked against Core 0.7.14 and KAI Koinos Node 0.3.6 on 31 October 2026. Snapshots are rendered from the app interface with example data.
 
+**Already producing with Alpha?** The illustrated Node steps below describe the older **chain-only** transfer. They do not preserve producer settings, signing keys or external signing setup. Do not follow the new-wallet/key-configuration steps to replace a working producer. See the Node plugin's [complete profile migration guide](https://github.com/therexdev/kai-plugin-koinos-node/blob/feat/complete-node-migration/docs/NODE_PROFILE_MIGRATION.md) for the expanded options being prepared. Wait for its signed plugin release before using those options; installing Core separately does not migrate the Node setup.
+
 ## 1. Transfer your models
 
 Move from Koinos AI Alpha to KAI Core Beta on the same computer. Models and wallet can be selected together; they are shown separately here.
@@ -39,7 +41,7 @@ This copies your encrypted Alpha wallet into Core. It keeps the same address and
 
 Install the regular **KAI Koinos Node** plugin from **Plugins**, then open it from **Apps**. This guide does not use Master KAI Koinos Node.
 
-**Recommended:** Create a new wallet specifically for your Node. **Do not use your KAI Core wallet as your Node wallet.** Keeping separate addresses helps you manage Node funds independently from your Core wallet.
+**For a new node:** Create a new wallet specifically for your Node. **Do not use your KAI Core wallet as your Node wallet.** Keeping separate addresses helps you manage Node funds independently from your Core wallet. **For an existing producing node:** preserve its current producer wallet/custody and signing key during the migration; do not create a replacement address just to change applications.
 
 1. In the Node plugin, open **Wallet**.
 2. Under **Create a new wallet**, enter and confirm a password, then click **Create wallet**.
