@@ -150,7 +150,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
   function mount(document, bridge) {
     const $ = id => document.getElementById(`alpha-migration-${id}`), dialog = $("dialog");
     if (!dialog || !bridge?.call) return null;
-    const text = (id, value) => { const node = $(id), next = String(value || ""); if (node.textContent !== next) node.textContent = next; };
+    const text = (id, value) => KaiLocale.setText($(id), value && typeof value === "object" ? value : KaiLocale.literal(value));
     const controller = createController({ call: (method, input) => bridge.call(method, input),
       onComplete: result => document.dispatchEvent(new root.CustomEvent("kai-alpha-migration-complete", { detail: result })),
       render(state, view) {
