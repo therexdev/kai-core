@@ -1,5 +1,7 @@
-# KAI Core Beta 0.7.15
+# KAI Core Beta 0.7.16
 
-Reward activity now distinguishes an active 24-hour review from an elapsed review awaiting finalization. Each confirmed review deadline is shown with its date and time in UTC. If the deadline is unavailable, Core shows “Review status pending” instead of implying that another 24-hour wait is underway.
+Fixes the misleading “Core desktop access denied” error that could appear after choosing **Restart and install**. Core now stops refreshing its status before services shut down and shows a normal restart message while the update is prepared.
 
-The label uses the last verified reward snapshot, so a failed refresh does not advance payment status. Payment progress, paid rewards and attention states remain separate. Reward amounts and payout processing are unchanged. Longer badges wrap within the reward card.
+Canceling a restart keeps the app available, and update verification failures remain visible. Desktop access checks, installer signature verification, and service cleanup still run normally. Your wallet, models, plugins, and saved data stay in place.
+
+The fix takes effect once 0.7.16 is installed. When updating from an older version, the old app may still show the message once as it closes.
