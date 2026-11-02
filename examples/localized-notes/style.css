@@ -1,0 +1,1 @@
+body{font:15px system-ui;color:#172b4d;background:#f4f7fd;margin:32px;max-width:720px}label,textarea{display:block}textarea{width:100%;box-sizing:border-box;margin:12px 0;border:1px solid #bbcde6;border-radius:12px;padding:16px;font:inherit}button{background:#165eff;color:white;border:0;border-radius:10px;padding:12px 24px;font:inherit}button:disabled{opacity:.5}

@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   const terminal = phase => ["complete", "failed", "cancelled"].includes(phase);
   const issue = error => String(error?.message || error || "Migration is unavailable.").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "").slice(0, 800);
@@ -158,10 +159,10 @@
         text("last-result", state.lastResult); $("last-result").hidden = !state.lastResult;
         if (!state.open) return;
         $("choices").hidden = view.terminal; $("copy-note").hidden = view.terminal; $("browse").hidden = view.terminal;
-        text("description", view.terminal ? "Review the completed items and any files that were kept." : "Choose what to migrate into KAI Core Beta. Close Koinos AI Alpha, including its tray icon, before migrating.");
+        text("description", (view.terminal ? KaiLocale.message(["Review the completed items and any files that were kept."]) : KaiLocale.message(["Choose what to migrate into KAI Core Beta. Close Koinos AI Alpha, including its tray icon, before migrating."])));
         const source = state.inventory?.source || state.job?.source, inventory = state.inventory;
-        text("source-path", source?.path || (state.loading ? "Looking for your Alpha profile…" : view.busy ? "Migration in progress" : "No Alpha profile found. Choose its data folder to continue."));
-        text("browse", state.choosing ? "Choosing folder…" : source ? "Choose another folder" : "Choose folder");
+        text("source-path", ((_value) => _value ? KaiLocale.literal(_value) : (state.loading ? KaiLocale.message(["Looking for your Alpha profile…"]) : (view.busy ? KaiLocale.message(["Migration in progress"]) : KaiLocale.message(["No Alpha profile found. Choose its data folder to continue."]))))(source?.path));
+        text("browse", (state.choosing ? KaiLocale.message(["Choosing folder…"]) : (source ? KaiLocale.message(["Choose another folder"]) : KaiLocale.message(["Choose folder"]))));
         $("browse").disabled = !view.canChoose;
         for (const key of ["models", "wallet"]) {
           $(key).checked = state.selected[key];
@@ -172,20 +173,20 @@
         const modelInfo = inventory?.models, walletInfo = inventory?.wallet;
         let modelDetail = modelInfo?.detail;
         if (!modelDetail && modelInfo?.available) modelDetail = `${modelInfo.count || 0} downloaded model${modelInfo.count === 1 ? "" : "s"}. Includes vision projectors when present.`;
-        text("models-detail", modelDetail || (state.loading ? "Checking downloaded models…" : view.busy && state.selected.models ? "Copying your selected models." : "No downloaded GGUF models found."));
-        text("models-size", modelInfo?.bytes ? `${formatBytes(modelInfo.bytes)} of model files` : ""); $("models-size").hidden = !modelInfo?.bytes;
-        text("wallet-detail", walletInfo?.detail || (state.loading ? "Checking your saved wallet…" : view.busy && state.selected.wallet ? "Copying your encrypted wallet." : walletInfo?.blocked ? "A wallet already exists in Core and will be kept." : walletInfo?.available ? "Encrypted wallet ready to copy." : "No encrypted Alpha wallet found."));
+        text("models-detail", ((_value) => _value ? KaiLocale.literal(_value) : (state.loading ? KaiLocale.message(["Checking downloaded models…"]) : (view.busy && state.selected.models ? KaiLocale.message(["Copying your selected models."]) : KaiLocale.message(["No downloaded GGUF models found."]))))(modelDetail));
+        text("models-size", (modelInfo?.bytes ? KaiLocale.message`${formatBytes(modelInfo.bytes)} of model files` : KaiLocale.message([""]))); $("models-size").hidden = !modelInfo?.bytes;
+        text("wallet-detail", ((_value) => _value ? KaiLocale.literal(_value) : (state.loading ? KaiLocale.message(["Checking your saved wallet…"]) : (view.busy && state.selected.wallet ? KaiLocale.message(["Copying your encrypted wallet."]) : (walletInfo?.blocked ? KaiLocale.message(["A wallet already exists in Core and will be kept."]) : (walletInfo?.available ? KaiLocale.message(["Encrypted wallet ready to copy."]) : KaiLocale.message(["No encrypted Alpha wallet found."]))))))(walletInfo?.detail));
         text("wallet-address", walletInfo?.address); $("wallet-address").hidden = !walletInfo?.address;
         $("wallet-note").hidden = !!walletInfo?.blocked || (!walletInfo?.available && !state.selected.wallet);
         $("close").disabled = view.busy;
         $("cancel").disabled = state.starting || state.cancelling;
-        text("cancel", state.cancelling ? "Cancelling…" : view.terminal ? "Close" : view.busy ? "Cancel migration" : "Cancel");
+        text("cancel", (state.cancelling ? KaiLocale.message(["Cancelling…"]) : (view.terminal ? KaiLocale.message(["Close"]) : (view.busy ? KaiLocale.message(["Cancel migration"]) : KaiLocale.message(["Cancel"])))));
         $("submit").disabled = !view.canStart; $("submit").hidden = view.terminal;
-        text("submit", state.starting ? "Starting…" : view.busy ? "Migrating…" : "Migrate");
-        text("selection-note", view.terminal ? state.selected.deleteOldModels ? "Completed model transfers remain in Core." : "Your Alpha files are unchanged." : view.busy ? "Keep KAI Core Beta running while migrating." : state.loading ? "Checking your Alpha profile…" : state.selected.deleteOldModels ? "Verified model originals will be removed from Alpha." : "Select Models, Wallet, or both.");
+        text("submit", (state.starting ? KaiLocale.message(["Starting…"]) : (view.busy ? KaiLocale.message(["Migrating…"]) : KaiLocale.message(["Migrate"]))));
+        text("selection-note", (view.terminal ? (state.selected.deleteOldModels ? KaiLocale.message(["Completed model transfers remain in Core."]) : KaiLocale.message(["Your Alpha files are unchanged."])) : (view.busy ? KaiLocale.message(["Keep KAI Core Beta running while migrating."]) : (state.loading ? KaiLocale.message(["Checking your Alpha profile…"]) : (state.selected.deleteOldModels ? KaiLocale.message(["Verified model originals will be removed from Alpha."]) : KaiLocale.message(["Select Models, Wallet, or both."]))))));
         $("progress-section").hidden = !view.busy;
         const progress = state.job?.progress, total = Math.max(0, Number(progress?.totalBytes) || 0), completed = Math.max(0, Number(progress?.completedBytes) || 0);
-        text("progress-detail", state.cancelling ? "Stopping safely. Finishing cleanup…" : progress?.detail || (state.starting ? "Preparing your migration…" : "Copying selected items…"));
+        text("progress-detail", (state.cancelling ? KaiLocale.message(["Stopping safely. Finishing cleanup…"]) : ((_value) => _value ? KaiLocale.literal(_value) : (state.starting ? KaiLocale.message(["Preparing your migration…"]) : KaiLocale.message(["Copying selected items…"])))(progress?.detail)));
         if (total > 0) { $("progress").max = total; $("progress").value = Math.min(total, completed); text("progress-value", `${Math.min(100, Math.floor(completed / total * 100))}%`); }
         else { $("progress").removeAttribute("value"); text("progress-value", ""); }
         $("outcome").hidden = !view.terminal; $("outcome").dataset.phase = state.job?.phase || "";

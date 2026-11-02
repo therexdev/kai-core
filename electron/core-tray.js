@@ -4,7 +4,7 @@ const fs = require("node:fs"), path = require("node:path");
 
 // Only a working notification-area icon may turn the main window's X into Hide.
 // This module never stops the provider or closes plugin services on a normal X.
-function createCoreTray({ app, win, Tray, Menu, nativeImage, iconDirectory, isQuitting, logger = console, platform = process.platform }) {
+function createCoreTray({ app, win, Tray, Menu, nativeImage, iconDirectory, isQuitting, getLanguage = () => "en", logger = console, platform = process.platform }) {
   let tray = null, disposed = false, quitRequested = false;
   const quitting = () => quitRequested || isQuitting();
   const available = () => !disposed && !!tray && !tray.isDestroyed();
@@ -23,6 +23,20 @@ function createCoreTray({ app, win, Tray, Menu, nativeImage, iconDirectory, isQu
     // Core's before-quit handler awaits native services before exiting.
     app.quit();
   }
+  function refresh() {
+    if (!available()) return;
+    const captions = {
+      en: ["Open KAI Core Beta", "Quit KAI Core Beta"],
+      es: ["Abrir KAI Core Beta", "Salir de KAI Core Beta"],
+      "pt-BR": ["Abrir KAI Core Beta", "Sair do KAI Core Beta"],
+      fr: ["Ouvrir KAI Core Beta", "Quitter KAI Core Beta"],
+      de: ["KAI Core Beta öffnen", "KAI Core Beta beenden"],
+    };
+    const [open, exit] = captions[getLanguage()] || captions.en;
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: open, click: show }, { type: "separator" }, { label: exit, click: quit },
+    ]));
+  }
   try {
     let iconPath = path.join(iconDirectory, platform === "win32" ? "icon.ico" : "icon.png");
     const unpacked = iconPath.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
@@ -33,11 +47,7 @@ function createCoreTray({ app, win, Tray, Menu, nativeImage, iconDirectory, isQu
     if (platform === "darwin") image.setTemplateImage(true);
     tray = new Tray(image);
     tray.setToolTip("KAI Core Beta");
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: "Open KAI Core Beta", click: show },
-      { type: "separator" },
-      { label: "Quit KAI Core Beta", click: quit },
-    ]));
+    refresh();
     tray.on("click", show); tray.on("double-click", show);
   } catch (error) {
     destroyTray();
@@ -71,7 +81,7 @@ function createCoreTray({ app, win, Tray, Menu, nativeImage, iconDirectory, isQu
   // Windows does not emit before-quit for every shutdown/logoff path. Begin
   // normal teardown on the final session-end event without delaying the OS.
   win.on("session-end", quit);
-  return { get available() { return available(); }, show, dispose };
+  return { get available() { return available(); }, show, refresh, dispose };
 }
 
 module.exports = { createCoreTray };

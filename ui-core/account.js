@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 // Original device-link/account panel extracted from ui/app.js at kaiapp
 // 34d17faa0526213b8fc0ac7a65aa7f2c186c6547. Existing Core account endpoints
 // retain the session, keyring and signing behavior; the renderer sees no tokens.
@@ -61,12 +62,10 @@ async function renderAccount(force) {
     si.hidden = true;
     return accountMsg(e.message);
   }
-  $("account-heading").textContent = j.scope === "credits" ? "AI credit account" : "Koinos AI account";
-  $("account-hint").textContent = j.scope === "credits"
-    ? "Connect your existing credit account using its browser sign-in. Wallet connection in Credits and device setup in Earn also work without this sign-in. Your website and Connections sign-in stays saved separately."
-    : "Sign in to your website account for Connections and web access. Approve the app's short code in your browser, then link this wallet if needed.";
+  KaiLocale.setText($("account-heading"), (j.scope === "credits" ? KaiLocale.message(["AI credit account"]) : KaiLocale.message(["Koinos AI account"])));
+  KaiLocale.setText($("account-hint"), (j.scope === "credits" ? KaiLocale.message(["Connect your existing credit account using its browser sign-in. Wallet connection in Credits and device setup in Earn also work without this sign-in. Your website and Connections sign-in stays saved separately."]) : KaiLocale.message(["Sign in to your website account for Connections and web access. Approve the app's short code in your browser, then link this wallet if needed."])));
   $("btn-account-scope").hidden = !j.separateCreditAccount;
-  $("btn-account-scope").textContent = websiteAccount ? "Open AI credit account" : "Website account and Connections";
+  KaiLocale.setText($("btn-account-scope"), (websiteAccount ? KaiLocale.message(["Open AI credit account"]) : KaiLocale.message(["Website account and Connections"])));
   $("account-web").hidden = true;
   /*
    * Three different things used to look identical here: signed out, session

@@ -1,0 +1,1 @@
+{"schema":2,"apiVersion":3,"id":"example.localized-notes","version":"1.0.0","name":"Localized Notes","description":"Five-language notes example following Core Settings.","entry":"index.html","runtime":"sandboxed","permissions":["storage.read","storage.write"],"provides":[],"consumes":[]}

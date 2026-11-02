@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   const busyStates = new Set(["checking", "downloading", "installing", "closing"]);
   const cleanError = error => String(error?.message || error || "The update could not be completed.").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
@@ -69,25 +70,26 @@
   if (typeof module === "object") module.exports = { createUpdates, presentation };
   if (!root?.document || !root.kaiCore?.call) return;
   const $ = id => root.document.getElementById(id), card = $("application-updates"); if (!card) return;
-  const text = (id, value) => { const node = $(id), next = String(value ?? ""); if (node.textContent !== next) node.textContent = next; };
+  const text = (id, value) => KaiLocale.setText($(id), value && typeof value === "object" ? value : KaiLocale.literal(value));
   const controller = createUpdates({ call: (method, input) => root.kaiCore.call(method, input), render(state, view) {
     const info = state.info;
     card.dataset.state = view.state;
-    text("updates-version", info?.currentVersion ? `KAI Core Beta · Version ${info.currentVersion}` : "KAI Core Beta");
-    text("updates-title", view.title); text("updates-detail", view.detail);
-    text("updates-badge", view.hasUpdate ? info.state === "downloaded" ? "Ready to install" : "Update available" : ""); $("updates-badge").hidden = !view.hasUpdate;
+    text("updates-version", (info?.currentVersion ? KaiLocale.message`KAI Core Beta · Version ${info.currentVersion}` : KaiLocale.message(["KAI Core Beta"])));
+    KaiLocale.setText($("updates-title"), view.title === `Version ${info?.availableVersion} is available` ? KaiLocale.message`Version ${info.availableVersion} is available` : view.title);
+    KaiLocale.setText($("updates-detail"), view.detail === `Version ${info?.availableVersion} is downloaded and verified. Restart when you’re ready to install it.` ? KaiLocale.message`Version ${info.availableVersion} is downloaded and verified. Restart when you’re ready to install it.` : view.detail);
+    text("updates-badge", (view.hasUpdate ? (info.state === "downloaded" ? KaiLocale.message(["Ready to install"]) : KaiLocale.message(["Update available"])) : KaiLocale.message([""]))); $("updates-badge").hidden = !view.hasUpdate;
     $("core-update-badge").hidden = !view.hasUpdate;
     $("settings-nav").setAttribute("aria-label", view.hasUpdate ? "Settings, Core update available" : "Settings");
     $("settings-nav").title = view.hasUpdate ? "Settings · Core update available" : "Settings";
     $("updates-automatic").checked = info?.automaticCheck !== false; $("updates-automatic").disabled = view.automaticDisabled;
-    $("check-updates").disabled = view.checkDisabled; text("check-updates", view.checkLabel);
+    $("check-updates").disabled = view.checkDisabled; KaiLocale.setText($("check-updates"), view.checkLabel);
     $("updates-download").hidden = !view.downloadVisible; $("updates-download").disabled = view.downloadDisabled;
     $("updates-install").hidden = !view.installVisible; $("updates-install").disabled = view.installDisabled;
     $("updates-open-release").hidden = !view.releaseVisible; $("updates-open-release").disabled = view.releaseDisabled;
-    text("updates-open-release", view.releaseLabel); $("updates-open-release").classList.toggle("primary", view.releasePrimary); $("updates-open-release").classList.toggle("text-button", !view.releasePrimary);
+    KaiLocale.setText($("updates-open-release"), view.releaseLabel); $("updates-open-release").classList.toggle("primary", view.releasePrimary); $("updates-open-release").classList.toggle("text-button", !view.releasePrimary);
     $("updates-progress-row").hidden = !view.downloading; $("updates-progress").value = view.percent; text("updates-progress-value", `${Math.floor(view.percent)}%`);
     const checked = info?.lastCheckedAt && new Date(info.lastCheckedAt);
-    text("updates-last-checked", checked && !Number.isNaN(checked.valueOf()) ? `Last checked ${checked.toLocaleString()}` : "Not checked yet");
+    text("updates-last-checked", (checked && !Number.isNaN(checked.valueOf()) ? KaiLocale.message`Last checked ${checked.toLocaleString(KaiLocale.language)}` : KaiLocale.message(["Not checked yet"])));
     text("update-state", view.error); $("update-notice").hidden = !view.error;
   } });
   $("check-updates").addEventListener("click", () => void controller.act("check"));

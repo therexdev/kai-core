@@ -50,6 +50,12 @@ jobs:
       - name: Application update desktop check (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:updates
+      - name: Shared language and plugin propagation (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:language
+      - name: Shared language and plugin propagation (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:language
       - name: Application update desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:updates

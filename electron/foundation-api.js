@@ -105,6 +105,15 @@ function createFoundationApi(ctx, record) {
   const api = {
     paths:Object.freeze({protected:Object.freeze([path.resolve(record.dataDir,"../../..")])}),
     version:1, plugin:Object.freeze({id,version:record.manifest.version,root:record.root,dataDir:record.dataDir}), signal, settings,
+    locale:Object.freeze({
+      get(){active();return core.locale.get();},
+      onChange(handler){
+        active(); if(typeof handler!=="function")throw TypeError("A language callback is required");
+        const off=core.locale.onChange(value=>{if(!signal.aborted&&!ctx.isClosing?.())handler(value);});
+        const remove=()=>{off();signal.removeEventListener("abort",remove);};
+        signal.addEventListener("abort",remove,{once:true});return remove;
+      },
+    }),
     models:Object.freeze({
       list(){requireGrant("models.read");return structuredClone(core.models.aliases());},
       async ensure({alias}, extraSignal) {
@@ -149,8 +158,8 @@ function createFoundationApi(ctx, record) {
       async openCore(view,section){requireGrant("desktop.navigate");if(!CORE_VIEWS.has(view))throw Error("Unknown Core page");if(section!==undefined&&(view!=="settings"||!["website-account","credit-account"].includes(section)))throw Error("Unknown Core section");return ctx.openCoreView(view,section);},
       async openExternal(raw){requireGrant("desktop.external");const u=new URL(raw);if(u.protocol!=="https:"||u.username||u.password)throw Error("Use HTTPS without credentials");if(!await confirm("Open website?",u.href))return{cancelled:true};await electron.shell.openExternal(u.href);return{opened:true};},
       confirm,
-      preferences(){requireGrant("desktop.preferences");return {language:core.settings.get("interface.language","en"),theme:core.settings.get("interface.theme","light")};},
-      setPreferences(input){requireGrant("desktop.preferences");if(!input||Object.keys(input).some(k=>!["language","theme"].includes(k)))throw Error("Unsupported preference");if(input.language!==undefined){if(typeof input.language!=="string"||!/^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/.test(input.language))throw Error("Invalid language");core.settings.set("interface.language",input.language);}if(input.theme!==undefined){if(!["light","dark","system"].includes(input.theme))throw Error("Invalid theme");core.settings.set("interface.theme",input.theme);}return api.desktop.preferences();},
+      preferences(){requireGrant("desktop.preferences");return {language:core.locale?.get().language||core.settings.get("interface.language","en"),theme:core.settings.get("interface.theme","light")};},
+      setPreferences(input){requireGrant("desktop.preferences");if(!input||Object.keys(input).some(k=>!["language","theme"].includes(k)))throw Error("Unsupported preference");if(input.language!==undefined)throw Error("Change the shared language in Core Settings");if(input.theme!==undefined){if(!["light","dark","system"].includes(input.theme))throw Error("Invalid theme");core.settings.set("interface.theme",input.theme);}return api.desktop.preferences();},
       on(channel,handler){requireGrant("desktop.windows");if(!["show","hide","closed","focus","blur"].includes(channel)||typeof handler!=="function")throw Error("Invalid desktop event");const w=window();w.on(channel,handler);const remove=()=>w.removeListener(channel,handler);signal.addEventListener("abort",remove,{once:true});return remove;},
     }),
     account:Object.freeze({

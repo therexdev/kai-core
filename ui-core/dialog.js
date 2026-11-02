@@ -1,5 +1,9 @@
 "use strict";
 (() => {
+  // Caller-supplied messages and reviewed details stay literal. Core translates
+  // its own chrome and recognized action labels; plugins localize their prompts.
+  const i18n = window.KaiI18n;
+  const label = source => i18n ? i18n.t(source) : source;
   const byId = id => document.getElementById(id), close = byId("dialog-close"), checkbox = byId("dialog-checkbox");
   let ready = false, pending = false, buttons = [];
   function error(message) {
@@ -8,7 +12,7 @@
     checkbox.disabled = true;
     byId("dialog-loading").hidden = true;
     byId("dialog-content").setAttribute("aria-busy", "false");
-    byId("dialog-error").textContent = message;
+    byId("dialog-error").textContent = label(message);
     byId("dialog-error").hidden = false;
     close.focus();
   }
@@ -42,6 +46,7 @@
       const data = await window.kaiDialog.read();
       if (!data || typeof data.title !== "string" || typeof data.message !== "string" || typeof data.detail !== "string" || !Array.isArray(data.buttons) || !data.buttons.length || data.buttons.some(label => typeof label !== "string") || !Number.isInteger(data.defaultId) || data.defaultId < -1 || data.defaultId >= data.buttons.length || !Number.isInteger(data.cancelId)) throw Error("Invalid dialog");
       if (pending) return;
+      if (i18n?.normalize(data.language)) i18n.setLanguage(data.language);
       document.title = data.title || "KAI";
       byId("dialog-title").textContent = data.title || "KAI";
       byId("dialog-message").textContent = data.message;
@@ -56,7 +61,7 @@
       checkbox.checked = !!data.checkboxChecked;
       checkbox.disabled = !data.checkboxLabel;
       buttons = data.buttons.map((label, index) => {
-        const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.dataset.response = String(index);
+        const button = document.createElement("button"); button.type = "button"; button.textContent = i18n ? i18n.t(label) : label; button.dataset.response = String(index);
         if (data.buttons.length === 1 || (data.buttons.length === 2 && data.cancelId >= 0 && index !== data.cancelId) || (index === data.defaultId && index !== data.cancelId)) button.classList.add("primary");
         button.addEventListener("click", () => void decide(index)); byId("dialog-actions").append(button); return button;
       });

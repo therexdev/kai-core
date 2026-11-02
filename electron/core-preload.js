@@ -8,6 +8,16 @@ ipcRenderer.on("kai-core:closing", (_event, value) => {
   for (const callback of closingListeners) callback(closing);
 });
 contextBridge.exposeInMainWorld("kaiCore", Object.freeze({
+  locale: Object.freeze({
+    get: () => ipcRenderer.invoke("kai-core:call", "locale.get"),
+    set: language => ipcRenderer.invoke("kai-core:call", "locale.set", { language }),
+    onChange(callback) {
+      if (typeof callback !== "function") throw TypeError("A language callback is required");
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on("kai:locale-changed", listener);
+      return () => ipcRenderer.removeListener("kai:locale-changed", listener);
+    },
+  }),
   isClosing: () => closing !== null,
   onClosing: callback => {
     if (typeof callback !== "function") throw TypeError("A closing callback is required");

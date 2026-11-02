@@ -74,7 +74,7 @@ async function main() {
   for (const name of ["wallet/session.bin", "machine-secret.bin", "account.cfg", "credit-account-fixture.cfg", "documents/private-document.txt", "plugins/data/private-plugin.txt", "brain/private-memory.txt", "models/partial.gguf.part"]) write(path.join(source, name), sentinel + ":" + name);
   const sourceBefore = snapshot(source), externalBefore = snapshot(external);
   require(path.join(appRoot, "electron/foundation-profile")).prepareFoundationProfile(profile);
-  write(path.join(profile, "settings.json"), JSON.stringify({ network: { privacyMode: "local-only" }, earn: { autoStart: false, schedulerUrl: balanceOrigin } }));
+  write(path.join(profile, "settings.json"), JSON.stringify({ interface: { language: "en" }, network: { privacyMode: "local-only" }, earn: { autoStart: false, schedulerUrl: balanceOrigin } }));
   write(path.join(temp, "package.json"), JSON.stringify({ name: "kai-alpha-migration-smoke", version: require(path.join(appRoot, "package.json")).version, main: "desktop.js" }));
   write(path.join(temp, "desktop.js"), `"use strict";\nrequire(${JSON.stringify(path.join(__dirname, "apps-fixture.js"))}).install(${JSON.stringify({ appRoot: runtimeRoot, appData, reportFile: exitReport, syntheticKeychain })});\nrequire(${JSON.stringify(path.join(runtimeRoot, "electron/core-main.js"))});\n`);
   const args = [];

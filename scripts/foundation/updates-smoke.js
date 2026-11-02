@@ -9,7 +9,7 @@ async function main() {
   const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kai-updates-"))), profile = path.join(temp, "profile"), exitReport = path.join(temp, "exit.json");
   const report = { realCore: true, realSettings: true, realIPC: true, syntheticUpdater: true, syntheticProfile: true, syntheticKeychain: true, syntheticSingleton: true, liveActions: false, checks: [], screenshots: [] };
   require(path.join(appRoot, "electron/foundation-profile")).prepareFoundationProfile(profile);
-  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({ network: { privacyMode: "local-only" }, earn: { autoStart: false } }));
+  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({ interface: { language: "en" }, network: { privacyMode: "local-only" }, earn: { autoStart: false } }));
   fs.writeFileSync(path.join(temp, "package.json"), JSON.stringify({ name: "kai-updates-smoke", version: "1.0.0", main: "desktop.js" }));
   fs.writeFileSync(path.join(temp, "desktop.js"), `
 require(${JSON.stringify(path.join(__dirname, "apps-fixture.js"))}).install(${JSON.stringify({ appRoot: runtimeRoot, appData: path.join(temp, "app-data"), reportFile: exitReport, syntheticKeychain: true, realDialogs: true })});

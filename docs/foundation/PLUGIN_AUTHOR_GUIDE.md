@@ -8,7 +8,7 @@ There are two distinct version numbers: the signed package uses **schema 2 / `ap
 
 | Runtime | What runs | Trust and limits |
 | --- | --- | --- |
-| `sandboxed` | Packaged HTML, CSS and JavaScript in a sandboxed renderer | No Node, direct network access, frames, popups or arbitrary IPC. Uses the four public renderer methods below. No native service entry. |
+| `sandboxed` | Packaged HTML, CSS and JavaScript in a sandboxed renderer | No Node, direct network access, frames, popups or arbitrary IPC. Uses the public renderer methods below. No native service entry. |
 | `native` | Sandboxed UI plus a CommonJS service in Electron's main process | Explicit installation approval trusts code with **KAI's operating-system permissions**. Native code can access files and app data available to KAI, execute programs, use Electron and affect Core. A crash or blocking loop can affect the whole application. |
 
 Native execution is not an OS sandbox. The documented capability checks and plugin directories help avoid mistakes and keep normal API use consistent; they do not confine malicious native code. Native plugins do not automatically gain administrator/root access or bypass OS protections, but share any rights already held by KAI. A signature identifies a publisher and detects changed package bytes. It does not mean KAI reviewed that publisher. The GitHub owner shown on a plugin card is repository attribution from the catalog; it is not a separate verification of the publisher's signing key.
@@ -95,7 +95,8 @@ Never write into `api.plugin.root`. Code is materialized from the signed package
 | `api.desktop.hostWindowId/rendererId/send/on` | `desktop.windows` | Numeric Electron IDs, messages to your renderer, Core-window lifecycle events. IDs can be `null` before a view exists. |
 | `api.desktop.openPlugin/openCore` | `desktop.navigate` | Open an installed plugin or supported Core page. |
 | `api.desktop.openExternal` | `desktop.external` | Reviewed HTTPS URL opening. |
-| `api.desktop.preferences/setPreferences` | `desktop.preferences` | Shared interface language and theme. |
+| `api.locale.get/onChange` | None | Read the shared Core language and subscribe to saved changes. |
+| `api.desktop.preferences/setPreferences` | `desktop.preferences` | Read shared language/theme; change theme. Language changes belong to Core Settings. |
 | `api.desktop.isVisible/confirm` | Native runtime | Visibility and a consistent attended approval. Cancel or a hidden window yields `false`. |
 | `api.account.status/request` | `account.request` | Current KAI account metadata and same-origin requests without returning its token. Local-Only blocks requests. |
 | `api.wallet.summary/authorize` | `wallet.read/authorize` | Shared wallet summary and the supported reviewed credit operations below. No private-key export. |
@@ -107,6 +108,83 @@ Model inputs are bounded at 16 MiB. Network request bodies are bounded at 16 MiB
 `account.request` is a broad grant to the signed-in KAI account API at its configured origin, including endpoints that can change account state. It is not a per-endpoint or read-only account scope. A plugin must obtain clear authorization for the action it performs; keeping the bearer token out of API results does not make the requested account operation harmless. The native runtime itself still has the user's computer authority.
 
 The package permission vocabulary includes some descriptive permissions such as `files.read`, `files.write`, `process.execute` and `desktop.notifications`. API v1 does not expose a generic file/process/notification broker for those names. Do not assume a permission string creates an API method or confines native Node/Electron access. File/process behavior belongs to the native plugin and must use its own clear, bounded user approvals.
+
+## Shared language and localization (Core 0.7.17+)
+
+Core asks for a language on first launch and saves it in the current Core profile.
+Settings → Language lets the user change it with **Save language**. A new plugin
+must follow this preference instead of displaying another first-run picker or
+saving its own language. The supported values are `en`, `es`, `pt-BR`, `fr`, and
+`de`; first launch suggests a supported OS language and falls back to English.
+A dismissed picker is shown again next launch until a choice is saved.
+
+All publishers, including sandboxed plugins with no extra permissions, use the
+same read-only renderer API:
+
+```js
+let revision = 0;
+const applyLanguage = ({ language, direction }) => {
+  document.documentElement.lang = language;
+  document.documentElement.dir = direction;
+  renderInterfaceLabels(language); // Preserve inputs and running operations.
+};
+const unsubscribe = window.kai.locale.onChange(state => {
+  revision++;
+  applyLanguage(state);
+});
+const initialRevision = revision;
+const initial = await window.kai.locale.get();
+if (revision === initialRevision) applyLanguage(initial);
+window.addEventListener("pagehide", unsubscribe, { once: true });
+```
+
+`window.kai.call("locale.get")` is the equivalent low-level call. The state is
+`{ language, direction, selected, languages: [{code, name}] }`. Subscribe before
+reading to avoid a delayed read overwriting a newer change. Notifications reach
+open views, including hidden views; newly opened views read the latest choice.
+Sender/main-frame, installed-content and revocation checks still apply.
+
+Native services use synchronous `api.locale.get()` and
+`api.locale.onChange(callback)`. The returned disposer removes the listener;
+Core also removes it when the service's abort signal fires. Forward the state to
+plugin-owned auxiliary windows only after validating their exact sender/frame.
+The Assistant uses this to keep its floating companion in sync. No additional
+permission, account sign-in, or network request is needed.
+
+Core owns this setting. `api.desktop.preferences().language` remains a read
+compatibility alias; `api.desktop.setPreferences({language: ...})` now rejects
+with directions to Core Settings. Theme updates remain supported. Do not store
+language in plugin `preferences.json` or browser `localStorage`.
+
+Bundle your own offline dictionaries with the signed plugin. Translate explicit
+interface labels, placeholders, accessible labels and status templates. Keep
+user notes, chats, generated output, code, filenames, addresses, keys, model names
+and identifiers literal. Pass dynamic values as interpolation parameters and
+escape at the output sink; do not translate whole DOM trees after user data is
+rendered. Missing keys fall back to their English source. Use the language with
+`Intl.NumberFormat` and `Intl.DateTimeFormat` for display, never for protocol
+amounts, addresses or serialized transaction fields. An interface language does
+not override a user's requested output language or silently translate documents.
+
+[`examples/localized-notes`](../../examples/localized-notes) is a complete small
+sandboxed example with all five languages and a live subscription. Its draft is
+preserved when the language changes. The shipped `core-language.js` adapter can
+also be copied into a plugin that uses the offline `KaiI18n` engine; it is a
+plugin-owned build asset, not a runtime import from Core.
+
+Core translates its dialog controls. Plugins must localize their own dialog messages
+and reviewed details before calling the dialog API; Core keeps that caller-supplied
+content literal. Do the same for prompts created by a native service using
+`api.locale.get().language`. Logs and upstream diagnostics can keep their original text.
+
+Publish these plugin versions with catalog `minCoreVersion: "0.7.17"` or newer.
+The catalog is the compatibility gate; `minCoreVersion` is **not** a manifest
+field. Publish Core first, then signed immutable plugin versions, then a newly
+signed catalog pointing to the exact package bytes. Keep prior release assets
+unchanged. Check initial selection, restart persistence, all five languages,
+live/hidden views, draft preservation, failed writes, and missing-key fallback
+before release. Native error details and upstream diagnostics may remain in
+English; never hide an actionable error because a translation is missing.
 
 ## Local inference, network inference and credits
 

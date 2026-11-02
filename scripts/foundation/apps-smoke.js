@@ -25,7 +25,7 @@ async function main(){
  const output=path.resolve(process.env.KAI_FOUNDATION_APPS_OUTPUT||path.join(os.tmpdir(),"kai-foundation-apps-smoke"));fs.mkdirSync(output,{recursive:true});
  const report={platform:process.platform,realCore:true,runtimeRoot,publicNetworkResponsesMocked:false,syntheticProfile:true,ephemeralSignatures:!packages,packageMode:packages?"publisher-signed-streaming":"ephemeral-source",checks:[],plugins:[],screenshots:[],failures:[]};
  require(path.join(appRoot,"electron/foundation-profile")).prepareFoundationProfile(profile);
- fs.writeFileSync(path.join(profile,"settings.json"),JSON.stringify({network:{privacyMode:"local-only"},earn:{autoStart:false}}));
+ fs.writeFileSync(path.join(profile,"settings.json"),JSON.stringify({interface:{language:"en"},network:{privacyMode:"local-only"},earn:{autoStart:false}}));
  const manager=new(require(path.join(appRoot,"core/lib/plugins/manager")).PluginManager)(profile);
  const key=packages?null:crypto.generateKeyPairSync("ed25519"),publicKey=key?.publicKey.export({format:"der",type:"spki"}).toString("base64");
  const selected=process.env.KAI_FOUNDATION_SMOKE_IDS?new Set(process.env.KAI_FOUNDATION_SMOKE_IDS.split(",")):null;

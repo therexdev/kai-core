@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   const MAX_INPUT_BYTES = 24000, MAX_PROMPT_BYTES = 16000, MAX_REPLY_BYTES = 1000000;
   const bytes = value => new TextEncoder().encode(value).length;
@@ -213,7 +214,7 @@
 
   function mount(window, document) {
     const host = document.getElementById("chat-content"); if (!host || !window.kaiCore) return null;
-    host.innerHTML = `<div class="chat-shell">
+    host.innerHTML = KaiLocale.html`<div class="chat-shell">
       <div class="chat-toolbar"><div class="chat-route-controls"><label for="chat-source">Chat with<select id="chat-source"><option value="local">Local model</option><option value="network">Network model</option></select></label><label for="chat-model">Model<select id="chat-model" aria-label="Chat model"></select></label></div><div class="actions"><button id="chat-refresh" type="button" hidden>Refresh models</button><button id="chat-new" type="button">New chat</button></div></div>
       <p id="chat-model-detail" class="chat-model-detail muted"></p>
       <div id="chat-messages" class="chat-messages" role="log" aria-label="Chat messages" aria-live="polite"></div>
@@ -231,8 +232,8 @@
       const optionsSignature = JSON.stringify([state.source, models, state.selected[state.source]]);
       if (signature !== optionsSignature) {
         signature = optionsSignature; $("chat-model").replaceChildren();
-        if (!models.length) { const option = document.createElement("option"); option.value = ""; option.textContent = network ? "No network models available" : "No local models installed"; $("chat-model").append(option); }
-        else if (network && !state.selected.network) { const option = document.createElement("option"); option.value = ""; option.textContent = "Choose a network model"; option.disabled = true; $("chat-model").append(option); }
+        if (!models.length) { const option = document.createElement("option"); option.value = ""; KaiLocale.setText(option, (network ? KaiLocale.message(["No network models available"]) : KaiLocale.message(["No local models installed"]))); $("chat-model").append(option); }
+        else if (network && !state.selected.network) { const option = document.createElement("option"); option.value = ""; KaiLocale.setText(option, KaiLocale.message(["Choose a network model"])); option.disabled = true; $("chat-model").append(option); }
         for (const model of models) { const option = document.createElement("option"); option.value = model.id; option.textContent = model.label + (model.available ? "" : " · unavailable"); option.disabled = !model.available; $("chat-model").append(option); }
         $("chat-model").value = state.selected[state.source];
       }
@@ -244,12 +245,8 @@
       $("chat-send").disabled = state.busy || !picked?.available || network && (!state.info?.enabled || !!state.info?.blocked || state.privacyMode === "local-only");
       $("chat-recovery").hidden = !network || !state.info?.recoveryAvailable; $("chat-recover").disabled = state.busy || state.privacyMode === "local-only";
       statusNotice.show(state.status, { error: state.error, dismissible: !state.busy });
-      $("chat-hint").textContent = network ? "Your network conversation is sent to the selected network model." : "Messages stay on this computer.";
-      $("chat-model-detail").textContent = !network ? (picked ? "Runs locally on your computer." : "Install or import a model in Models to start chatting.")
-        : state.privacyMode === "local-only" ? "Local-Only is on. Open Settings to allow network chat."
-        : state.checking ? "Checking network models…"
-        : state.info?.blocked || (picked?.unavailableReason === "wallet-connection-required" ? "Connect your wallet to network credits to use other providers while this computer shares the same model, or choose Local model." : !models.some(m => m.available) && state.info?.models?.some(m => m.unavailableReason === "self-only") ? "Your own shared models are excluded from network chat. Choose Local model to use them, or wait for another provider." : state.info?.enabled !== true ? "Network chat is unavailable. Check Network to connect."
-        : `${state.info.freeOnlySession ? "Uses free credits only." : "Uses eligible free credits first, then purchased credits."}${state.info.maxRequestCredits ? ` Up to ${state.info.maxRequestCredits} credits per message.` : ""}${picked?.inputCreditsPerMillion !== undefined ? ` ${picked.inputCreditsPerMillion} input / ${picked.outputCreditsPerMillion} output credits per million tokens.` : ""}`);
+      KaiLocale.setText($("chat-hint"), (network ? KaiLocale.message(["Your network conversation is sent to the selected network model."]) : KaiLocale.message(["Messages stay on this computer."])));
+      KaiLocale.setText($("chat-model-detail"), (!network ? (picked ? KaiLocale.message(["Runs locally on your computer."]) : KaiLocale.message(["Install or import a model in Models to start chatting."])) : (state.privacyMode === "local-only" ? KaiLocale.message(["Local-Only is on. Open Settings to allow network chat."]) : (state.checking ? KaiLocale.message(["Checking network models…"]) : ((_value) => _value ? KaiLocale.literal(_value) : (picked?.unavailableReason === "wallet-connection-required" ? KaiLocale.message(["Connect your wallet to network credits to use other providers while this computer shares the same model, or choose Local model."]) : (!models.some(m => m.available) && state.info?.models?.some(m => m.unavailableReason === "self-only") ? KaiLocale.message(["Your own shared models are excluded from network chat. Choose Local model to use them, or wait for another provider."]) : (state.info?.enabled !== true ? KaiLocale.message(["Network chat is unavailable. Check Network to connect."]) : KaiLocale.message`${state.info.freeOnlySession ? "Uses free credits only." : "Uses eligible free credits first, then purchased credits."}${state.info.maxRequestCredits ? ` Up to ${state.info.maxRequestCredits} credits per message.` : ""}${picked?.inputCreditsPerMillion !== undefined ? ` ${picked.inputCreditsPerMillion} input / ${picked.outputCreditsPerMillion} output credits per million tokens.` : ""}`))))(state.info?.blocked)))));
       const turns = state.turns[source], serialized = JSON.stringify(turns);
       if (messagesSignature !== serialized) {
         messagesSignature = serialized; const log = $("chat-messages"), nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 100;
@@ -257,8 +254,8 @@
         for (const turn of turns) {
           for (const [role, content] of [["user", turn.prompt], ["assistant", turn.answer || (turn.state === "pending" ? "Thinking…" : turn.error || "Reply stopped")]]) {
             const bubble = document.createElement("article"); bubble.className = `chat-message ${role}${turn.state === "failed" && role === "assistant" ? " error" : ""}`;
-            const label = document.createElement("strong"), body = document.createElement("div"); label.textContent = role === "user" ? "You" : "KAI"; body.textContent = content; bubble.append(label, body);
-            if (role === "assistant" && turn.answer && turn.state === "failed") { const note = document.createElement("small"); note.textContent = turn.error || "Reply interrupted"; bubble.append(note); }
+            const label = document.createElement("strong"), body = document.createElement("div"); KaiLocale.setText(label, (role === "user" ? KaiLocale.message(["You"]) : KaiLocale.message(["KAI"]))); body.textContent = content; bubble.append(label, body);
+            if (role === "assistant" && turn.answer && turn.state === "failed") { const note = document.createElement("small"); KaiLocale.setText(note, ((_value) => _value ? KaiLocale.literal(_value) : KaiLocale.message(["Reply interrupted"]))(turn.error)); bubble.append(note); }
             log.append(bubble);
           }
         }
@@ -266,7 +263,7 @@
       }
       $("chat-messages").hidden = !turns.length; $("chat-empty").hidden = !!turns.length;
       $("chat-setup").hidden = !!picked?.available && (!network || state.privacyMode !== "local-only");
-      $("chat-setup").textContent = network ? state.privacyMode === "local-only" ? "Open Settings" : "Open Network" : "Open Models";
+      KaiLocale.setText($("chat-setup"), (network ? (state.privacyMode === "local-only" ? KaiLocale.message(["Open Settings"]) : KaiLocale.message(["Open Network"])) : KaiLocale.message(["Open Models"])));
     }
     $("chat-source").onchange = event => { void controller.setSource(event.target.value); };
     $("chat-model").onchange = event => controller.setModel(event.target.value);

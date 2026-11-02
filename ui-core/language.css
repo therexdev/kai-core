@@ -1,0 +1,10 @@
+.language-dialog{border:1px solid #dce5f3;border-radius:22px;width:min(440px,calc(100vw - 40px));padding:34px;color:var(--text);background:#fff;box-shadow:0 28px 90px #182d5933;box-sizing:border-box}
+.language-dialog::backdrop{background:#192c534d;backdrop-filter:blur(6px)}
+.language-dialog h1{font-size:28px;line-height:1.2;letter-spacing:-.7px;margin:18px 0 12px}
+.language-dialog p{font-size:13px;line-height:1.6;color:var(--text-dim)}
+.language-dialog .language-close{position:absolute;right:15px;top:12px;border:0;background:transparent;font-size:24px;padding:4px 10px}
+.language-dialog .language-symbol{display:grid;place-items:center;width:56px;height:56px;border-radius:17px;background:linear-gradient(135deg,#edf4ff,#e4edff);font-size:32px;color:var(--accent)}
+.language-dialog select{font-size:15px;padding:13px;margin-top:10px}.language-dialog .primary{width:100%;padding:13px;margin-top:10px}
+.language-dialog .language-error{color:#a33040;min-height:20px}.language-setting-row{display:flex;gap:12px;align-items:center;max-width:480px}.language-setting-row select{margin:7px 0}.language-setting-row button{flex-shrink:0}.language-setting-status{min-height:20px}
+
+.rail-icons{grid-template-columns:1fr}.rail-icon{justify-content:flex-start;padding:8px 12px;white-space:normal;min-width:0}
