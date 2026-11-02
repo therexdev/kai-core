@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   const message = error => String(error?.message || error || "Your credit connection could not be checked.").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
   function presentation(state) {
@@ -62,7 +63,7 @@
   if (typeof module === "object") module.exports = { createConnection, presentation };
   if (!root?.document || !root.kaiCore?.credit) return;
   const $ = id => root.document.getElementById("credit-connection" + (id ? "-" + id : "")), card = $(""); if (!card) return;
-  const text = (id, value) => { const node = $(id), next = String(value || ""); if (node.textContent !== next) node.textContent = next; };
+  const text = (id, value) => KaiLocale.setText($(id), value && typeof value === "object" ? value : KaiLocale.literal(value));
   const controller = createConnection({ read: () => root.kaiCore.credit("wallet-info"), connect: () => root.kaiCore.credit("wallet-connect", { sessionOnly: false }),
     refreshCredits: async () => { root.KaiCredits.clear(); await root.KaiCredits.refresh(); },
     navigate: action => {
@@ -70,9 +71,9 @@
       if (action === "account") root.KaiCoreAccount?.openCredit();
     },
     render(state, view) {
-      card.hidden = !view.visible; text("title", view.title); text("detail", view.detail); text("address", state.info?.address);
+      card.hidden = !view.visible; KaiLocale.setText($("title"), view.title); text("detail", view.detail); text("address", state.info?.address);
       $("address").hidden = !state.info?.address; text("error", state.error); $("error").hidden = !state.error;
-      text("action", state.busy ? "Connecting…" : state.loading ? "Checking…" : view.label); $("action").disabled = state.busy || state.loading;
+      text("action", (state.busy ? KaiLocale.message(["Connecting…"]) : (state.loading ? KaiLocale.message(["Checking…"]) : KaiLocale.message([view.label || ""])))); $("action").disabled = state.busy || state.loading;
     } });
   $("action").addEventListener("click", () => void controller.act());
   root.KaiCreditConnection = controller;

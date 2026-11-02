@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   const count = value => Number.isSafeInteger(value) && value >= 0;
   const label = (value, max = 256) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
@@ -34,7 +35,7 @@
   if (!root || typeof document !== "object") return;
   const host = document.getElementById("network-content");
   if (!host) return;
-  host.innerHTML = `
+  host.innerHTML = KaiLocale.html`
     <header class="product-head"><div><h1>Network overview</h1><p>Available AI and the computers providing it.</p></div><button id="core-network-refresh" type="button">Refresh</button></header>
     <section class="product-network-status" aria-label="Network status">
       <div><h2 id="core-network-state" role="status">Network status unavailable</h2><p id="core-network-time">No verified observation yet.</p></div>
@@ -49,7 +50,7 @@
     <section class="product-panel"><h2>Computers providing AI</h2><div id="core-network-providers"><p class="product-empty">No verified provider status yet.</p></div></section>
     <section class="product-panel" id="core-network-recent" hidden><h2>Recent activity</h2><p id="core-network-activity-state" class="muted"></p><div id="core-network-activity"></div></section>`;
   const $ = id => document.getElementById(`core-network-${id}`);
-  const text = (id, value) => { const node = $(id), next = String(value); if (node.textContent !== next) node.textContent = next; };
+  const text = (id, value) => KaiLocale.setText($(id), value && typeof value === "object" ? value : KaiLocale.literal(value));
   const html = (id, value) => { const node = $(id); if (node.innerHTML !== value) node.innerHTML = value; };
   let snapshot = null, error = "", mode = null, active = false, warmed = false, generation = 0, pending = null, pollTimer, expiryTimer;
   const visible = () => (active || warmed) && !document.hidden;
@@ -58,11 +59,11 @@
   function clearTimers() { clearTimeout(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null; }
   function paint() {
     const n = snapshot, current = fresh(), publicStatus = n?.source === "public-scheduler";
-    text("state", current ? n.state === "available" ? "AI network status" : "Network paused" : n ? "Last known network status" : "Network status unavailable");
-    text("time", n ? `Last updated ${new Date(n.observedAt).toLocaleString()}${current ? "" : " · Availability unconfirmed"}${error ? " · " + error : ""}` : error || "Checking network status…");
+    text("state", (current ? (n.state === "available" ? KaiLocale.message(["AI network status"]) : KaiLocale.message(["Network paused"])) : (n ? KaiLocale.message(["Last known network status"]) : KaiLocale.message(["Network status unavailable"]))));
+    text("time", (n ? KaiLocale.message`Last updated ${new Date(n.observedAt).toLocaleString(KaiLocale.language)}${current ? "" : " · Availability unconfirmed"}${error ? " · " + error : ""}` : ((_value) => _value ? KaiLocale.literal(_value) : KaiLocale.message(["Checking network status…"]))(error)));
     $("state").dataset.state = current ? n.state : "unavailable";
-    text("provider-label", publicStatus ? "providers online" : "providers ready");
-    text("waiting-label", publicStatus ? "jobs waiting" : "requests waiting");
+    text("provider-label", (publicStatus ? KaiLocale.message(["providers online"]) : KaiLocale.message(["providers ready"])));
+    text("waiting-label", (publicStatus ? KaiLocale.message(["jobs waiting"]) : KaiLocale.message(["requests waiting"])));
     text("model-count", n ? n.models.filter(m => m.available).length : "—");
     text("provider-count", n ? publicStatus ? n.providersOnline : n.readyProviders : "—");
     text("waiting-count", n ? n.waitingRequests : "—");
@@ -71,10 +72,10 @@
     $("model-grid").classList.toggle("product-single", !reported);
     $("recent").hidden = !n || publicStatus || n.activityAvailable === false;
     text("completed-count", reported ? n.completedToday : "—");
-    text("activity-state", n && !current ? "Last verified activity. Current network status is unavailable." : "");
-    html("models", n?.models.length ? n.models.map(m => `<div class="product-model-row"><div><strong>${escape(modelName(m))}</strong>${m.freeEligible === null ? "" : `<p>${m.freeEligible ? "Free credits eligible" : "Purchased credits"}</p>`}</div><div><p>${current && m.unavailableReason === "self-only" ? "Only shared by your computer or account · use Local model" : current && m.unavailableReason === "wallet-connection-required" ? "Connect your wallet to use other providers while sharing this model" : current && m.available ? `${m.providers} provider${m.providers === 1 ? "" : "s"} ${publicStatus ? "online" : "ready"}` : "Availability unconfirmed"}</p>${publicStatus ? "" : `<button type="button" data-network-model="${escape(m.id)}"${canUse(m) ? "" : " disabled"}>Use model</button>`}</div></div>`).join("") : `<p class="product-empty">${n ? "No models are currently reported." : "No verified model availability yet."}</p>`);
-    html("providers", n?.providers.length ? n.providers.map(p => `<div class="product-detail"><span>${p.self ? "Your computer or account" : `Provider ${escape(p.id)}`} · ${escape(modelName(p.model))}</span><span>${current ? escape(p.state.replace(/-/g, " ")) : "Last seen — status stale"}</span></div>`).join("") + (n.providersTruncated ? '<p class="muted">Showing the first 256 providers.</p>' : "") : `<p class="product-empty">${n ? "No recently observed providers." : "No verified provider status yet."}</p>`);
-    html("activity", n?.activity.length ? n.activity.map(a => `<div class="product-detail"><span>Reply delivered · ${escape(modelName(a.model))}</span><time>${escape(new Date(a.at).toLocaleTimeString())}</time></div>`).join("") : '<p class="product-empty">No verified replies recorded today.</p>');
+    text("activity-state", (n && !current ? KaiLocale.message(["Last verified activity. Current network status is unavailable."]) : KaiLocale.message([""])));
+    html("models", n?.models.length ? n.models.map(m => KaiLocale.html`<div class="product-model-row"><div><strong>${escape(modelName(m))}</strong>${m.freeEligible === null ? "" : KaiLocale.html`<p>${m.freeEligible ? "Free credits eligible" : "Purchased credits"}</p>`}</div><div><p>${current && m.unavailableReason === "self-only" ? "Only shared by your computer or account · use Local model" : current && m.unavailableReason === "wallet-connection-required" ? "Connect your wallet to use other providers while sharing this model" : current && m.available ? `${m.providers} provider${m.providers === 1 ? "" : "s"} ${publicStatus ? "online" : "ready"}` : "Availability unconfirmed"}</p>${publicStatus ? "" : `<button type="button" data-network-model="${escape(m.id)}"${canUse(m) ? "" : " disabled"}>Use model</button>`}</div></div>`).join("") : KaiLocale.html`<p class="product-empty">${n ? "No models are currently reported." : "No verified model availability yet."}</p>`);
+    html("providers", n?.providers.length ? n.providers.map(p => KaiLocale.html`<div class="product-detail"><span>${p.self ? "Your computer or account" : `Provider ${escape(p.id)}`} · ${escape(modelName(p.model))}</span><span>${current ? escape(p.state.replace(/-/g, " ")) : "Last seen — status stale"}</span></div>`).join("") + (n.providersTruncated ? KaiLocale.html('<p class="muted">Showing the first 256 providers.</p>') : "") : KaiLocale.html`<p class="product-empty">${n ? "No recently observed providers." : "No verified provider status yet."}</p>`);
+    html("activity", n?.activity.length ? n.activity.map(a => KaiLocale.html`<div class="product-detail"><span>Reply delivered · ${escape(modelName(a.model))}</span><time>${escape(new Date(a.at).toLocaleTimeString(KaiLocale.language))}</time></div>`).join("") : KaiLocale.html('<p class="product-empty">No verified replies recorded today.</p>'));
     clearTimeout(expiryTimer);
     if (visible() && current) expiryTimer = setTimeout(paint, Math.max(1, n.validUntil - Date.now()));
   }

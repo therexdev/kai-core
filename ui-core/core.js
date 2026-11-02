@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 const $ = id => document.getElementById(id), bridge = window.kaiCore;
 let snapshot, page = "chat", activeAppId = null, refreshing = false, priceGeneration = 0, creditState, knownPrivacy, knownWalletAddress, purchaseInfoKey, purchaseInfoGeneration = 0, walletSecretGeneration = 0, cancelledPurchases = new Set();
 const pageTitles = { chat: "Chat", app: "App", models: "Models", plugins: "Plugins", wallet: "Wallet", credits: "Credits and Usage", "buy-credits": "Buy credits", earning: "Earn KOIN", network: "Network", settings: "Settings" };
@@ -13,7 +14,7 @@ const notices = {
   "purchase-state": makeNotice("purchase-notice", "purchase-state", "purchase-close", () => $("usd")),
 };
 let noticeSource = "action";
-const text = (id, value) => { if (notices[id]) notices[id].show(value); else if ($(id).textContent !== String(value ?? "")) $(id).textContent = value ?? ""; };
+const text = (id, value) => { if (notices[id]) notices[id].show(value); else KaiLocale.setText($(id), value && typeof value === "object" ? value : KaiLocale.literal(value)); };
 function notify(message, error = false, { background = false } = {}) {
   if (bridge?.isClosing?.()) return;
   noticeSource = background ? "refresh" : "action";
@@ -71,8 +72,8 @@ function showPage(next, app) {
     n.classList.toggle("selected", selected); n.setAttribute("aria-current", selected ? "page" : "false");
   });
   const title = next === "app" ? window.KaiPluginPresentation.get(activeAppId, snapshot?.plugins?.find(plugin => plugin.id === activeAppId) || app).name : pageTitles[next];
-  text("workspace-title", title);
-  if (next === "app") text("app-loading", `Opening ${title}…`);
+  KaiLocale.setText($("workspace-title"), next === "app" ? KaiLocale.literal(title) : title);
+  if (next === "app") text("app-loading", KaiLocale.message`Opening ${title}…`);
   if (next === "app") syncAppBounds();
   if (next === "chat") window.KaiCoreChat?.show();
   if (next === "earning") window.KaiCoreEarning?.enter();
@@ -104,15 +105,15 @@ async function refresh() {
     if (bridge.isClosing?.()) return;
     applyPrivacy(s.network.privacyMode);
     text("version", `v${s.version}`);
-    text("closing-window-detail", s.desktop?.trayAvailable ? "Closing the window keeps KAI and earning running in the system tray. Click the tray icon to reopen it, or choose Quit KAI Core Beta from its menu to stop the app." : "A system tray icon is not available on this desktop. Closing the window will quit KAI Core Beta.");
+    text("closing-window-detail", (s.desktop?.trayAvailable ? KaiLocale.message(["Closing the window keeps KAI and earning running in the system tray. Click the tray icon to reopen it, or choose Quit KAI Core Beta from its menu to stop the app."]) : KaiLocale.message(["A system tray icon is not available on this desktop. Closing the window will quit KAI Core Beta."])));
     const address = s.wallet.address;
     if (knownWalletAddress !== undefined && knownWalletAddress !== (address || null)) {
       hideBackup();
       window.dispatchEvent(new CustomEvent("kai-credit-identity-changed"));
     }
     knownWalletAddress = address || null;
-    text("wallet-state", address ? s.wallet.unlocked ? "Unlocked on this computer" : "Saved wallet · locked" : "Create or restore your wallet");
-    text("wallet-address", address || "No wallet created"); text("wallet-detail", s.wallet.unlocked ? "Wallet unlocked. Core’s plugin API does not share its private key." : "Unlock to authorize wallet actions.");
+    text("wallet-state", (address ? (s.wallet.unlocked ? KaiLocale.message(["Unlocked on this computer"]) : KaiLocale.message(["Saved wallet · locked"])) : KaiLocale.message(["Create or restore your wallet"])));
+    text("wallet-address", ((_value) => _value ? KaiLocale.literal(_value) : KaiLocale.message(["No wallet created"]))(address)); text("wallet-detail", (s.wallet.unlocked ? KaiLocale.message(["Wallet unlocked. Core’s plugin API does not share its private key."]) : KaiLocale.message(["Unlock to authorize wallet actions."])));
     $("create-wallet").hidden = s.wallet.exists; $("restore-wallet").hidden = s.wallet.exists; $("unlock-button").hidden = !s.wallet.exists || s.wallet.unlocked; $("lock-wallet").hidden = !s.wallet.unlocked;
     window.KaiCoreWallet?.observe(s.wallet, s.network.privacyMode);
     window.KaiCoreEarning?.observe(s.wallet, s.network.privacyMode);
@@ -158,8 +159,8 @@ function pluginRepository(repository) {
 function pluginDeveloper(repository) {
   const source = pluginRepository(repository);
   if (!source) return "";
-  const github = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 6v-3.9a3.4 3.4 0 0 0-1-2.7c3.3-.4 6.8-1.6 6.8-7.4A5.8 5.8 0 0 0 19.2 4a5.4 5.4 0 0 0-.1-4S17.8-.4 15 1.5a14.1 14.1 0 0 0-7 0C5.2-.4 3.9 0 3.9 0A5.4 5.4 0 0 0 3.8 4a5.8 5.8 0 0 0-1.6 4c0 5.8 3.5 7 6.8 7.4a3.4 3.4 0 0 0-1 2.7V22" transform="translate(1 1) scale(.92)"/></svg>';
-  return `<div class="plugin-developer"><span>by <strong>${esc(source.owner)}</strong></span><a class="plugin-repository-link" href="${esc(source.url)}" data-plugin-repository="${esc(source.repository)}" aria-label="Open ${esc(source.repository)} on GitHub" title="View ${esc(source.repository)} on GitHub">${github}</a></div>`;
+  const github = KaiLocale.html('<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 6v-3.9a3.4 3.4 0 0 0-1-2.7c3.3-.4 6.8-1.6 6.8-7.4A5.8 5.8 0 0 0 19.2 4a5.4 5.4 0 0 0-.1-4S17.8-.4 15 1.5a14.1 14.1 0 0 0-7 0C5.2-.4 3.9 0 3.9 0A5.4 5.4 0 0 0 3.8 4a5.8 5.8 0 0 0-1.6 4c0 5.8 3.5 7 6.8 7.4a3.4 3.4 0 0 0-1 2.7V22" transform="translate(1 1) scale(.92)"/></svg>');
+  return KaiLocale.html`<div class="plugin-developer"><span>by <strong>${esc(source.owner)}</strong></span><a class="plugin-repository-link" href="${esc(source.url)}" data-plugin-repository="${esc(source.repository)}" aria-label="Open ${esc(source.repository)} on GitHub" title="View ${esc(source.repository)} on GitHub">${github}</a></div>`;
 }
 function pluginCardDisplay(plugin) {
   const display = window.KaiPluginPresentation.get(plugin.id, plugin);
@@ -171,16 +172,16 @@ function renderInstalledPlugins() {
   const label = count ? `Plugins, ${count} ${count === 1 ? "update" : "updates"} available` : "Plugins";
   $("plugin-nav").setAttribute("aria-label", label); $("plugin-nav").setAttribute("title", label);
   $("plugin-updates").hidden = !count; text("plugin-updates-count", count);
-  text("plugin-updates-title", `${count} plugin ${count === 1 ? "update" : "updates"} available`);
+  text("plugin-updates-title", KaiLocale.message`${count} plugin ${count === 1 ? "update" : "updates"} available`);
   const blocked = [...updates.values()].filter(item => item.compatible === false).length;
-  text("plugin-updates-detail", blocked ? `${blocked} ${blocked === 1 ? "update needs" : "updates need"} a newer Core version. Review available updates below.` : "Review and install the new versions below.");
+  text("plugin-updates-detail", (blocked ? KaiLocale.message`${blocked} ${blocked === 1 ? "update needs" : "updates need"} a newer Core version. Review available updates below.` : KaiLocale.message(["Review and install the new versions below."])));
   html("plugins", s.plugins.length ? s.plugins.map(p => {
     const display = pluginCardDisplay(p), update = updates.get(p.id), blocked = update?.compatible === false;
-    const updateLabel = update ? `<span class="pill plugin-update-label">${blocked ? "Core update required" : "Update available"}</span>` : "";
-    const version = update ? `Version ${esc(p.version)} <span aria-hidden="true">→</span><span class="sr-only"> to </span> <strong>${esc(update.version)}</strong>` : `Version ${esc(p.version)}`;
+    const updateLabel = update ? KaiLocale.html`<span class="pill plugin-update-label">${blocked ? "Core update required" : "Update available"}</span>` : "";
+    const version = update ? KaiLocale.html`Version ${esc(p.version)} <span aria-hidden="true">→</span><span class="sr-only"> to </span> <strong>${esc(update.version)}</strong>` : `Version ${esc(p.version)}`;
     const updateButton = update ? `<button class="primary" data-install-plugin="${esc(p.id)}" ${blocked ? "disabled" : ""}>${blocked ? "Requires newer Core" : "Review update"}</button>` : "";
-    return `<article class="plugin-card${update ? " plugin-update-available" : ""}" data-installed-plugin="${esc(p.id)}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div class="plugin-identity"><h2>${esc(display.name)}</h2>${pluginDeveloper(p.repository)}</div></div><div class="pills plugin-status"><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span>${updateLabel}</div><p class="plugin-description">${esc(display.description)}</p>${p.backgroundError ? `<p class="plugin-card-notice error">Background service needs attention: ${esc(p.backgroundError)}</p>` : ""}${blocked ? `<p class="plugin-card-notice">${esc(update.compatibilityReason || `Requires KAI Core Beta ${update.minCoreVersion || "a newer version"}.`)}</p>` : ""}<div class="plugin-card-footer"><p class="muted plugin-version">${version}</p><div class="actions">${updateButton}${p.enabled ? `<button${update ? "" : ' class="primary"'} data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></div></article>`;
-  }).join("") : "<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a plugin below to add the tools you need.</p></article>");
+    return KaiLocale.html`<article class="plugin-card${update ? " plugin-update-available" : ""}" data-installed-plugin="${esc(p.id)}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div class="plugin-identity"><h2>${esc(display.name)}</h2>${pluginDeveloper(p.repository)}</div></div><div class="pills plugin-status"><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span>${updateLabel}</div><p class="plugin-description">${esc(display.description)}</p>${p.backgroundError ? KaiLocale.html`<p class="plugin-card-notice error">Background service needs attention: ${esc(p.backgroundError)}</p>` : ""}${blocked ? KaiLocale.html`<p class="plugin-card-notice">${esc(update.compatibilityReason || `Requires KAI Core Beta ${update.minCoreVersion || "a newer version"}.`)}</p>` : ""}<div class="plugin-card-footer"><p class="muted plugin-version">${version}</p><div class="actions">${updateButton}${p.enabled ? `<button${update ? "" : ' class="primary"'} data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></div></article>`;
+  }).join("") : KaiLocale.html("<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a plugin below to add the tools you need.</p></article>"));
 }
 function renderCatalog() {
   if (!snapshot || !$("plugin-catalog")) return;
@@ -191,8 +192,8 @@ function renderCatalog() {
     const differentPublisher = installed && installed.fingerprint && p.fingerprint && installed.fingerprint !== p.fingerprint;
     const label = differentPublisher ? "Different publisher" : update ? blocked ? "Requires newer Core" : "Review update" : installed ? pluginVersionOrder(installed.version, p.version) === 1 ? "Newer version installed" : "Installed" : blocked ? "Requires newer Core" : "Install";
     const unavailable = blocked || differentPublisher || installed && !update;
-    return `<article class="plugin-card${update ? " plugin-update-available" : ""}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div class="plugin-identity"><h2>${esc(display.name)}</h2>${pluginDeveloper(p.repository)}</div></div><div class="pills plugin-status"><span class="pill">${p.official ? "KAI" : "Community"}</span>${update ? '<span class="pill plugin-update-label">Update available</span>' : ""}</div><p class="plugin-description">${esc(display.description)}</p>${blocked ? `<p class="plugin-card-notice">${esc(p.compatibilityReason || "Update Core to use this plugin.")}</p>` : ""}<div class="plugin-card-footer"><p class="muted plugin-version">Version ${esc(p.version)}${p.minCoreVersion ? ` · Core ${esc(p.minCoreVersion)}+` : ""}</p><div class="actions"><button${!unavailable ? ' class="primary"' : ""} data-install-plugin="${esc(p.id)}" ${unavailable ? "disabled" : ""}>${label}</button></div></div></article>`;
-  }).join("") : "<p>No plugins match your search.</p>");
+    return KaiLocale.html`<article class="plugin-card${update ? " plugin-update-available" : ""}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div class="plugin-identity"><h2>${esc(display.name)}</h2>${pluginDeveloper(p.repository)}</div></div><div class="pills plugin-status"><span class="pill">${p.official ? "KAI" : "Community"}</span>${update ? KaiLocale.html('<span class="pill plugin-update-label">Update available</span>') : ""}</div><p class="plugin-description">${esc(display.description)}</p>${blocked ? KaiLocale.html`<p class="plugin-card-notice">${esc(p.compatibilityReason || "Update Core to use this plugin.")}</p>` : ""}<div class="plugin-card-footer"><p class="muted plugin-version">Version ${esc(p.version)}${p.minCoreVersion ? ` · Core ${esc(p.minCoreVersion)}+` : ""}</p><div class="actions"><button${!unavailable ? ' class="primary"' : ""} data-install-plugin="${esc(p.id)}" ${unavailable ? "disabled" : ""}>${label}</button></div></div></article>`;
+  }).join("") : KaiLocale.html("<p>No plugins match your search.</p>"));
   const r = s.registry, check = s.catalogCheck;
   const base = r?.available && !r.expired ? `Signed catalog ${r.version} · ${r.count} plugins.` : r?.present ? "Catalog unavailable. Check again before installing." : "Showing bundled KAI releases.";
   const detail = check?.paused || s.network.privacyMode === "local-only" ? "Update checks are paused in Local-Only mode." : check?.error || r?.error ? "Could not check for new updates. Try again when connected." : check?.checking && !r?.available ? "Checking for plugin updates…" : "";
@@ -230,7 +231,7 @@ function applyPrivacy(mode) {
   if (mode === knownPrivacy) return;
   knownPrivacy = mode; priceGeneration++; purchaseInfoGeneration++; cancelledPurchases.clear();
   window.dispatchEvent(new CustomEvent("kai-core-privacy-changed", { detail: { mode } }));
-  if (mode === "local-only") text("price", "Choose an online mode in Settings to buy credits.");
+  if (mode === "local-only") text("price", KaiLocale.message(["Choose an online mode in Settings to buy credits."]));
 }
 $("privacy").onchange = e => action(e.currentTarget, async () => {
   const mode = e.target.value; await bridge.call("privacy", { mode }); applyPrivacy(mode);
@@ -249,7 +250,7 @@ async function createWallet(restore) {
       window.dispatchEvent(new CustomEvent("kai-credit-identity-changed"));
     }
     if (r.wif && page === "wallet" && !document.hidden && generation === walletSecretGeneration) {
-      text("wallet-backup", `Save this backup key privately:\n${r.wif}`); $("wallet-backup").hidden = false; $("hide-backup").hidden = false;
+      text("wallet-backup", KaiLocale.message`Save this backup key privately:\n${r.wif}`); $("wallet-backup").hidden = false; $("hide-backup").hidden = false;
     }
     notify("Wallet ready.");
   } finally { $("password").value = ""; $("restore-wif").value = ""; }
@@ -262,23 +263,23 @@ $("lock-wallet").onclick = e => { hideBackup(); return action(e.currentTarget, (
 $("connect-wallet").onclick = e => action(e.currentTarget, async () => { await bridge.credit("wallet-connect"); window.KaiCredits.clear(); await window.KaiCredits.refresh(); });
 $("import-model").onclick = e => action(e.currentTarget, async () => { const r = await bridge.call("models.import"); if (r) { notices["model-message"].clear(); await api("/core/models/import", { path: r.file }); } });
 let priceBusy = false;
-async function price() { if (!bridge || priceBusy || page !== "buy-credits" || snapshot?.network.privacyMode === "local-only") return; priceBusy = true; const generation = ++priceGeneration, usd = $("usd").value; try { const r = await bridge.credit("purchase-estimate", { usd }); if (generation === priceGeneration) text("price", `Estimated payment: ${r.estimate.koin} KOIN · ${r.estimate.credits} credits`); } catch (e) { if (generation === priceGeneration) text("price", e.message); } finally { priceBusy = false; } }
-$("usd").oninput = () => { priceGeneration++; text("price", "The exact KOIN payment will be shown before approval."); };
+async function price() { if (!bridge || priceBusy || page !== "buy-credits" || snapshot?.network.privacyMode === "local-only") return; priceBusy = true; const generation = ++priceGeneration, usd = $("usd").value; try { const r = await bridge.credit("purchase-estimate", { usd }); if (generation === priceGeneration) text("price", KaiLocale.message`Estimated payment: ${r.estimate.koin} KOIN · ${r.estimate.credits} credits`); } catch (e) { if (generation === priceGeneration) text("price", e.message); } finally { priceBusy = false; } }
+$("usd").oninput = () => { priceGeneration++; text("price", KaiLocale.message(["The exact KOIN payment will be shown before approval."])); };
 $("buy-credits").onsubmit = e => { e.preventDefault(); const usd = $("usd").value; void action(e.submitter, async () => {
   notices["purchase-state"].show("Preparing purchase…", { dismissible: false });
   try {
     const connected = await bridge.credit("purchase-connect");
-    if (connected.state === "cancelled") { text("purchase-state", "Purchase cancelled. No payment was approved."); return; }
+    if (connected.state === "cancelled") { text("purchase-state", KaiLocale.message(["Purchase cancelled. No payment was approved."])); return; }
     if (connected.state && !["ready", "connected"].includes(connected.state)) throw Error(connected.detail || "Unlock and connect your wallet to continue");
     const r = await bridge.credit("purchase-preview", { usd });
     if ($("usd").value !== usd) throw Error("Amount changed. Review a new quote.");
-    text("price", `${r.quote.koin} KOIN · ${r.quote.credits} credits`);
+    text("price", KaiLocale.message`${r.quote.koin} KOIN · ${r.quote.credits} credits`);
     const done = await bridge.credit("purchase-approve", r.quote.id);
-    text("purchase-state", done.detail || (done.state === "cancelled" ? "Purchase cancelled." : done.state) || "Purchase submitted; confirmation may take a moment.");
+    text("purchase-state", ((_value) => _value ? KaiLocale.literal(_value) : KaiLocale.message(["Purchase submitted; confirmation may take a moment."]))(done.detail || (done.state === "cancelled" ? "Purchase cancelled." : done.state)));
     await window.KaiCredits.refresh();
   } catch (error) {
     text("purchase-state", error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""));
-    text("price", "Review a fresh quote before trying again."); throw error;
+    text("price", KaiLocale.message(["Review a fresh quote before trying again."])); throw error;
   }
 }); };
 $("purchase-retry").onclick = e => action(e.currentTarget, async () => {
@@ -301,14 +302,14 @@ async function refreshCreditActivity() {
 function creditAmount(value) {
   if (typeof value !== "string" || !/^(0|[1-9]\d{0,19})$/.test(value) || BigInt(value) > (1n << 64n) - 1n) return null;
   const n = BigInt(value), fraction = String(n % 100000n).padStart(5, "0").replace(/0+$/, "");
-  return (n / 100000n).toLocaleString() + (fraction ? "." + fraction : "");
+  return (n / 100000n).toLocaleString(KaiLocale.language) + (fraction ? new Intl.NumberFormat(KaiLocale.language).formatToParts(1.1).find(p => p.type === "decimal").value + fraction : "");
 }
 function renderCredits() {
   if (!creditState) return;
   const p = window.KaiCreditPresentation(creditState), s = creditState.snapshot;
   text("credits", p.total); text("credit-breakdown", p.breakdown); text("credit-detail", [p.status, p.detail].filter(Boolean).join(" "));
   if (!p.usd) {
-    html("credit-activity", `<p class="muted">${esc(s ? "Activity for USD credits will appear here when connected." : creditState.status === "loading" ? "Loading your credit activity…" : "Credit activity is unavailable. Try refreshing your credits.")}</p>`);
+    html("credit-activity", KaiLocale.html`<p class="muted">${esc(s ? "Activity for USD credits will appear here when connected." : creditState.status === "loading" ? "Loading your credit activity…" : "Credit activity is unavailable. Try refreshing your credits.")}</p>`);
     text("credit-activity-status", ""); return;
   }
   const filter = $("credit-filter").value || "all";
@@ -320,8 +321,8 @@ function renderCredits() {
       return { kind: "purchase", title: "Purchased credits", at: when(u.confirmedAt || u.createdAt), status: confirmed ? "Added to balance" : cancelled ? "Cancelled · no purchase" : String(u.state || "Pending").replaceAll("_", " ").slice(0, 100), amount: confirmed ? creditAmount(u.credits ?? u.amount) : cancelled ? "0" : "Pending", prefix: confirmed ? "+" : "" };
     }),
   ].filter(r => filter === "all" || r.kind === filter).sort((a, b) => b.at - a.at);
-  html("credit-activity", rows.length ? `<div class="table-scroll"><table class="activity-table"><thead><tr><th scope="col">Activity</th><th scope="col">When</th><th scope="col">Status</th><th scope="col">Credits</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.title)}</td><td>${esc(r.at ? new Date(r.at).toLocaleString() : "—")}</td><td>${esc(r.status)}</td><td>${r.amount === null ? "Unavailable" : esc(r.prefix + r.amount)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">${s.deviceFree && s.paidAccessLocked ? "Connect this wallet above to restore its purchased credits and network activity." : filter === "usage" ? "Your network chat usage will appear here." : filter === "purchase" ? "Your credit purchases will appear here." : "Your purchases and network chat usage will appear here."}</p>`);
-  text("credit-activity-status", p.stale ? "Showing your last verified activity. Refresh when your connection is available." : `Checked ${new Date(s.receivedAt).toLocaleString()}`);
+  html("credit-activity", rows.length ? KaiLocale.html`<div class="table-scroll"><table class="activity-table"><thead><tr><th scope="col">Activity</th><th scope="col">When</th><th scope="col">Status</th><th scope="col">Credits</th></tr></thead><tbody>${rows.map(r => KaiLocale.html`<tr><td>${esc(r.title)}</td><td>${esc(r.at ? new Date(r.at).toLocaleString(KaiLocale.language) : "—")}</td><td>${esc(r.status)}</td><td>${r.amount === null ? "Unavailable" : esc(r.prefix + r.amount)}</td></tr>`).join("")}</tbody></table></div>` : KaiLocale.html`<p class="muted">${s.deviceFree && s.paidAccessLocked ? "Connect this wallet above to restore its purchased credits and network activity." : filter === "usage" ? "Your network chat usage will appear here." : filter === "purchase" ? "Your credit purchases will appear here." : "Your purchases and network chat usage will appear here."}</p>`);
+  text("credit-activity-status", (p.stale ? KaiLocale.message(["Showing your last verified activity. Refresh when your connection is available."]) : KaiLocale.message`Checked ${new Date(s.receivedAt).toLocaleString(KaiLocale.language)}`));
 }
 $("credit-filter").onchange = renderCredits;
 window.KaiCredits.subscribe(state => {

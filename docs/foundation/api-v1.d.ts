@@ -62,6 +62,19 @@ export interface ChatCompletion {
 }
 export type PrivacyMode = "local-only" | "local-first" | "network";
 export interface NetworkStatus { privacyMode: PrivacyMode; [key: string]: unknown; }
+export type InterfaceLanguage = "en" | "es" | "pt-BR" | "fr" | "de";
+export interface LocaleState {
+  language: InterfaceLanguage;
+  /** False until a supported language has been saved in Core Settings. */
+  selected: boolean;
+  direction: "ltr";
+  languages: Array<{ code: InterfaceLanguage; name: string }>;
+}
+/** Available to every installed plugin renderer on Core 0.7.17+. */
+export interface RendererLocale {
+  get(): Promise<LocaleState>;
+  onChange(callback: (value: LocaleState) => void): () => void;
+}
 export interface DesktopPreferences { language: string; theme: "light" | "dark" | "system"; }
 export type CoreView = "chat" | "models" | "plugins" | "wallet" | "credits" | "buy-credits" | "earning" | "network" | "settings";
 export interface ServiceContext {
@@ -92,6 +105,11 @@ export interface FoundationApi {
   readonly settings: {
     get<T = JSONValue>(key: string, fallback?: T): T;
     set<T extends JSONValue>(key: string, value: T): T;
+  };
+  /** Read-only shared interface preference, no additional permission required. */
+  readonly locale: {
+    get(): LocaleState;
+    onChange(callback: (value: LocaleState) => void): () => void;
   };
   readonly models: {
     list(): ModelAlias[];
@@ -124,7 +142,7 @@ export interface FoundationApi {
     openExternal(url: string): Promise<{ opened?: true; cancelled?: true }>;
     confirm(title: string, detail: unknown): Promise<boolean>;
     preferences(): DesktopPreferences;
-    setPreferences(input: Partial<DesktopPreferences>): DesktopPreferences;
+    setPreferences(input: Partial<Pick<DesktopPreferences, "theme">>): DesktopPreferences;
     on(event: "show" | "hide" | "closed" | "focus" | "blur", handler: (...args: unknown[]) => void): () => void;
   };
   readonly account: {

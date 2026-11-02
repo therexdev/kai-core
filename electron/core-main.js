@@ -10,7 +10,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { stan
 let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, appUpdates, alphaMigration, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
 const pluginIO = new Set();
 async function trackPluginIO(task) { pluginIO.add(task); try { return await task; } finally { pluginIO.delete(task); } }
-const messageDialogs = require("./core-dialogs").createCoreDialogs({ electron, getWindow: () => win, isClosing: () => shuttingDown });
+const messageDialogs = require("./core-dialogs").createCoreDialogs({ electron, getWindow: () => win, isClosing: () => shuttingDown, getLanguage: () => core?.locale?.get().language || "en" });
 // Electron is shared with native plugins. Every existing message-box caller gets
 // the same trusted Core presentation while keeping its approval/result contract.
 dialog.showMessageBox = (...args) => messageDialogs.showMessageBox(...args);
@@ -61,15 +61,25 @@ async function start() {
     creditAccountOrigin: service.state === "ready" ? new URL(service.config.schedulerUrl).origin : null });
   core.gateway.staticAssets.set("/credit-account.js", path.join(__dirname, "../ui-core/credit-account.js"));
   core.gateway.staticAssets.set("/reward-summary.js", path.join(__dirname, "../ui-core/reward-summary.js"));
+  core.locale = require("./core-locale").createCoreLocale({ settings: core.settings,
+    preferredLanguages: app.getPreferredSystemLanguages?.() || [app.getLocale()],
+    onListenerError: error => console.warn("[language]", error.message) });
+  core.locale.onChange(value => {
+    if (!shuttingDown && trustedMainDocument({ sender: win?.webContents, senderFrame: win?.webContents?.mainFrame }, win, origin))
+      win.webContents.send("kai:locale-changed", value);
+    pluginHost?.localeChanged(value);
+    desktopTray?.refresh();
+  });
   const port = await core.start(), origin = `http://127.0.0.1:${port}`;
   if (shuttingDown) return;
   win = new BrowserWindow({ width: 1200, height: 820, minWidth: 800, minHeight: 600, title: release.productName, backgroundColor: "#f4f7fd", autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, "core-preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   desktopTray = require("./core-tray").createCoreTray({ app, win, Tray: electron.Tray, Menu: electron.Menu, nativeImage: electron.nativeImage,
-    iconDirectory: path.join(__dirname, "../build"), isQuitting: () => shuttingDown });
+    iconDirectory: path.join(__dirname, "../build"), isQuitting: () => shuttingDown, getLanguage: () => core.locale.get().language });
   protectNavigation(win.webContents, origin, () => {});
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   pluginReview = require("./core-plugin-install").createPluginInstallReview({ electron, getWindow: () => win, isClosing: () => shuttingDown,
+    getLanguage: () => core.locale.get().language,
     isTrustedParent: parent => trustedMainDocument({ sender: parent.webContents, senderFrame: parent.webContents.mainFrame }, win, origin) });
   const manager = new (require("../core/lib/plugins/manager").PluginManager)(dataDir);
   const appOrder = require("./core-app-order").createAppOrder({ dataDir, getInstalled: () => manager.list() });
@@ -158,6 +168,8 @@ async function start() {
     if (!trustedMainDocument(event, win, origin)) throw Error("Core desktop access denied");
     if (shuttingDown) throw Error("Core is closing.");
     switch (method) {
+      case "locale.get": return core.locale.get();
+      case "locale.set": return core.locale.set(input?.language);
       case "dialog.confirm": case "dialog.alert": {
         const frame = event.senderFrame;
         return require("./core-renderer-dialogs").showRendererDialog({ dialog, parent: win, name: release.productName, kind: method.slice(7), input,

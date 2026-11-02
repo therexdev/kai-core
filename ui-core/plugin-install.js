@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (() => {
   // These labels describe declared capabilities, not a sandbox for native code.
   // Manifest text is never markup.
@@ -7,7 +8,7 @@
     "models.read":"View installed models", "models.manage":"Set up and load models", "inference.local":"Run local AI models", "inference.network":"Request network AI",
     "storage.read":"Read plugin settings", "storage.write":"Save plugin settings", "secrets.use":"Use secure credential storage",
     "network.status":"Read network policy", "network.configure":"Request privacy changes", "network.fetch":"Make network requests",
-    "desktop.navigate":"Open KAI pages and installed apps", "desktop.external":"Request browser links", "desktop.preferences":"Read and change interface preferences",
+    "desktop.navigate":"Open KAI pages and installed apps", "desktop.external":"Request browser links", "desktop.preferences":"Read interface preferences and change theme",
     "desktop.media":"Request microphone and camera access", "desktop.windows":"Create native windows and desktop controls",
     "account.request":"Use your signed-in KAI account for service requests", "wallet.read":"Read wallet summaries", "wallet.authorize":"Request reviewed credit and payment actions",
     "services.call":"Use declared services from installed plugins", "services.provide":"Provide declared services to other plugins"
@@ -20,7 +21,7 @@
     ready = false; approve.disabled = true;
     byId("review-loading").hidden = true;
     byId("review-content").setAttribute("aria-busy", "false");
-    byId("review-error").textContent = message;
+    KaiLocale.setText(byId("review-error"), message);
     byId("review-error").hidden = false;
   }
   async function decide(choice) {
@@ -50,36 +51,35 @@
     try {
       const data = await window.kaiPluginInstall.read();
       if (!data || typeof data.name !== "string" || typeof data.version !== "string" || typeof data.id !== "string" || typeof data.fingerprint !== "string" || !Array.isArray(data.permissions) || data.permissions.some(p => typeof p !== "string")) throw Error("Invalid review");
+      if (window.KaiI18n?.normalize(data.language)) window.KaiI18n.setLanguage(data.language);
       const updating = !!data.installedVersion;
-      byId("permissions-heading").textContent = data.runtime === "native" ? "Declared capabilities" : "Requested access";
-      byId("access-note").textContent = data.runtime === "native"
-        ? "Native code: this plugin runs with the same operating-system permissions as KAI. It can access files and app data available to KAI, including credentials, make network connections, and run programs. The listed capabilities control KAI API calls; they do not restrict native code. This does not automatically grant administrator access. Install only if you trust the publisher."
-        : "This plugin runs in a sandboxed view. Core provides only its granted APIs.";
+      KaiLocale.setText(byId("permissions-heading"), (data.runtime === "native" ? KaiLocale.message(["Declared capabilities"]) : KaiLocale.message(["Requested access"])));
+      KaiLocale.setText(byId("access-note"), (data.runtime === "native" ? KaiLocale.message(["Native code: this plugin runs with the same operating-system permissions as KAI. It can access files and app data available to KAI, including credentials, make network connections, and run programs. The listed capabilities control KAI API calls; they do not restrict native code. This does not automatically grant administrator access. Install only if you trust the publisher."]) : KaiLocale.message(["This plugin runs in a sandboxed view. Core provides only its granted APIs."])));
       byId("access-note").classList.toggle("native-trust", data.runtime === "native");
 
-      byId("review-heading").textContent = updating ? "Update plugin" : "Install plugin";
+      KaiLocale.setText(byId("review-heading"), (updating ? KaiLocale.message(["Update plugin"]) : KaiLocale.message(["Install plugin"])));
       document.title = `${updating ? "Update" : "Install"} plugin · KAI`;
-      approve.textContent = updating ? "Update plugin" : "Install plugin";
+      KaiLocale.setText(approve, (updating ? KaiLocale.message(["Update plugin"]) : KaiLocale.message(["Install plugin"])));
       close.setAttribute("aria-label", updating ? "Cancel plugin update" : "Cancel plugin installation");
       byId("plugin-name").textContent = data.name;
-      byId("plugin-version").textContent = updating ? `Version ${data.installedVersion} → ${data.version}` : `Version ${data.version}`;
+      KaiLocale.setText(byId("plugin-version"), (updating ? KaiLocale.message`Version ${data.installedVersion} → ${data.version}` : KaiLocale.message`Version ${data.version}`));
       byId("plugin-description").textContent = data.description || "";
       byId("plugin-description").hidden = !data.description;
       // Only bundled SVG paths enter this element. Names/descriptions remain text.
       byId("plugin-icon").innerHTML = window.KaiPluginPresentation.get(data.official ? data.id : "").icon;
-      byId("publisher-label").textContent = data.official ? "KAI publisher · signed package" : "Signed package";
+      KaiLocale.setText(byId("publisher-label"), (data.official ? KaiLocale.message(["KAI publisher · signed package"]) : KaiLocale.message(["Signed package"])));
       byId("plugin-id").textContent = data.id;
       byId("publisher-fingerprint").textContent = data.fingerprint;
       byId("permission-count").textContent = `${data.permissions.length} ${data.permissions.length === 1 ? "permission" : "permissions"}`;
       for (const permission of data.permissions) {
         const row = document.createElement("li");
         row.dataset.permission = permission;
-        row.textContent = Object.hasOwn(permissionLabels, permission) ? permissionLabels[permission] : permission;
+        if (Object.hasOwn(permissionLabels, permission)) KaiLocale.setText(row, permissionLabels[permission]); else row.textContent = permission;
         byId("permission-list").append(row);
         const raw = document.createElement("li"); raw.textContent = permission;
         byId("permission-ids").append(raw);
       }
-      if (!data.permissions.length) byId("permission-ids").textContent = "None";
+      if (!data.permissions.length) KaiLocale.setText(byId("permission-ids"), KaiLocale.message(["None"]));
       byId("permission-list").hidden = !data.permissions.length;
       byId("no-permissions").hidden = !!data.permissions.length;
       byId("review-loading").hidden = true;

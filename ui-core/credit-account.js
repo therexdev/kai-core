@@ -26,7 +26,7 @@
     }
     return { accept, refresh, clear() { generation++; pending = null; value = { status: "loading", snapshot: null, error: null, refreshing: false }; notify(); }, get: () => structuredClone(value), subscribe(listener) { listeners.add(listener); listener(structuredClone(value)); return () => listeners.delete(listener); } };
   }
-  const credits = value => { const n = BigInt(value), fraction = String(n % 100000n).padStart(5, "0").replace(/0+$/, ""); return (n / 100000n).toLocaleString() + (fraction ? "." + fraction : ""); };
+  const credits = value => { const n = BigInt(value), fraction = String(n % 100000n).padStart(5, "0").replace(/0+$/, ""); return (n / 100000n).toLocaleString(globalThis.KaiI18n?.language) + (fraction ? new Intl.NumberFormat(globalThis.KaiI18n?.language).formatToParts(1.1).find(p => p.type === "decimal").value + fraction : ""); };
   function creditPresentation(state, now = Date.now()) {
     const snapshot = state.snapshot, s = snapshot?.credits;
     const stale = !!s && (state.status !== "ready" || now - snapshot.receivedAt > 30000);

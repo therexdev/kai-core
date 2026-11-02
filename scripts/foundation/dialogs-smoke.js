@@ -9,7 +9,7 @@ async function main() {
   const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kai-dialogs-"))), profile = path.join(temp, "profile"), exitReport = path.join(temp, "exit.json");
   const report = { realCore: true, realDialogs: true, syntheticProfile: true, syntheticKeychain: true, liveActions: false, runtimeRoot, checks: [], screenshots: [] };
   require(path.join(appRoot, "electron/foundation-profile")).prepareFoundationProfile(profile);
-  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({ network: { privacyMode: "local-only" }, earn: { autoStart: false } }));
+  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({ interface: { language: "en" }, network: { privacyMode: "local-only" }, earn: { autoStart: false } }));
   const { signingPayload } = require(path.join(appRoot, "core/lib/plugins/package")), keys = crypto.generateKeyPairSync("ed25519");
   const manifest = { schema: 2, apiVersion: 3, id: "example.dialogs", name: "Dialog Test Plugin", version: "1.0.0", runtime: "native", entry: "index.html", service: "service.js", permissions: ["native.execute", "desktop.windows"], provides: [], consumes: [] };
   const files = { "index.html": '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\'"><title>Dialog test</title></head><body><h1>Dialog test fixture</h1></body></html>',

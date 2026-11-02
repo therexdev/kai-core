@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   function orderedIds(rows, preferred = []) {
     const available = new Set(rows.map(row => row.id)), seen = new Set(), ids = [];
@@ -67,7 +68,7 @@
           row.className = "app-nav-row"; row.dataset.appId = id;
           handle.className = "app-reorder-handle"; handle.type = "button"; handle.draggable = true; handle.dataset.reorderApp = id;
           handle.setAttribute("aria-describedby", "apps-reorder-help");
-          handle.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h10M3 12h10"/></svg>';
+          handle.innerHTML = KaiLocale.html('<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h10M3 12h10"/></svg>');
           button.className = "nav-item app-nav-item"; button.type = "button"; button.dataset.app = id;
           // Presentation icons are static SVG from Core, never plugin markup.
           button.innerHTML = root.KaiPluginPresentation.get(id, plugin).icon;
@@ -106,7 +107,7 @@
         }
         const display = root.KaiPluginPresentation.get(id, plugin), selected = active === id;
         if (node.label.firstChild?.nodeType !== 3 || node.label.firstChild.textContent !== display.name) node.label.textContent = display.name;
-        node.disabled.textContent = "Disabled";
+        KaiLocale.setText(node.disabled, KaiLocale.message(["Disabled"]));
         if (!plugin.enabled && !node.disabled.parentNode) node.label.append(node.disabled);
         if (plugin.enabled) node.disabled.remove();
         node.button.dataset.disabled = String(!plugin.enabled);

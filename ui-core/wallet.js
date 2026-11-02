@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   const decimal = /^(0|[1-9]\d{0,11})(\.\d{1,8})?$/, atomsPattern = /^(0|[1-9]\d{0,19})$/, hashPattern = /^0x1220[a-f0-9]{64}$/;
   const MAX = 18446744073709551615n;
@@ -6,7 +7,7 @@
   function amount(value) {
     if (typeof value !== "string" || !decimal.test(value)) return "—";
     const [whole, fraction = ""] = value.split("."), tail = fraction.replace(/0+$/, "");
-    return BigInt(whole).toLocaleString() + (tail ? new Intl.NumberFormat().formatToParts(1.1).find(p => p.type === "decimal").value + tail : "");
+    return BigInt(whole).toLocaleString(KaiLocale.language) + (tail ? new Intl.NumberFormat(KaiLocale.language).formatToParts(1.1).find(p => p.type === "decimal").value + tail : "");
   }
   function atomAmount(value) { const n = BigInt(value); return amount(`${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`); }
   function validAmount(value) {
@@ -108,7 +109,7 @@
     const notice = root.KaiCoreNotice.create({ container: $("wallet-notice"), message: $("wallet-message"), close: $("wallet-message-close"), focusTarget: () => $("wallet-refresh") });
     const balanceNotice = root.KaiCoreNotice.create({ container: $("wallet-balance-error"), message: $("wallet-balance-error-text"), close: $("wallet-balance-error-close"), focusTarget: () => $("wallet-refresh") });
     const historyNotice = root.KaiCoreNotice.create({ container: $("wallet-history-error"), message: $("wallet-history-error-text"), close: $("wallet-history-error-close"), focusTarget: () => $("wallet-history-refresh") });
-    const text = (id, value) => { if ($(id).textContent !== String(value ?? "")) $(id).textContent = value ?? ""; };
+    const text = (id, value) => KaiLocale.setText($(id), value && typeof value === "object" ? value : KaiLocale.literal(value));
     function clearSecrets() {
       for (const id of ["password", "restore-wif", "wallet-send-password", "wallet-reveal-password"]) $(id).value = "";
       text("wallet-backup", ""); $("wallet-backup").hidden = true; $("hide-backup").hidden = true;
@@ -126,7 +127,7 @@
         if (entry.counterparty) { const counterparty = document.createElement("small"); counterparty.textContent = entry.counterparty; activity.append(counterparty); }
         for (const change of entry.changes) { const line = document.createElement("div"); line.textContent = `${change.direction === "in" ? "+" : "−"}${atomAmount(change.amount)} ${change.asset}`; line.className = "payment-wallet-" + change.direction; value.append(line); }
         if (!entry.changes.length) value.textContent = "—";
-        when.textContent = entry.timestamp == null ? "Time unavailable" : new Date(entry.timestamp).toLocaleString();
+        KaiLocale.setText(when, (entry.timestamp == null ? KaiLocale.message(["Time unavailable"]) : KaiLocale.literal(new Date(entry.timestamp).toLocaleString(KaiLocale.language))));
         status.textContent = ({ confirmed: "Confirmed", confirming: "Confirming", failed: "Failed" })[entry.status]; status.dataset.status = entry.status;
         tr.append(activity, value, when, status); rows.push(tr);
       }
@@ -135,16 +136,16 @@
     function render(state, view) {
       const wallet = state.wallet, summary = state.summary;
       $("wallet-account").hidden = !wallet?.address; $("wallet-access").hidden = !!wallet?.unlocked; $("wallet-unlocked").hidden = !wallet?.unlocked;
-      text("wallet-access-title", wallet?.exists ? "Unlock your wallet" : "Create a wallet");
-      text("wallet-detail", wallet?.exists ? "You can view balances and history while locked. Unlock to send or back up your wallet." : "Your private key is generated locally and encrypted with your password on this computer.");
-      text("wallet-lock-state", wallet?.unlocked ? "Unlocked" : "Locked");
-      text("wallet-network", summary ? `${summary.network === "mainnet" ? "Mainnet" : "Harbinger testnet"} · Share this address to receive ${summary.tokenSymbol} or VHP.` : "Share this address to receive KOIN or VHP.");
-      text("wallet-koin-label", `${summary?.tokenSymbol || "KOIN"} (liquid)`);
+      text("wallet-access-title", (wallet?.exists ? KaiLocale.message(["Unlock your wallet"]) : KaiLocale.message(["Create a wallet"])));
+      text("wallet-detail", (wallet?.exists ? KaiLocale.message(["You can view balances and history while locked. Unlock to send or back up your wallet."]) : KaiLocale.message(["Your private key is generated locally and encrypted with your password on this computer."])));
+      text("wallet-lock-state", (wallet?.unlocked ? KaiLocale.message(["Unlocked"]) : KaiLocale.message(["Locked"])));
+      text("wallet-network", (summary ? KaiLocale.message`${summary.network === "mainnet" ? "Mainnet" : "Harbinger testnet"} · Share this address to receive ${summary.tokenSymbol} or VHP.` : KaiLocale.message(["Share this address to receive KOIN or VHP."])));
+      text("wallet-koin-label", KaiLocale.message`${summary?.tokenSymbol || "KOIN"} (liquid)`);
       for (const name of ["koin", "vhp", "mana"]) text("wallet-" + name, amount(summary?.[name]));
-      text("wallet-balance-note", state.balanceError ? summary ? `Previously checked balances from ${new Date(summary.observedAt).toLocaleTimeString()}. Refresh to check the current amounts.` : "Balances unavailable. Refresh to try again." : summary ? `Balances checked ${new Date(summary.observedAt).toLocaleTimeString()}. Mana is a resource balance, not a separate token.` : "Checking balances…");
-      text("wallet-history-status", state.historyError ? state.rows.length ? "Showing previously loaded history. Refresh to check for updates." : "Transaction history unavailable. Try again to check for updates." : state.historyObserved ? state.rows.length ? `On-chain activity · checked ${new Date(state.historyObserved).toLocaleTimeString()}. Confirming transactions can still change.` : state.cursor ? "No transfers in this page. Load older transactions to continue." : "No transactions were found for this wallet on this network." : state.balanceError ? "Refresh wallet balances to load transaction history." : "Loading transaction history…");
+      text("wallet-balance-note", (state.balanceError ? (summary ? KaiLocale.message`Previously checked balances from ${new Date(summary.observedAt).toLocaleTimeString(KaiLocale.language)}. Refresh to check the current amounts.` : KaiLocale.message(["Balances unavailable. Refresh to try again."])) : (summary ? KaiLocale.message`Balances checked ${new Date(summary.observedAt).toLocaleTimeString(KaiLocale.language)}. Mana is a resource balance, not a separate token.` : KaiLocale.message(["Checking balances…"]))));
+      text("wallet-history-status", (state.historyError ? (state.rows.length ? KaiLocale.message(["Showing previously loaded history. Refresh to check for updates."]) : KaiLocale.message(["Transaction history unavailable. Try again to check for updates."])) : (state.historyObserved ? (state.rows.length ? KaiLocale.message`On-chain activity · checked ${new Date(state.historyObserved).toLocaleTimeString(KaiLocale.language)}. Confirming transactions can still change.` : (state.cursor ? KaiLocale.message(["No transfers in this page. Load older transactions to continue."]) : KaiLocale.message(["No transactions were found for this wallet on this network."]))) : (state.balanceError ? KaiLocale.message(["Refresh wallet balances to load transaction history."]) : KaiLocale.message(["Loading transaction history…"])))));
       $("wallet-refresh").disabled = state.loading;
-      $("wallet-history-refresh").hidden = !state.historyError && !state.expanded; $("wallet-history-refresh").disabled = state.loading; text("wallet-history-refresh", state.expanded && !state.historyError ? "Back to latest" : "Try again");
+      $("wallet-history-refresh").hidden = !state.historyError && !state.expanded; $("wallet-history-refresh").disabled = state.loading; text("wallet-history-refresh", (state.expanded && !state.historyError ? KaiLocale.message(["Back to latest"]) : KaiLocale.message(["Try again"])));
       $("wallet-history-more").hidden = !state.cursor; $("wallet-history-more").disabled = state.loading;
       $("wallet-copy").disabled = !wallet?.address || state.busy; $("wallet-explorer").hidden = summary?.network !== "mainnet"; $("wallet-explorer").disabled = state.busy;
       $("wallet-open-send").disabled = !view.canSend; $("wallet-send-submit").disabled = !view.canSend; $("wallet-reveal-submit").disabled = state.busy || !wallet?.unlocked;
@@ -152,7 +153,7 @@
       for (const id of ["wallet-send-token", "wallet-send-to", "wallet-send-amount", "wallet-send-password", "wallet-send-close", "wallet-send-cancel"]) $(id).disabled = state.busy;
       if ($("wallet-send-panel").open && (!wallet?.unlocked || sendIdentity !== JSON.stringify([wallet.address, summary?.network]))) $("wallet-send-panel").close();
       text("wallet-send-message", state.notice); $("wallet-send-message").hidden = !state.notice; $("wallet-send-message").classList.toggle("error", state.noticeError);
-      $("wallet-send-token").options[0].textContent = summary?.tokenSymbol || "KOIN";
+      KaiLocale.setText($("wallet-send-token").options[0], ((_value) => _value ? KaiLocale.literal(_value) : KaiLocale.message(["KOIN"]))(summary?.tokenSymbol));
       paintHistory(state);
       balanceNotice.show(state.balanceError, { error: true, force: state.readVersion !== lastRead });
       historyNotice.show(state.historyError, { error: true, force: state.readVersion !== lastRead }); lastRead = state.readVersion;
@@ -194,7 +195,7 @@
     $("wallet-reveal-form").onsubmit = async event => {
       event.preventDefault(); const password = $("wallet-reveal-password").value; $("wallet-reveal-password").value = "";
       const result = await controller.perform("wallet.reveal", { password });
-      if (result && typeof result.wif === "string" && result.wif.length < 200) { text("wallet-backup", `Save this backup key privately:\n${result.wif}`); $("wallet-backup").hidden = false; $("hide-backup").hidden = false; }
+      if (result && typeof result.wif === "string" && result.wif.length < 200) { text("wallet-backup", KaiLocale.message`Save this backup key privately:\n${result.wif}`); $("wallet-backup").hidden = false; $("hide-backup").hidden = false; }
     };
     const leave = controller.leave;
     controller.leave = () => { leave(); $("wallet-send-panel").close(); $("wallet-reveal-panel").open = false; $("restore-wallet").open = false; };

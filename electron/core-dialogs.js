@@ -20,10 +20,10 @@ function normalize(options) {
 
 // All dialog content comes from trusted main-process callers. Untrusted renderers
 // cannot open this surface or choose which pending request receives a decision.
-function createCoreDialogs({ electron, getWindow = () => null, isClosing = () => false }) {
+function createCoreDialogs({ electron, getWindow = () => null, isClosing = () => false, getLanguage = () => "en" }) {
   const { BrowserWindow, ipcMain, session, screen, app } = electron;
   const directory = path.join(__dirname, "../ui-core"), file = path.join(directory, "dialog.html"), entry = pathToFileURL(file).href;
-  const allowed = new Set(["dialog.html", "dialog.css", "dialog.js", "assets/brand-mark.svg"].map(name => pathToFileURL(path.join(directory, name)).href));
+  const allowed = new Set(["dialog.html", "dialog.css", "dialog.js", "i18n.js", "locales/catalogs.js", "locales/core.js", "assets/brand-mark.svg"].map(name => pathToFileURL(path.join(directory, name)).href));
   const queue = []; let active = null, disposed = false;
   const closing = () => disposed || isClosing();
   const parentValid = record => !record.parent || (!record.parent.isDestroyed() && record.parent.isVisible() && !record.parent.webContents.isDestroyed() && record.parent.webContents.mainFrame === record.parentFrame && record.parentFrame.url === record.parentUrl);
@@ -33,7 +33,7 @@ function createCoreDialogs({ electron, getWindow = () => null, isClosing = () =>
       event.sender !== record.window.webContents || event.senderFrame !== record.window.webContents.mainFrame || event.senderFrame.url !== entry) throw Error("Dialog access denied");
     return record;
   }
-  ipcMain.handle(CHANNELS.read, event => { const record = requireRecord(event); record.read = true; return record.details; });
+  ipcMain.handle(CHANNELS.read, event => { const record = requireRecord(event); record.read = true; return Object.freeze({ ...record.details, language: getLanguage() }); });
   ipcMain.handle(CHANNELS.checkbox, (event, checked) => {
     const record = requireRecord(event);
     if (!record.read || !record.window.isVisible() || !record.details.checkboxLabel || typeof checked !== "boolean") throw Error("Invalid dialog checkbox");

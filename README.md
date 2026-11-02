@@ -82,3 +82,7 @@ The all-app smoke requires sibling plugin checkouts and Assistant's prepared pay
 The original application lives in `therexdev/kaiapp` and is not modified by this project. Foundation is a clean plugin platform, not a compatibility layer for its old internal objects.
 
 Imported-wallet purchased credits and recent remote activity are restored from **Credits and Usage → Restore wallet credits**, after unlocking and approving the same-wallet connection. The installation keeps its own protected session; old credentials are not imported.
+
+Language support: Core offers English, Spanish, Brazilian Portuguese, French and German, with a first-launch picker and a saved Settings preference shared by plugins. See the [plugin localization contract](docs/foundation/PLUGIN_AUTHOR_GUIDE.md#shared-language-and-localization-core-0717).
+
+Interface messages are bundled offline. Edit `ui-core/locales/core.json`, run `npm run build:locales`, then `npm test` and `npm run test:language`. The original plugin catalogs are retained for shared labels.

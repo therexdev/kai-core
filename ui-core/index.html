@@ -10,12 +10,13 @@
   <link rel="stylesheet" href="earning.css">
   <link rel="stylesheet" href="alpha-migration.css">
   <link rel="stylesheet" href="credit-connection.css">
+  <link rel="stylesheet" href="language.css">
 </head>
 <body>
   <aside id="sidebar">
     <div class="brand">
       <img class="brand-mark" src="assets/brand-mark.svg" width="35" height="38" alt="">
-      <div><div class="brand-name">Koinos<span>AI</span></div><div class="brand-tagline">THINK · BUILD · GROW</div></div>
+      <div><div class="brand-name" translate="no">Koinos<span>AI</span></div><div class="brand-tagline">THINK · BUILD · GROW</div></div>
     </div>
     <nav id="nav" aria-label="Main navigation">
       <button class="nav-item selected" data-page="chat" aria-label="Chat with KAI" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v12H9l-4 4Z"/></svg><span>Chat with KAI</span></button>
@@ -111,7 +112,9 @@
       <section data-panel="earning" class="page" hidden><div id="earning-content"></div></section>
       <section data-panel="network" class="page" hidden><div id="network-content"></div></section>
       <section data-panel="settings" class="page" hidden>
+
         <div class="page-head"><div><h1>Settings</h1><p>Make this workspace your own.</p></div></div>
+        <article id="language-settings"><h2>Language</h2><p>Choose the language for KAI Core and your plugins.</p><label for="interface-language">Interface language</label><div class="language-setting-row"><select id="interface-language"></select><button id="language-save" class="primary" type="button" disabled>Save language</button></div><p id="language-setting-status" class="muted language-setting-status" role="status" aria-live="polite"></p></article>
         <article><h2>AI privacy</h2><label for="privacy">Where AI can run</label><select id="privacy"><option value="local-only">Local only</option><option value="local-first">Local first</option><option value="network">Network</option></select><p class="muted">Choose Local only to keep chat on this computer. Choose an online mode to use network models and credits.</p></article>
         <article id="account-settings" class="account-settings">
           <h2 id="account-heading">Koinos AI account</h2>
@@ -207,6 +210,15 @@
       <footer class="alpha-migration-footer"><span id="alpha-migration-selection-note" class="muted">Select Models, Wallet, or both.</span><div><button id="alpha-migration-cancel" type="button">Cancel</button><button id="alpha-migration-submit" class="primary" type="submit">Migrate</button></div></footer>
     </form>
   </dialog>
+  <dialog id="language-dialog" class="language-dialog" aria-labelledby="language-title" aria-describedby="language-intro">
+    <button id="language-close" class="language-close" type="button" aria-label="Close" title="Close">×</button>
+    <div class="language-symbol" aria-hidden="true">◎</div><h1 id="language-title">Choose your language</h1>
+    <p id="language-intro">Welcome to KAI Core. Choose a language to get started.</p>
+    <label for="first-language">Language</label><select id="first-language"></select>
+    <p>You can change this later in Settings. Your plugins follow this choice.</p>
+    <p id="language-error" class="language-error" role="alert"></p><button id="language-continue" class="primary" type="button">Continue</button>
+  </dialog>
+  <script src="locales/catalogs.js"></script><script src="locales/core.js"></script><script src="i18n.js"></script><script src="language.js"></script>
   <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="apps.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="account.js"></script><script src="models.js"></script><script src="updates.js"></script><script src="core.js"></script><script src="credit-connection.js"></script><script src="alpha-migration.js"></script>
 </body>
 </html>

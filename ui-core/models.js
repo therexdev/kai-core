@@ -1,4 +1,5 @@
 "use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   function description(model) {
     return String(model.blurb || "").replace(/\s*·\s*\d+(?:\.\d+)?\s*GB\s*$/i, "").trim();
@@ -48,7 +49,7 @@
   function create({ document, container, request, refresh }) {
     const cards = new Map(), pending = new Map(), errors = new Map();
     let snapshot = { models: [] };
-    const putText = (node, value) => { const text = String(value ?? ""); if (node.textContent !== text) node.textContent = text; };
+    const putText = (node, value) => KaiLocale.setText(node, value && typeof value === "object" ? value : KaiLocale.literal(value));
     function element(tag, className, parent) {
       const node = document.createElement(tag); if (className) node.className = className; parent?.appendChild(node); return node;
     }

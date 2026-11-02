@@ -149,6 +149,13 @@ class PluginHost {
     this.destroyRecord(record); return this.features?.close(id, { reason }) || Promise.resolve();
   }
   closeAll() { this.hide(); return Promise.allSettled([...this.windows.keys()].map(id => this.close(id, "quit"))); }
+  localeChanged(value) {
+    for (const record of this.windows.values()) {
+      if (record.controller.signal.aborted || record.webContents.isDestroyed() || record.webContents.mainFrame.url !== record.entry) continue;
+      try { this.manager.assertActive(record.manifest.id, record.digest, record.fingerprint); record.webContents.send("kai:locale-changed", value); }
+      catch { /* Revoked or destroyed views must not block the saved preference. */ }
+    }
+  }
   async reviewMedia(record, granted, wc, permission, details) {
     const types = details?.mediaTypes;
     if (permission !== "media" || wc !== record.webContents || details?.isMainFrame !== true || details.requestingUrl !== record.entry || !Array.isArray(types) || !types.length || types.some(type => !["audio", "video"].includes(type))) return false;
@@ -189,6 +196,9 @@ class PluginHost {
     record.calls.push(now);
     const { manifest: m } = record;
     this.manager.assertActive(m.id, record.digest, record.fingerprint);
+    // Available equally to native and sandboxed publishers after the same
+    // sender, frame and exact installed-content checks as every other call.
+    if (method === "locale.get") return this.core.locale.get();
     const permissions = { "models.list": "models.read", "inference.local": "inference.local", "storage.get": "storage.read", "storage.set": "storage.write" };
     const permission = typeof method === "string" && Object.hasOwn(permissions, method) ? permissions[method] : null;
     if (permission ? !m.permissions.includes(permission) : m.runtime !== "native" || !m.permissions.includes("native.execute")) throw Error("Plugin permission denied");

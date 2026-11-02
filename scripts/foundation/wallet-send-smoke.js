@@ -18,7 +18,7 @@ function fixture() {
 async function main(){
  const {_electron}=require("playwright-core"),temp=fs.mkdtempSync(path.join(os.tmpdir(),"kai-wallet-send-")),profile=path.join(temp,"profile"),output=path.resolve(process.env.KAI_WALLET_SMOKE_OUTPUT||path.join(os.tmpdir(),"kai-wallet-send-smoke"));fs.mkdirSync(output,{recursive:true});
  require(path.join(appRoot,"electron/foundation-profile")).prepareFoundationProfile(profile);
- fs.writeFileSync(path.join(profile,"settings.json"),JSON.stringify({network:{privacyMode:"local-only"},earn:{autoStart:false}}));
+ fs.writeFileSync(path.join(profile,"settings.json"),JSON.stringify({interface:{language:"en"},network:{privacyMode:"local-only"},earn:{autoStart:false}}));
  const {WalletService}=require(path.join(appRoot,"core/lib/wallet")),wallet=new WalletService(path.join(profile,"wallet")),password="synthetic-send-smoke-password";
  wallet.create({password});const address=wallet.address;wallet.lock();
  fs.writeFileSync(path.join(temp,"package.json"),JSON.stringify({name:"kai-wallet-send-smoke",version:"1.0.0",main:"desktop.js"}));

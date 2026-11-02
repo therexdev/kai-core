@@ -1,3 +1,5 @@
+"use strict";
+var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   "use strict";
   const POLL = 15000, REWARD_POLL = 5000, MAX_ATOMS = (1n << 64n) - 1n;
@@ -30,7 +32,7 @@
       if (q.failure?.deadlines > 0) detail += ` ${q.failure.deadlines} checks did not finish before their deadline.`;
       if (q.failure?.wrongAnswers > 0) detail += ` ${q.failure.wrongAnswers} answers did not match the required output.`;
       if (!q.failure || q.failure.code === "unknown") detail += " The network did not report a complete failure reason.";
-      if (Number.isSafeInteger(q.retryAt)) detail += ` Retry scheduled for ${new Date(q.retryAt).toLocaleTimeString()}.`;
+      if (Number.isSafeInteger(q.retryAt)) detail += ` Retry scheduled for ${new Date(q.retryAt).toLocaleTimeString(KaiLocale.language)}.`;
     }
     return detail;
   }
@@ -90,8 +92,8 @@
         } else reviewDetail = "Waiting for a confirmed review deadline.";
       }
       const day = new Date(Number(row.epoch) * 86400000).toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
-      return `<li class="product-reward-item"><div class="product-reward-item-head"><strong>${esc(amount(BigInt(row.availability) + BigInt(row.work)))} KOIN</strong><span class="product-reward-badge" data-state="${state}">${label}</span></div><span class="product-reward-day">${esc(day)} · UTC</span>${reviewDetail ? `<small>${esc(reviewDetail)}</small>` : ""}<small>Availability ${amount(row.availability)} · Work ${amount(row.work)}</small></li>`;
-    }).join("") : '<li class="product-reward-empty"><strong>Your rewards will appear here</strong><span>Recorded rewards and payment updates will appear here.</span></li>';
+      return KaiLocale.html`<li class="product-reward-item"><div class="product-reward-item-head"><strong>${esc(amount(BigInt(row.availability) + BigInt(row.work)))} KOIN</strong><span class="product-reward-badge" data-state="${state}">${label}</span></div><span class="product-reward-day">${esc(day)} · UTC</span>${reviewDetail ? KaiLocale.html`<small>${esc(reviewDetail)}</small>` : ""}<small>Availability ${amount(row.availability)} · Work ${amount(row.work)}</small></li>`;
+    }).join("") : KaiLocale.html('<li class="product-reward-empty"><strong>Your rewards will appear here</strong><span>Recorded rewards and payment updates will appear here.</span></li>');
   }
   // Keep the original testnet drop calculation separate from paid KOIN rewards.
   // Scheduler balances may contain exponent notation; convert decimal text to
@@ -111,7 +113,7 @@
     const wallet = snapshot?.wallet?.address, earnings = snapshot?.earnings;
     if (typeof wallet !== "string" || !wallet || wallet.length > 128 || earnings?.address !== wallet || earnings.error) return null;
     try {
-      const format = atoms => { const fraction = String(atoms % 100000000n).padStart(8, "0").replace(/0+$/, ""); return (atoms / 100000000n).toLocaleString() + (fraction ? "." + fraction : ""); };
+      const format = atoms => { const fraction = String(atoms % 100000000n).padStart(8, "0").replace(/0+$/, ""); return (atoms / 100000000n).toLocaleString(KaiLocale.language) + (fraction ? new Intl.NumberFormat(KaiLocale.language).formatToParts(1.1).find(p => p.type === "decimal").value + fraction : ""); };
       const kai = legacyAtoms(earnings.kai);
       return { wallet, kai: format(kai), koin: format(kai / 5n) };
     } catch { return null; }
@@ -246,14 +248,14 @@
 
   function mount(document, bridge) {
     const host = document.getElementById("earning-content"); if (!host) return;
-    host.innerHTML = `<div class="product-earn"><header class="product-page-head"><h1>Share your AI. Earn KOIN.</h1><p>Contribute this computer’s spare AI capacity to the network.</p></header>
+    host.innerHTML = KaiLocale.html`<div class="product-earn"><header class="product-page-head"><h1>Share your AI. Earn KOIN.</h1><p>Contribute this computer’s spare AI capacity to the network.</p></header>
       <div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="earning-toggle" role="switch" aria-checked="false" aria-label="Share AI capacity" aria-describedby="provider-start-hint provider-readiness" disabled>Start earning</button></div><p id="provider-start-hint" class="product-fine">Click the button to start earning.</p><div class="product-provider-state"><span id="provider-dot" class="product-live-dot" aria-hidden="true"></span><h2 id="provider-label" data-state="checking">CHECKING SETUP</h2><p id="provider-detail">Checking wallet, device authorization and installed models.</p><p id="provider-qualification" hidden></p></div><div class="product-divider"></div><strong id="provider-model">Model not confirmed</strong><p id="provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p><button id="provider-models-open" hidden>Choose shared models</button></section>
       <section class="product-panel product-rewards" aria-labelledby="reward-title"><div class="product-reward-heading"><div class="product-reward-heading-copy"><h2 id="reward-title">Reward activity</h2><p class="product-reward-intro">Your KOIN rewards, as they are recorded and paid.</p></div><div id="earn-legacy-drop" class="product-legacy-drop" aria-label="Testnet KAI and estimated KOIN drop"><span>Wallet KAI: <b id="earn-wallet-kai">—</b></span><span>KOIN Drop: <b id="earn-koin-drop">—</b></span><small id="earn-legacy-status" role="status">Drop Date: Nov 15, 2026</small></div></div><div class="product-reward-summary"><div><span>Daily Estimated Earnings</span><strong id="reward-today">—</strong></div><div><span>Awaiting payment</span><strong id="reward-pending">—</strong></div></div><p id="reward-status" class="product-fine" role="status">Loading reward history…</p><ol id="rewards" class="product-reward-feed" aria-label="Reward activity" tabindex="0">${rewardMarkup(null)}</ol><p id="reward-updated" class="product-fine product-reward-updated">KOIN rewards are separate from chat credits.</p></section></div>
       <section id="provider-models" class="product-panel product-provider-models" hidden><h2>Models you share</h2><label class="product-share-all"><span>Share all compatible installed models</span><input type="checkbox" id="provider-share-all" class="product-switch-input" role="switch" checked></label><p class="product-fine">Models load as needed. Each model must pass its network check and be approved before it can earn from paid work.</p><p id="provider-model-summary" role="status"></p><div id="provider-model-list"></div><p id="provider-selection-status" class="product-fine" role="status" hidden></p><div id="provider-selection-actions" class="product-actions" hidden><button id="provider-models-apply" class="primary">Apply selection</button><button id="provider-models-reset">Cancel changes</button></div></section>
       <details id="provider-advanced" class="product-panel product-provider-advanced"><summary>Connection and setup</summary><div class="product-provider-advanced-content"><div id="provider-model-choice" hidden><label for="provider-model-pick">Startup model</label><select id="provider-model-pick" disabled><option value="">Choose a provider model</option></select><p class="product-fine">Sharing prepares installed models automatically.</p></div><p id="provider-setup" role="status">Start earning to prepare the installed models and connect.</p><p id="provider-authorization" class="product-fine" hidden></p><div id="provider-action-message" class="dismissible-notice inline-notice" hidden><p id="provider-action-notice" role="status"></p><button id="provider-action-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div><div class="product-actions"><button id="provider-reload">Reload setup</button><button id="provider-revoke" hidden>Remove device authorization</button><button id="provider-download" hidden>Download approved model</button><button id="provider-cancel" hidden>Cancel setup</button><button id="provider-wallet">Reward wallet</button><button id="provider-open-models">Manage models</button></div></div></details></div>`;
     const $ = id => document.getElementById(id);
     const actionNotice = root.KaiCoreNotice.create({ container: $("provider-action-message"), message: $("provider-action-notice"), close: $("provider-action-close"), focusTarget: () => $("provider-reload") });
-    const text = (id, value) => { const node = $(id), next = String(value ?? ""); if (node.textContent !== next) node.textContent = next; };
+    const text = (id, value) => KaiLocale.setText($(id), value && typeof value === "object" ? value : KaiLocale.literal(value));
     const hide = (id, value) => { if ($(id).hidden !== value) $(id).hidden = value; };
     const disable = (id, value) => { if ($(id).disabled !== value) $(id).disabled = value; };
     const navigate = page => root.dispatchEvent(new root.CustomEvent("kai-core-navigate", { detail: { page } }));
@@ -263,7 +265,7 @@
       const models = presentation.models, selected = selectedModels(info.selection, models), draft = selectedModels(state.draft, models), offered = new Set(info.offeredModels || []);
       const rows = new Map(presentation.rows.map(row => [row.model, row])), dirty = selectionKey(state.draft) !== selectionKey(info.selection);
       if ($("provider-share-all").checked !== (state.draft.mode === "all")) $("provider-share-all").checked = state.draft.mode === "all"; disable("provider-share-all", state.busy);
-      text("provider-model-summary", info.enabled ? `${presentation.chosen} selected · ${presentation.ready} ready for paid work.` : `${presentation.chosen} selected. Earning is off.`);
+      text("provider-model-summary", (info.enabled ? KaiLocale.message`${presentation.chosen} selected · ${presentation.ready} ready for paid work.` : KaiLocale.message`${presentation.chosen} selected. Earning is off.`));
       const list = $("provider-model-list"), existing = new Map([...list.querySelectorAll("[data-shared-model]")].map(node => [node.dataset.sharedModel, node]));
       const wanted = new Set(models.map(model => model.id)); for (const [id, node] of existing) if (!wanted.has(id)) node.remove();
       if (models.length) list.querySelector(".product-provider-model-empty")?.remove();
@@ -282,7 +284,7 @@
         let node = existing.get(model.id);
         if (!node) {
           node = document.createElement("div"); node.className = "product-provider-model-row"; node.dataset.sharedModel = model.id;
-          node.innerHTML = '<label class="product-provider-model-name"></label><div class="product-provider-model-readiness"><span class="product-model-status"></span><small class="product-provider-model-detail" hidden></small></div><input type="checkbox" role="switch" class="product-switch-input">';
+          node.innerHTML = KaiLocale.html('<label class="product-provider-model-name"></label><div class="product-provider-model-readiness"><span class="product-model-status"></span><small class="product-provider-model-detail" hidden></small></div><input type="checkbox" role="switch" class="product-switch-input">');
           const input = node.querySelector("input"); input.id = "provider-share-" + model.id; input.dataset.providerSharedModel = model.id; node.querySelector("label").htmlFor = input.id;
           node.querySelector(".product-model-status").id = input.id + "-status"; input.setAttribute("aria-describedby", input.id + "-status");
         }
@@ -294,8 +296,8 @@
         if (description.textContent !== detail) description.textContent = detail; description.hidden = !detail;
         if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
       });
-      if (!models.length && !list.querySelector(".product-provider-model-empty")) { const empty = document.createElement("p"); empty.className = "product-fine product-provider-model-empty"; empty.textContent = "No compatible installed models found. Install a supported model from Models."; list.appendChild(empty); }
-      text("provider-selection-status", state.busy ? "Finishing the current change. Stop earning remains available." : dirty ? "Changes are not applied yet. Choose at least one model, then Apply selection." : "");
+      if (!models.length && !list.querySelector(".product-provider-model-empty")) { const empty = document.createElement("p"); empty.className = "product-fine product-provider-model-empty"; KaiLocale.setText(empty, KaiLocale.message(["No compatible installed models found. Install a supported model from Models."])); list.appendChild(empty); }
+      text("provider-selection-status", (state.busy ? KaiLocale.message(["Finishing the current change. Stop earning remains available."]) : (dirty ? KaiLocale.message(["Changes are not applied yet. Choose at least one model, then Apply selection."]) : KaiLocale.message([""]))));
       hide("provider-selection-status", !$("provider-selection-status").textContent); hide("provider-selection-actions", !dirty);
       disable("provider-models-apply", state.busy || !models.some(model => model.compatible && draft.has(model.id))); disable("provider-models-reset", state.busy);
     }
@@ -307,26 +309,26 @@
       text("provider-qualification", qualificationDetail(presentation.status.qualification)); hide("provider-qualification", !presentation.status.qualification);
       text("provider-model", presentation.modelSummary); text("provider-readiness", presentation.readiness); paintModels(state, presentation);
       text("provider-setup", state.error || (state.busy ? presentation.status.detail : info?.running && !info.blocked ? "Sharing is on. Installed supported models load automatically when needed." : info?.blocked || info?.detail || "Start earning to prepare the installed models and connect.") + (info?.progress && Number.isFinite(info.progress.pct) ? ` ${info.progress.pct}% downloaded.` : ""));
-      hide("provider-authorization", !info?.deviceAuthorized); text("provider-authorization", info?.sessionOnly ? "This device is enabled for this session. Enable earning again after closing the app." : Number.isSafeInteger(info?.expiresAt) ? `Device authorized until ${new Date(info.expiresAt).toLocaleString()}.` : "This device is authorized to earn.");
+      hide("provider-authorization", !info?.deviceAuthorized); text("provider-authorization", (info?.sessionOnly ? KaiLocale.message(["This device is enabled for this session. Enable earning again after closing the app."]) : (Number.isSafeInteger(info?.expiresAt) ? KaiLocale.message`Device authorized until ${new Date(info.expiresAt).toLocaleString(KaiLocale.language)}.` : KaiLocale.message(["This device is authorized to earn."]))));
       actionNotice.show(state.notice); hide("provider-revoke", !info?.deviceAuthorized); disable("provider-revoke", state.busy);
       hide("provider-download", info?.state !== "download-required" || state.stale && !state.busy); disable("provider-download", state.busy); hide("provider-cancel", !state.busy); disable("provider-cancel", state.action === "stop"); disable("provider-reload", state.busy);
       const picker = $("provider-model-pick"), choices = info?.models || (info?.model ? [info.model] : []);
       hide("provider-model-choice", !info || info.automatic === true || !choices.length);
-      const options = (info?.model ? "" : '<option value="">Choose a provider model</option>') + choices.map(model => `<option value="${esc(model.id)}">${esc(model.label || model.id)}${model.installed ? "" : " · download required"}</option>`).join("");
+      const options = (info?.model ? "" : KaiLocale.html('<option value="">Choose a provider model</option>')) + choices.map(model => `<option value="${esc(model.id)}">${esc(model.label || model.id)}${model.installed ? "" : " · download required"}</option>`).join("");
       if (picker.innerHTML !== options) picker.innerHTML = options; if (picker.value !== (info?.model?.id || "")) picker.value = info?.model?.id || "";
       picker.disabled = presentation.on || state.busy || state.stale || !choices.length || !["ready", "model-required", "download-required"].includes(info?.state);
       const legacy = state.legacy;
       text("earn-wallet-kai", legacy?.kai ?? "—"); text("earn-koin-drop", legacy?.koin ?? "—");
-      text("earn-legacy-status", "Drop Date: Nov 15, 2026");
+      text("earn-legacy-status", KaiLocale.message(["Drop Date: Nov 15, 2026"]));
       $("earn-legacy-drop").title = legacy ? `Testnet KAI in wallet ${legacy.wallet}. Expected drop: 1 KOIN per 5 KAI, rounded down to 8 decimals. Estimate until the final drop snapshot.`
         : `${state.legacyError || "Checking testnet KAI balance."} The expected KOIN drop is calculated at 1 KOIN per 5 KAI when the balance is available.`;
       const rewards = state.rewards, feed = $("rewards"), markup = rewardMarkup(rewards);
       if (feed.innerHTML !== markup) { const top = feed.scrollTop; feed.innerHTML = markup; feed.scrollTop = top; }
-      text("reward-status", state.rewardError ? rewards ? "Reward updates are unavailable. Showing the last verified history." : state.rewardError : state.rewardLoading ? "Loading reward history…" : rewards?.payouts.length || rewards?.summary?.pending.length ? "Recorded rewards and payment progress." : "No recorded rewards yet.");
+      text("reward-status", (state.rewardError ? (rewards ? KaiLocale.message(["Reward updates are unavailable. Showing the last verified history."]) : KaiLocale.literal(state.rewardError)) : (state.rewardLoading ? KaiLocale.message(["Loading reward history…"]) : (rewards?.payouts.length || rewards?.summary?.pending.length ? KaiLocale.message(["Recorded rewards and payment progress."]) : KaiLocale.message(["No recorded rewards yet."])))));
       const summary = rewards?.summary, totals = summary && root.KaiRewardSummary?.totals(summary, rewards.payouts);
       text("reward-today", summary?.current.availability != null ? amount(summary.current.availability) + " KOIN" : "—");
       text("reward-pending", totals ? amount(BigInt(totals.availability) + BigInt(totals.work)) + " KOIN" : "—");
-      text("reward-updated", rewards ? `Last verified ${new Date(rewards.observedAt).toLocaleTimeString()} · ${rewards.walletAddress.length > 18 ? rewards.walletAddress.slice(0, 9) + "…" + rewards.walletAddress.slice(-6) : rewards.walletAddress}. KOIN rewards are separate from chat credits.` : "KOIN rewards are separate from chat credits.");
+      text("reward-updated", (rewards ? KaiLocale.message`Last verified ${new Date(rewards.observedAt).toLocaleTimeString(KaiLocale.language)} · ${rewards.walletAddress.length > 18 ? rewards.walletAddress.slice(0, 9) + "…" + rewards.walletAddress.slice(-6) : rewards.walletAddress}. KOIN rewards are separate from chat credits.` : KaiLocale.message(["KOIN rewards are separate from chat credits."])));
     }
     const controller = createController({ credit: (action, input) => bridge?.credit ? bridge.credit(action, input) : Promise.reject(Error("Open the desktop app to check earning setup.")),
       readLegacy: async () => {

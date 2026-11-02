@@ -50,7 +50,7 @@ async function main() {
   const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kai-credit-reconnect-"))), profile = path.join(temp, "profile"), reportFile = path.join(temp, "exit.json");
   const report = { realCore: true, syntheticNetwork: true, syntheticWallet: true, syntheticKeychain: true, syntheticLock: process.env.KAI_SMOKE_SYNTHETIC_LOCK === "1", checks: [], screenshots: [] };
   require(path.join(appRoot, "electron/foundation-profile")).prepareFoundationProfile(profile);
-  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({ network: { privacyMode: "local-first" }, earn: { autoStart: false } }));
+  fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({ interface: { language: "en" }, network: { privacyMode: "local-first" }, earn: { autoStart: false } }));
   const password = "Synthetic imported wallet password!", wallet = new (require(path.join(appRoot, "core/lib/wallet")).WalletService)(path.join(profile, "wallet"));
   const created = wallet.create({ password }); wallet.lock(); const originalWallet = fs.readFileSync(wallet.keystorePath);
   fs.writeFileSync(path.join(temp, "package.json"), JSON.stringify({ name: "kai-credit-reconnect-smoke", version: "1.0.0", main: "desktop.js" }));

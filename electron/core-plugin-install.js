@@ -5,11 +5,11 @@ const { randomUUID } = require("node:crypto");
 
 // This is trusted Core UI, never a page or icon supplied by the plugin. A review
 // can approve only the package held by its caller; IPC accepts no package data.
-function createPluginInstallReview({ electron, getWindow, isClosing, isTrustedParent }) {
+function createPluginInstallReview({ electron, getWindow, isClosing, isTrustedParent, getLanguage = () => "en" }) {
   const { BrowserWindow, ipcMain, session, screen } = electron;
   const directory = path.join(__dirname, "../ui-core");
   const entry = pathToFileURL(path.join(directory, "plugin-install.html")).href;
-  const allowed = new Set(["plugin-install.html", "plugin-install.css", "plugin-install.js", "presentation.js", "assets/brand-mark.svg"]
+  const allowed = new Set(["plugin-install.html", "plugin-install.css", "plugin-install.js", "presentation.js", "i18n.js", "locales/catalogs.js", "locales/core.js", "assets/brand-mark.svg"]
     .map(file => pathToFileURL(path.join(directory, file)).href));
   let pending = null, disposed = false;
 
@@ -24,7 +24,7 @@ function createPluginInstallReview({ electron, getWindow, isClosing, isTrustedPa
   }
   ipcMain.handle("kai-plugin-install:read", event => {
     const record = requireReview(event); record.read = true;
-    return record.details;
+    return Object.freeze({ ...record.details, language: getLanguage() });
   });
   ipcMain.handle("kai-plugin-install:decide", (event, choice) => {
     const record = requireReview(event);
