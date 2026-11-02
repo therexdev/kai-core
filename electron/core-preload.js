@@ -1,6 +1,20 @@
 "use strict";
 const { contextBridge, ipcRenderer } = require("electron");
+let closing = null;
+const closingListeners = new Set();
+ipcRenderer.on("kai-core:closing", (_event, value) => {
+  if (closing) return;
+  closing = Object.freeze({ reason: value?.reason === "update" ? "update" : "quit" });
+  for (const callback of closingListeners) callback(closing);
+});
 contextBridge.exposeInMainWorld("kaiCore", Object.freeze({
+  isClosing: () => closing !== null,
+  onClosing: callback => {
+    if (typeof callback !== "function") throw TypeError("A closing callback is required");
+    closingListeners.add(callback);
+    if (closing) callback(closing);
+    return () => closingListeners.delete(callback);
+  },
   call: (method, input) => ipcRenderer.invoke("kai-core:call", method, input),
   credit: (action, input) => ipcRenderer.invoke("koin:test-payments", action, input),
   dialogs: Object.freeze({

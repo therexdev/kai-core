@@ -64,3 +64,52 @@ test("changing automatic checks persists the explicit value without starting an 
   assert.deepEqual(calls[0], { method: "updates.configure", input: { automaticCheck: false } });
   assert.equal(calls.some(c => /download|install/.test(c.method)), false);
 });
+
+test("shutdown drops a late failed poll and prevents further polling and actions", async () => {
+  const read = deferred(), calls = [], controller = createUpdates({ call: method => { calls.push(method); return read.promise; } });
+  controller.observe(initial({ state: "downloaded", canInstall: true }));
+  const polling = controller.enter();
+  controller.beginClosing("update");
+  read.reject(Error("Core is closing.")); await polling;
+  await controller.refresh(); await controller.enter(); await controller.act("check");
+  controller.observe(initial({ revision: 100, state: "error", error: "Late obsolete response" }));
+  assert.deepEqual(calls, ["updates.status"]);
+  assert.equal(controller.snapshot().info.state, "installing");
+  assert.equal(controller.snapshot().active, false);
+  assert.equal(controller.snapshot().error, "");
+});
+
+test("an approved restart does not poll after the installer gets control", async () => {
+  const install = deferred(), calls = [], controller = createUpdates({ call: method => { calls.push(method); return install.promise; } });
+  controller.observe(initial({ state: "downloaded", canInstall: true }));
+  const action = controller.act("install");
+  controller.beginClosing("update");
+  install.resolve(initial({ revision: 2, state: "installing" })); await action;
+  assert.deepEqual(calls, ["updates.install"]);
+  assert.equal(controller.snapshot().error, "");
+  assert.equal(presentation(controller.snapshot().info).checkDisabled, true);
+});
+
+test("cancellation and verification failures keep the update UI usable before shutdown", async () => {
+  let fail = false;
+  const info = initial({ state: "downloaded", canInstall: true }), calls = [];
+  const controller = createUpdates({ call: async method => {
+    calls.push(method);
+    if (fail && method === "updates.install") throw Error("Installer verification failed");
+    return info;
+  } });
+  controller.observe(info); await controller.act("install");
+  assert.equal(controller.snapshot().closing, false);
+  assert.equal(presentation(controller.snapshot().info).installDisabled, false);
+  fail = true; await controller.act("install");
+  assert.match(controller.snapshot().error, /verification failed/);
+  assert.deepEqual(calls, ["updates.install", "updates.status", "updates.install", "updates.status"]);
+});
+
+test("ordinary quit shows closing instead of an update or privacy error", () => {
+  const controller = createUpdates({ call: () => assert.fail("Closing must not make a request") });
+  controller.observe(initial({ paused: true })); controller.beginClosing("quit");
+  const view = presentation(controller.snapshot().info);
+  assert.match(view.title, /Closing/); assert.equal(view.busy, true);
+  assert.equal(view.automaticDisabled, true); assert.equal(view.releaseVisible, false);
+});
