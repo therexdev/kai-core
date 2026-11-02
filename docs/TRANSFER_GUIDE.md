@@ -6,7 +6,7 @@ Transfer your models, Core wallet and regular Koinos Node from Koinos AI Alpha.
 
 Screens checked against Core 0.7.14 and KAI Koinos Node 0.3.6 on 31 October 2026. Snapshots are rendered from the app interface with example data.
 
-**Already producing with Alpha?** The illustrated Node steps below describe the older **chain-only** transfer. They do not preserve producer settings, signing keys or external signing setup. Do not follow the new-wallet/key-configuration steps to replace a working producer. See the Node plugin's [complete profile migration guide](https://github.com/therexdev/kai-plugin-koinos-node/blob/feat/complete-node-migration/docs/NODE_PROFILE_MIGRATION.md) for the expanded options being prepared. Wait for its signed plugin release before using those options; installing Core separately does not migrate the Node setup.
+**Already producing with Alpha?** The illustrated Node steps below describe the older **chain-only** transfer. They do not preserve producer settings, signing keys or external signing setup. Do not follow the new-wallet/key-configuration steps to replace a working producer. Update the regular Node plugin to **0.3.9 or newer** and use its [complete profile migration guide](https://github.com/therexdev/kai-plugin-koinos-node/blob/main/docs/NODE_PROFILE_MIGRATION.md) to preserve the existing producer setup. Installing Core separately does not migrate the Node setup.
 
 ## 1. Transfer your models
 
