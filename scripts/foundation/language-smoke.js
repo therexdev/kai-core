@@ -15,7 +15,7 @@ const fixture=(id,native)=>{
 fs.writeFileSync(path.join(temp,'package.json'),JSON.stringify({name:'kai-language-test',version:'1.0.0',main:'desktop.js'}));
 fs.writeFileSync(path.join(temp,'desktop.js'),`require(${JSON.stringify(path.join(source,'scripts/foundation/apps-fixture.js'))}).install(${JSON.stringify({appRoot:source,appData:path.join(temp,'app-data'),reportFile:path.join(temp,'exit.json'),syntheticKeychain:true})});require(${JSON.stringify(path.join(source,'electron/core-main.js'))});`);
 const env={...process.env,KAI_CORE_DATA:profile,KAI_CORE_PORT:'0',KAI_CHANNEL:'core'};delete env.ELECTRON_RUN_AS_NODE;delete env.KAI_SESSION_SECRET;delete env.KAI_CORE_TOKEN;
-const args=[...(process.getuid?.()===0?['--no-sandbox']:[]),...(!process.env.DISPLAY?['--ozone-platform=headless']:[]),temp];
+const args=[...(process.platform==="linux"&&process.getuid?.()===0?['--no-sandbox']:[]),...(process.platform==="linux"&&!process.env.DISPLAY?['--ozone-platform=headless']:[]),temp];
 let app,errors=[];
 const launch=async()=>{app=await _electron.launch({executablePath:require(path.join(source,'node_modules/electron')),args,env,timeout:60000});const page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(20000);await page.waitForFunction(()=>document.getElementById('version')?.textContent.startsWith('v'));return page;};
 const plugin=(id,code)=>app.evaluate((_e,{id,code})=>global.__foundationHost.renderer(id).executeJavaScript(code,true),{id,code});
