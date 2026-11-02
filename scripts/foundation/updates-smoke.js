@@ -17,13 +17,15 @@ require(${JSON.stringify(path.join(runtimeRoot, "electron/core-updates"))}).crea
   const state = { state:'idle',revision:0,currentVersion:'0.7.8',availableVersion:null,automaticCheck:true,lastCheckedAt:null,nextCheckAt:null,progress:null,error:null,paused:false,canDownload:false,canInstall:false,manualOnly:false,reason:null };
   const value=()=>structuredClone(state), set=next=>{Object.assign(state,next);state.revision++;return value();};
   const fixture=global.__updatesFixture={calls:[],installs:0,set,complete(next){const out=set(next);fixture.resolve?.(out);fixture.resolve=null;return out;}};
+  const handle=require('electron').ipcMain.handle.bind(require('electron').ipcMain);
+  require('electron').ipcMain.handle=(channel,listener)=>{if(channel==='kai-core:call')fixture.coreCall=listener;return handle(channel,listener);};
   return {
-    status:value,start(){},wake(){},dispose(){},
+    status:value,start(){},wake(){},dispose(){if(fixture.realShutdown)return new Promise(resolve=>{fixture.finishShutdown=resolve;});},
     privacyChanged(){set({paused:options.isLocalOnly()});},
     check(){fixture.calls.push('check');set({state:'checking',error:null});return new Promise(resolve=>{fixture.resolve=resolve;});},
     configure(input){fixture.calls.push('configure');return set({automaticCheck:input.automaticCheck});},
     download(){fixture.calls.push('download');set({state:'downloading',canDownload:false,progress:{percent:37,transferred:37,total:100}});return new Promise(resolve=>{fixture.resolve=resolve;});},
-    async install(){fixture.calls.push('install');const approved=await options.approveInstall(state.availableVersion);if(approved){fixture.installs++;return set({state:'installing'});}return value();},
+    async install(){fixture.calls.push('install');const approved=await options.approveInstall(state.availableVersion);if(approved){fixture.installs++;set({state:'installing'});if(fixture.realShutdown){const updater=new(require('node:events').EventEmitter)();updater.quitAndInstall=()=>{fixture.installerStarted=true;};await options.performInstall(updater);}}return value();},
     openRelease(){fixture.calls.push('openRelease');return value();}
   };
 };
@@ -94,9 +96,62 @@ require(${JSON.stringify(path.join(runtimeRoot, "electron/core-main.js"))});
     const layout = await page.evaluate(() => { const c = document.getElementById("application-updates"), p = document.querySelector('[data-panel="settings"]'); return { cardFits: c.scrollWidth <= c.clientWidth + 1, pageFits: p.scrollWidth <= p.clientWidth + 1, migrationLast: p.lastElementChild.id === "alpha-migration-settings", font: getComputedStyle(c).fontFamily }; });
     assert.equal(layout.cardFits, true); assert.equal(layout.pageFits, true); assert.equal(layout.migrationLast, true); assert.match(layout.font, /Inter|Segoe UI/);
     report.checks.push("Local-only privacy state disables network actions, 800px layout fits, and Alpha migration remains last in Settings");
+    // Exercise the real shutdown gate, keeping cleanup open long enough for
+    // both UI pollers to run. Earlier coverage stopped at the confirmation.
+    await set({ state: "downloaded", canDownload: false, canInstall: true, error: null });
+    await app.evaluate(() => { global.__updatesFixture.realShutdown = true; });
+    await page.locator("#updates-install").click(); popup = await dialog();
+    await popup.getByRole("button", { name: "Restart and install", exact: true }).click();
+    await until(() => app.evaluate(() => !!global.__updatesFixture.finishShutdown), "Real update shutdown did not start");
+    await page.evaluate(async () => { await window.KaiCoreUpdates.refresh(); await refresh(); });
+    assert.equal(await page.locator("#update-notice").isVisible(), false, "Shutdown must not produce an update access error");
+    assert.equal(await page.locator("#notice").evaluate(node => node.classList.contains("error")), false, "Shutdown must not produce a Core access error");
+    const refused = await app.evaluate(async () => {
+      const f = global.__updatesFixture, wc = global.__foundationWindow.webContents;
+      const results = [];
+      for (const event of [{ sender: {}, senderFrame: wc.mainFrame }, { sender: wc, senderFrame: { url: wc.mainFrame.url } }]) {
+        try { await f.coreCall(event, "status"); results.push("allowed"); } catch (error) { results.push(error.message); }
+      }
+      try { await f.coreCall({ sender: wc, senderFrame: wc.mainFrame }, "wallet.create", { password: "unused" }); results.push("allowed"); }
+      catch (error) { results.push(error.message); }
+      return results;
+    });
+    assert.deepEqual(refused, ["Core desktop access denied", "Core desktop access denied", "Core is closing."]);
+    await capture("settings-restarting");
+    await app.evaluate(() => { global.__updatesFixture.finishShutdown(); });
+    await until(() => app.evaluate(() => global.__updatesFixture.installerStarted), "Installer did not receive control after cleanup");
+    await page.evaluate(async () => { await window.KaiCoreUpdates.refresh(); await refresh(); });
+    assert.equal(await page.locator("#update-notice").isVisible(), false);
+    assert.equal(await page.locator("#notice").evaluate(node => node.classList.contains("error")), false);
+    report.checks.push("Real update shutdown stops UI polling without access errors, rejects untrusted frames and new operations, and hands off after cleanup");
     assert.deepEqual(errors, []);
     report.status = "passed";
-  } catch (error) { report.status = "failed"; report.error = error.stack; throw error; }
-  finally { if (app) await app.close().catch(() => {}); report.logs = logs; report.pageErrors = errors; fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(report, null, 2)); fs.rmSync(temp, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); console.log("Report", path.join(output, "report.json")); }
+  } catch (error) { report.status = "failed"; report.error = error.stack; fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(report, null, 2)); throw error; }
+  finally {
+    if (app) {
+      const child = app.process(), exited = () => child.exitCode !== null || child.signalCode !== null;
+      const ended = exited() ? Promise.resolve() : new Promise(resolve => child.once("exit", resolve));
+      const bounded = async (promise, ms) => { let timer; try { await Promise.race([promise, new Promise(resolve => { timer = setTimeout(resolve, ms); })]); } finally { clearTimeout(timer); } };
+      // The synthetic installer intentionally leaves the process open for the
+      // assertions above. Release slow cleanup before requesting the final quit.
+      await bounded(app.evaluate(async ({ app }) => {
+        const fixture = global.__updatesFixture;
+        if (fixture?.finishShutdown) {
+          fixture.finishShutdown();
+          const deadline = Date.now() + 5000;
+          while (!fixture.installerStarted && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        app.quit();
+      }).catch(() => {}), 6000);
+      if (!exited()) await bounded(ended, 5000);
+      if (!exited()) {
+        child.kill("SIGKILL"); await bounded(ended, 3000);
+        report.cleanupForced = true;
+        if (report.status === "passed") { report.status = "failed"; report.error = "Update fixture did not exit after cleanup"; process.exitCode = 1; }
+      }
+    }
+    report.logs = logs; report.pageErrors = errors; fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(report, null, 2));
+    fs.rmSync(temp, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); console.log("Report", path.join(output, "report.json"));
+  }
 }
 if (require.main === module) main().catch(error => { console.error(error.stack || error); process.exitCode = 1; });

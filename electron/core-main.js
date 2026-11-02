@@ -16,6 +16,14 @@ const messageDialogs = require("./core-dialogs").createCoreDialogs({ electron, g
 dialog.showMessageBox = (...args) => messageDialogs.showMessageBox(...args);
 dialog.showErrorBox = (...args) => messageDialogs.showErrorBox(...args);
 const { trustedMainDocument, protectNavigation } = require("./window-security");
+function beginShutdown(reason = "quit") {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // Tell the renderer before disposing services or rejecting new operations.
+  // A normal restart must not look like a loss of desktop authorization.
+  try { if (win && !win.isDestroyed()) win.webContents.send("kai-core:closing", { reason }); }
+  catch { /* A destroyed renderer must not prevent service cleanup. */ }
+}
 function stop() {
   if (!stopping) stopping = (async () => {
     pluginDownload?.abort(); messageDialogs.dispose(); const errors = [];
@@ -32,7 +40,7 @@ app.on("before-quit", event => {
   if (!core || shutdownComplete) return;
   event.preventDefault();
   if (shuttingDown) return;
-  shuttingDown = true;
+  beginShutdown();
   stop().catch(error => console.error("[shutdown]", error.message)).finally(() => { shutdownComplete = true; app.quit(); });
 });
 app.on("window-all-closed", () => app.quit());
@@ -42,7 +50,7 @@ if (!app.requestSingleInstanceLock()) {
     detail: "KAI Core Beta is already running. Open it from its tray icon.", buttons: ["OK"] })).finally(() => app.quit());
 } else {
   app.on("second-instance", () => desktopTray?.show());
-  app.whenReady().then(start).catch(async error => { if (!shuttingDown) await dialog.showErrorBox("KAI Core Beta could not start", error.message); shuttingDown = true; await stop().catch(() => {}); shutdownComplete = true; app.quit(); });
+  app.whenReady().then(start).catch(async error => { if (!shuttingDown) await dialog.showErrorBox("KAI Core Beta could not start", error.message); beginShutdown(); await stop().catch(() => {}); shutdownComplete = true; app.quit(); });
 }
 async function start() {
   const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "foundation-v1");
@@ -101,7 +109,7 @@ async function start() {
       if (shuttingDown) throw Error("Core is already closing.");
       if (installBusy) throw Error("Finish the current plugin installation before restarting to update Core.");
       if (alphaMigration?.running) throw Error("Finish or pause migration before restarting to update Core.");
-      shuttingDown = true;
+      beginShutdown("update");
       try { await stop(); }
       catch (error) {
         // Do not replace files under a service that failed to stop. Always
@@ -147,7 +155,8 @@ async function start() {
   win.webContents.on("render-process-gone", () => { void coreChat.stop(); });
   win.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) void coreChat.stop(); });
   ipcMain.handle("kai-core:call", async (event, method, input) => {
-    if (!trustedMainDocument(event, win, origin) || shuttingDown) throw Error("Core desktop access denied");
+    if (!trustedMainDocument(event, win, origin)) throw Error("Core desktop access denied");
+    if (shuttingDown) throw Error("Core is closing.");
     switch (method) {
       case "dialog.confirm": case "dialog.alert": {
         const frame = event.senderFrame;

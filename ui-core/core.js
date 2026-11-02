@@ -5,6 +5,9 @@ const pageTitles = { chat: "Chat", app: "App", models: "Models", plugins: "Plugi
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const makeNotice = (container, message, close, focusTarget) => window.KaiCoreNotice.create({ container: $(container), message: $(message), close: $(close), focusTarget });
 const globalNotice = makeNotice("notice", "notice-message", "notice-close", () => page === "wallet" ? $("password") : document.querySelector('[data-page][aria-current="page"]'));
+bridge?.onClosing?.(({ reason }) => {
+  globalNotice.show(reason === "update" ? "Restarting KAI Core Beta to install the update…" : "Closing KAI Core Beta…", { dismissible: false });
+});
 const notices = {
   "model-message": makeNotice("model-notice", "model-message", "model-message-close", () => $("import-model")),
   "purchase-state": makeNotice("purchase-notice", "purchase-state", "purchase-close", () => $("usd")),
@@ -12,6 +15,7 @@ const notices = {
 let noticeSource = "action";
 const text = (id, value) => { if (notices[id]) notices[id].show(value); else if ($(id).textContent !== String(value ?? "")) $(id).textContent = value ?? ""; };
 function notify(message, error = false, { background = false } = {}) {
+  if (bridge?.isClosing?.()) return;
   noticeSource = background ? "refresh" : "action";
   globalNotice.show(String(message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""), { error, force: !background });
 }
@@ -94,9 +98,10 @@ function modelDisplayName(value) {
 }
 document.addEventListener("kai-alpha-migration-complete", () => { void refresh(); });
 async function refresh() {
-  if (!bridge || refreshing || document.hidden) return; refreshing = true;
+  if (!bridge || bridge.isClosing?.() || refreshing || document.hidden) return; refreshing = true;
   try {
     snapshot = await bridge.call("status"); const s = snapshot;
+    if (bridge.isClosing?.()) return;
     applyPrivacy(s.network.privacyMode);
     text("version", `v${s.version}`);
     text("closing-window-detail", s.desktop?.trayAvailable ? "Closing the window keeps KAI and earning running in the system tray. Click the tray icon to reopen it, or choose Quit KAI Core Beta from its menu to stop the app." : "A system tray icon is not available on this desktop. Closing the window will quit KAI Core Beta.");
