@@ -1,4 +1,18 @@
-# KAI Core Beta 0.7.18
+# KAI Core Beta 0.7.19
+
+Choose where Core stores your models in **Settings → Model storage**:
+
+- Select separate folders for downloaded models and custom GGUF imports, including another drive.
+- Existing files are copied and verified before Core saves their new locations. **Remove original files after verification** is optional and off by default.
+- Future downloads and imports use the selected folders immediately, and the choices survive restart. New GGUF imports keep their original source files.
+- Transfers preserve model names, vision projectors and partial downloads, and never overwrite a different file at the destination. Progress and cancellation are available in Settings.
+- Wallets, plugin data, node data, runtime files and Ollama caches keep their current locations. Node storage remains controlled by its plugin.
+
+On installed Windows and supported Linux AppImages, open **Settings**, check for the update, choose **Download update**, then **Restart and install**. Portable Windows and macOS users can download the new build from this release.
+
+Keep your selected model drive connected when using Core. Finish or cancel local model work before transferring folders; existing network work is allowed to finish first.
+
+## Previous release: 0.7.18
 
 Improves Earn KOIN connection stability and recovery:
 
