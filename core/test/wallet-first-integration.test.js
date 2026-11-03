@@ -516,6 +516,39 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   assert.deepEqual(errors, []);
 });
 
+test("delegated worker recovers from failed polls, lost registration and wake without unlocking or reenrolling", options, async t => {
+  const f = await fixture(t, { multiModel: true }), signal = AbortSignal.timeout(45000);
+  await f.providerDevice.authorize(f.window, {}, signal);
+  const context = await f.providerDevice.context(signal), authorization = PD.authorizationId(context.record.authorization);
+  const signatures = f.providerWallet.hashes(); f.providerWallet.lock();
+  const running = await f.startWorker(context, { selectedModels: ["koinos-smart"] }), worker = running.worker;
+  const until = async (check, message) => {
+    const end = Date.now() + 12000;
+    while (!check() && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.ok(check(), message);
+  };
+  await until(() => worker.stats.lastPollOkAt, "worker reaches the real scheduler");
+  const originalFetch = globalThis.fetch; let failing = true;
+  globalThis.fetch = (url, init) => failing && String(url).includes("/worker/next-job?")
+    ? Promise.resolve(new Response("Unavailable", { status: 503 })) : originalFetch(url, init);
+  await until(() => /503/.test(worker.stats.lastError), "failed job polls are recorded");
+  const firstToken = worker.token; failing = false;
+  await until(() => !worker.stats.lastError, "polls recover automatically");
+  assert.equal(worker.token, firstToken, "a brief failed poll does not replace device registration");
+  f.scheduler.workers.delete(firstToken);
+  await until(() => worker.token !== firstToken && f.scheduler.workers.has(worker.token), "401 after lost registration automatically re-registers");
+  // Simulate a server losing volatile connection observations while asleep.
+  f.scheduler.workers.clear(); f.devices.db.prepare("DELETE FROM presence").run();
+  await worker.nudge();
+  const registered = f.scheduler.workers.get(worker.token);
+  assert.ok(registered); assert.equal(f.scheduler.workers.size, 1);
+  assert.equal(f.devices.presence(registered)?.ready, true, "wake immediately renews signed model presence");
+  assert.equal(registered.providerAuthorization, authorization);
+  assert.equal(f.providerWallet.hashes(), signatures, "recovery never unlocks or signs again with the reward wallet");
+  await running.stop();
+  const token = worker.token; await worker.nudge(); assert.equal(worker.token, token, "wake after Stop cannot restart earning");
+});
+
 test("locked-wallet Worker qualifies shared models, serves either on demand and counts only loaded reward capacity", { ...options, timeout: 180000 }, async t => {
   const f = await fixture(t, { multiModel: true }), signal = AbortSignal.timeout(165000);
   await f.service.connectWallet(f.window, {}, signal);

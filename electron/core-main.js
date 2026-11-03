@@ -154,7 +154,7 @@ async function start() {
   });
   pluginHost = new (require("./core-plugin-host").PluginHost)({ electron, manager, core, features, getContainerWindow: () => win,
     onActivate: view => { if (!shuttingDown && !win.isDestroyed()) win.webContents.send("kai-core:open-view", view); } });
-  payments = require("./koin-test-ipc").registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, isTest: false });
+  payments = require("./koin-test-ipc").registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, isTest: false, powerMonitor: electron.powerMonitor });
   coreChat = new (require("./core-chat").CoreChat)({ core });
   coreWallet = require("./core-wallet").createCoreWallet({ dataDir, core, electron, getWindow: () => win, isClosing: () => shuttingDown, withSpend: run => payments.withWalletSpend(run) });
   alphaMigration = require("./alpha-migration").createAlphaMigration({ dataDir, appData: app.getPath("appData"), models: core.models, wallet: core.account.wallet,

@@ -31,6 +31,8 @@ class ProviderDevice {
       headers: { "content-type": "application/json", ...(route === "capabilities" ? require("../core/lib/koin-network/catalog-extension").headers(c.config) : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const chunks = []; let size = 0;
     for await (const chunk of response.body) { signal?.throwIfAborted(); size += chunk.length; if (size > max) throw Error("Provider service response is too large"); chunks.push(chunk); }
+    if (response.status === 429 || response.status >= 500)
+      throw error("network-unavailable", "The earning service is temporarily unavailable. Your saved device authorization is preserved.");
     let value; try { value = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
     catch {
       if (response.status === 404) throw error("backend-upgrade-required", "The network needs its wallet-first earning update before this device can be authorized.");

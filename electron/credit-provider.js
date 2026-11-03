@@ -2,6 +2,8 @@
 const fs = require("fs"), path = require("path");
 const { Worker } = require("../core/lib/worker");
 const modelId = id => typeof id === "string" && /^[a-zA-Z0-9._-]{1,100}$/.test(id);
+const transientNetworkError = error => error?.code === "network-unavailable" || ["AbortError", "TimeoutError"].includes(error?.name) ||
+  error instanceof TypeError && /fetch failed|network|terminated/i.test(error.message);
 const rewardStates = new Set(["queued", "signing", "staged", "unknown", "pending", "reversible", "needs_review", "paid", "paid_elsewhere"]);
 const rewardScope = config => require("node:crypto").createHash("sha256").update(JSON.stringify([
   config.schedulerUrl, config.mode, config.deployment?.chainId, config.deployment?.credits, config.deployment?.creditsHash,
@@ -350,12 +352,35 @@ class CreditProvider {
         const stopping = this.stop(false); generation = this.generation; await stopping; if (!current()) return;
       }
       if (this.worker?.running) {
-        await this.models(c, AbortSignal.timeout(10000)); if (!current()) return; this.guard(c);
+        try { await this.models(c, AbortSignal.timeout(10000)); }
+        catch (error) {
+          if (!current()) return;
+          // A catalog timeout is not a revoked provider authorization. Keep
+          // the existing worker and its approved model pins while retrying.
+          // Recheck local authority after the await, including identity,
+          // privacy, expiry and protected-storage availability.
+          this.guard(c); this.guard(this.context);
+          if (!transientNetworkError(error)) throw error;
+          this.error = String(error.message); return;
+        }
+        if (!current()) return; this.guard(c); this.error = "";
         if (JSON.stringify(c.offeredModelPins) !== JSON.stringify(this.registeredModelPins))
           await this.selectModels(this.selection(c), AbortSignal.timeout(120000), true);
       }
       if (current() && !this.worker?.running && this.preference(c)) await this.start(AbortSignal.timeout(60000), true);
     } catch (e) { if (current()) { this.error = String(e.message); await this.stop(false); } }
+  }
+  async wake() {
+    if (this.closed || this.busy) return;
+    const generation = this.generation, worker = this.worker;
+    if (!worker?.running || !this.context) return this.tick();
+    try {
+      this.guard(this.context);
+      await worker.nudge();
+      if (generation === this.generation && worker === this.worker && !this.closed) this.guard(this.context);
+    } catch (error) {
+      if (generation === this.generation && worker === this.worker && !this.closed) { this.error = String(error.message); await this.stop(false); }
+    }
   }
   dispose() { this.closed = true; this.device?.dispose(); return this.stop(false); }
 }
