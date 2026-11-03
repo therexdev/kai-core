@@ -1,4 +1,15 @@
-# KAI Core Beta 0.7.17 (unreleased)
+# KAI Core Beta 0.7.18
+
+Improves Earn KOIN connection stability and recovery:
+
+- Network confirmations refresh independently of slower setup and model-catalog checks, reducing unnecessary ONLINE / CONNECTION UNCONFIRMED switching.
+- Temporary catalog timeouts, rate limits and server errors keep an already authorized worker running with its approved models while Core retries.
+- Waking the computer reconnects the earning worker and refreshes its signed model presence without unlocking the reward wallet or enabling earning again.
+- Expired confirmations, revoked authorizations and privacy changes still remove online eligibility. Choosing Stop prevents delayed requests or wake events from restarting earning.
+
+On installed Windows and supported Linux AppImages, open **Settings**, check for the update, choose **Download update**, then **Restart and install**. Portable Windows and macOS users can download the new build from this release. Wallets, models, installed plugins and saved data remain in place.
+
+## Previous release: 0.7.17
 
 Adds a language picker on first launch and a saved Language setting for Core and plugins. English, Spanish, Brazilian Portuguese, French and German use bundled offline catalogs. Open plugin views receive language changes through the public read-only locale API; drafts and user content remain intact. The plugin author guide includes the API contract and a complete localized example.
 
