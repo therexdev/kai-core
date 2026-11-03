@@ -46,17 +46,62 @@ test("enter checks setup and reward history without starting earning; leaving ne
 test("online evidence expires during a delayed refresh and no model remains falsely ready", async () => {
   const f = fixture(info({ enabled: true, running: true })); await f.enter();
   assert.equal(f.latest().presentation.ready, 1); assert.equal(f.latest().presentation.status.label, "ONLINE");
-  let release; f.setInfo(() => new Promise(resolve => { release = resolve; }));
+  let release; f.setStatus(() => new Promise(resolve => { release = resolve; }));
   await f.advance(10000); await f.advance(5000);
   assert.equal(f.latest().presentation.ready, 0); assert.equal(f.latest().presentation.status.label, "CONNECTION UNCONFIRMED");
   assert.equal(f.latest().presentation.action, "stop"); assert.equal(f.latest().presentation.disabled, false);
-  release(info({ enabled: true, running: true })); await flush();
+  release(online()); await flush();
   assert.equal(f.latest().presentation.ready, 0); f.controller.leave();
 });
 
 test("an online status without expiring evidence cannot claim readiness", () => {
   const state = { info: info({ enabled: true, running: true }), status: online({ validUntil: undefined, models: [{ state: "online", model: "small" }] }), stale: false, busy: false };
   const view = providerPresentation(state, start); assert.equal(view.ready, 0); assert.notEqual(view.status.label, "ONLINE");
+});
+
+test("slow setup checks do not delay fresh status or introduce an offline gap", async () => {
+  const f = fixture(info({ enabled: true, running: true })); await f.enter();
+  let release, current = start;
+  f.setStatus(() => online({ validUntil: current + 15000, models: [{ model: "small", state: "online", validUntil: current + 15000 }] }));
+  f.setInfo(() => new Promise(resolve => { release = resolve; }));
+  const refresh = f.controller.refresh(); await flush();
+  for (let i = 0; i < 4; i++) { current += 3000; await f.advance(3000); }
+  assert.equal(f.calls.filter(c => c.action === "provider-public-info").length, 2, "setup requests do not overlap");
+  assert.ok(f.calls.filter(c => c.action === "provider-public-status").length >= 5);
+  assert.equal(f.latest().presentation.status.label, "ONLINE");
+  assert.ok(!f.paints.some(p => p.presentation.status.label === "CONNECTION UNCONFIRMED"));
+  release(info({ enabled: true, running: true })); await refresh; f.controller.leave();
+});
+
+test("catalog failure preserves fresh confirmation but cannot keep expired status online", async () => {
+  const f = fixture(info({ enabled: true, running: true })); await f.enter();
+  f.setInfo(Error("Catalog temporarily unavailable")); await f.controller.refresh();
+  assert.equal(f.latest().presentation.status.label, "ONLINE");
+  assert.equal(f.latest().state.setupError, "Catalog temporarily unavailable");
+  await f.advance(15000);
+  assert.equal(f.latest().presentation.status.label, "CONNECTION UNCONFIRMED");
+  assert.equal(f.latest().presentation.ready, 0); f.controller.leave();
+});
+
+test("a delayed status read stays single flight and automatically recovers after expiry", async () => {
+  const f = fixture(info({ enabled: true, running: true })); await f.enter();
+  let release; f.setStatus(() => new Promise(resolve => { release = resolve; }));
+  await f.advance(3000);
+  await f.advance(12000);
+  assert.equal(f.calls.filter(c => c.action === "provider-public-status").length, 2);
+  assert.equal(f.latest().presentation.status.label, "CONNECTION UNCONFIRMED");
+  release(online({ validUntil: start + 30000, models: [{ model: "small", state: "online", validUntil: start + 30000 }] })); await flush();
+  assert.equal(f.latest().presentation.status.label, "ONLINE");
+  f.controller.leave(); assert.equal(f.timers.size, 0);
+});
+
+test("old status cannot restore online after stopping while setup or status is pending", async () => {
+  const f = fixture(info({ enabled: true, running: true })); await f.enter();
+  let release; f.setStatus(() => new Promise(resolve => { release = resolve; }));
+  await f.advance(3000); f.setInfo(info()); await f.controller.action("stop");
+  release(online()); await flush();
+  assert.equal(f.latest().presentation.status.label, "OFFLINE");
+  assert.equal(f.latest().presentation.ready, 0); f.controller.leave();
 });
 
 test("background reads preserve an unapplied individual model selection", async () => {
@@ -102,8 +147,8 @@ test("device authorization uses native approval before start, and cancellation n
   assert.equal(f.latest().presentation.status.label, "ONLINE"); f.controller.leave();
 });
 
-test("read failure removes readiness but preserves a working Stop control", async () => {
-  const f = fixture(info({ enabled: true, running: true })); await f.enter(); f.setInfo(Error("Connection unavailable")); await f.controller.refresh();
+test("status read failure removes readiness but preserves a working Stop control", async () => {
+  const f = fixture(info({ enabled: true, running: true })); await f.enter(); f.setStatus(Error("Connection unavailable")); await f.controller.refresh();
   assert.equal(f.latest().presentation.ready, 0); assert.equal(f.latest().presentation.status.label, "CONNECTION UNCONFIRMED");
   assert.equal(f.latest().presentation.on, true); assert.equal(f.latest().presentation.disabled, false); f.controller.leave();
 });

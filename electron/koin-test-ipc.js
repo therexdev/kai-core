@@ -33,7 +33,7 @@ function save(file, value) {
   try { fs.writeFileSync(fd, JSON.stringify(value, null, 2) + "\n"); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
   fs.renameSync(temp, file);
 }
-function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, dataDir, isTest }) {
+function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, dataDir, isTest, powerMonitor }) {
   const prepaidRoot = path.join(dataDir, "koin-prepaid-v1"), usdRoot = path.join(dataDir, "koin-prepaid-usd-v1");
   const productRoot = d => isUsd(d) ? usdRoot : prepaidRoot;
   let root = fs.existsSync(path.join(usdRoot, "deployment.json")) ? usdRoot : fs.existsSync(path.join(prepaidRoot, "deployment.json")) ? prepaidRoot : path.join(dataDir, "koin-foundation-test");
@@ -508,6 +508,14 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     providerTick = true; providerPending = creditProvider.tick();
     try { await providerPending; } finally { providerTick = false; providerPending = null; }
   }, 15000); providerTimer.unref();
+  let providerWake = null;
+  const wakeProvider = () => {
+    if (disposed || providerWake) return;
+    providerWake = Promise.resolve().then(() => {
+      if (!disposed) return creditProvider.wake();
+    }).catch(() => { /* Periodic recovery retries if the network is still unavailable. */ }).finally(() => { providerWake = null; });
+  };
+  powerMonitor?.on("resume", wakeProvider);
   return {
     // Public native SDK adapter: identical credit authority for any granted
     // publisher, with the actual installed renderer bound by the caller.
@@ -539,13 +547,13 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     },
     isProviding: () => !!worker?.running || !!creditProvider.worker?.running, dispose() {
     if (disposal) return disposal;
-    disposed = true; clearInterval(purchaseTimer); clearInterval(providerTimer);
+    disposed = true; clearInterval(purchaseTimer); clearInterval(providerTimer); powerMonitor?.removeListener("resume", wakeProvider);
     purchaseSync?.abort.abort(); for (const service of pluginCreditServices.values()) service.dispose(); pluginCreditServices.clear(); creditService.dispose(); payments?.stop(); creditService.purchases.stop();
     for (const controller of activeRequests) controller.abort();
     chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.();
     // Keep the shared-profile lock until signed-byte staging, polling and
     // workers have settled. Another app must never open a half-written journal.
-    disposal = Promise.allSettled([...inFlight, purchaseSync?.promise, providerPending, creditProvider.dispose(), worker?.stop()]).then(() => {});
+    disposal = Promise.allSettled([...inFlight, purchaseSync?.promise, providerPending, providerWake, creditProvider.dispose(), worker?.stop()]).then(() => {});
     return disposal;
   } };
 }

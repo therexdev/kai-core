@@ -496,6 +496,9 @@ class Worker {
     if (this._backoff || this.runtime.networkWorkPaused?.()) return { running: true }; // quiet on purpose — stay quiet
     try {
       await this._register();
+      if (!this.running) return { running: false };
+      await this._koinPresence();
+      if (this._loopDone) this._startLoop();
       this.onEvent({ type: "worker:nudged-reregistered" });
     } catch { /* unreachable — watchdog keeps retrying */ }
     return { running: true };

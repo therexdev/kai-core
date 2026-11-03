@@ -2,7 +2,7 @@
 var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("./i18n") : { html: (s, ...v) => typeof s === "string" ? s : s.reduce((a, p, i) => a + p + (v[i] ?? ""), ""), message: (s, ...v) => ({ source: s.reduce((a, p, i) => a + p + (i < v.length ? "{" + i + "}" : ""), ""), values: v }), literal: value => ({ literal: true, value }), setText: (node, v) => { const next = String((v?.literal ? v.value : v?.source?.replace(/\{(\d+)\}/g, (m, i) => v.values[i] ?? m) ?? v) ?? ""); if (node.textContent !== next) node.textContent = next; } });
 (function (root) {
   "use strict";
-  const POLL = 15000, REWARD_POLL = 5000, MAX_ATOMS = (1n << 64n) - 1n;
+  const POLL = 15000, STATUS_POLL = 3000, REWARD_POLL = 5000, MAX_ATOMS = (1n << 64n) - 1n;
   const rewardStates = {
     awaiting_review: ["Awaiting review", "pending"], reviewing: ["Review status pending", "pending"],
     finalizing: ["Finalizing reward", "pending"], queued: ["Queued", "pending"], signing: ["Preparing payment", "pending"],
@@ -119,9 +119,9 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
     } catch { return null; }
   }
   function createController({ credit, readLegacy, render, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, summaryApi, navigate = () => {} }) {
-    const state = { info: null, status: null, draft: null, stale: false, error: "", busy: false, action: "", notice: "", rewards: null, rewardError: "", rewardLoading: false, legacy: null, legacyAt: 0, legacyError: "" };
+    const state = { info: null, status: null, draft: null, stale: false, error: "", setupError: "", busy: false, action: "", notice: "", rewards: null, rewardError: "", rewardLoading: false, legacy: null, legacyAt: 0, legacyError: "" };
     let foreground = false;
-    let active = false, generation = 0, readRevision = 0, rewardRevision = 0, actionRevision = 0, legacyRevision = 0, pending = false, rewardPending = false, legacyPending = false, providerTimer, rewardTimer, expiryTimer, legacyTimer, legacyExpiryTimer;
+    let active = false, generation = 0, readRevision = 0, statusRevision = 0, rewardRevision = 0, actionRevision = 0, legacyRevision = 0, pending = false, infoPending = false, rewardPending = false, legacyPending = false, providerTimer, infoTimer, rewardTimer, expiryTimer, legacyTimer, legacyExpiryTimer;
     const paint = () => render(state, providerPresentation(state, now()));
     const cancelTimer = timer => { if (timer !== undefined) clearTimer(timer); };
     const read = async (action, request = () => credit(action)) => {
@@ -129,7 +129,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       try { return await Promise.race([request(), new Promise((_, reject) => { timer = setTimer(() => reject(Error("Setup check timed out. Use Reload setup to try again.")), 15000); })]); }
       finally { cancelTimer(timer); }
     };
-    function schedule(delay = POLL) { cancelTimer(providerTimer); if (active) providerTimer = setTimer(refreshProvider, delay); }
+    function schedule(delay = STATUS_POLL) { cancelTimer(providerTimer); if (active && state.info?.running) providerTimer = setTimer(refreshProvider, delay); }
     function armExpiry() {
       cancelTimer(expiryTimer);
       const times = [state.status?.validUntil, ...(state.status?.models || []).map(row => row.validUntil)].filter(t => Number.isSafeInteger(t) && t > now());
@@ -140,25 +140,51 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
         // Recompute each model against its own expiry; never extend online evidence while a read is pending.
         paint(); armExpiry();
       }, remaining);
-      schedule(Math.max(1000, Math.min(10000, remaining - 5000)));
     }
-    async function refreshProvider() {
-      if (!active || pending || state.busy) return;
-      pending = true; cancelTimer(providerTimer);
+    // Setup includes remote catalog and model checks. It must never hold up
+    // the short-lived status confirmation or restart its polling cadence.
+    const connectionKey = info => JSON.stringify([info?.running, selectionKey(info?.selection), [...(info?.offeredModels || [])].sort()]);
+    async function refreshInfo() {
+      if (!active || infoPending || state.busy) return;
+      infoPending = true; cancelTimer(infoTimer);
       const g = generation, revision = readRevision;
       const current = () => active && g === generation && revision === readRevision;
       try {
         const info = await read("provider-public-info"); if (!current()) return;
         if (!info || typeof info.state !== "string") throw Error("Provider setup is unavailable. Check your network mode in Settings.");
-        const status = info.running ? await read("provider-public-status") : null; if (!current()) return;
+        if (info.state === "unavailable" && info.running && state.info?.running) throw Error(info.detail || "Provider setup is unavailable.");
+        const changed = connectionKey(info) !== connectionKey(state.info);
         if (validSelection(info.selection) && (!state.draft || !validSelection(state.info?.selection) || selectionKey(info.selection) !== selectionKey(state.info.selection))) state.draft = clone(info.selection);
         if (!validSelection(info.selection)) state.draft = null;
-        state.info = info; state.status = status; state.stale = false; state.error = "";
-        paint(); schedule(); armExpiry();
+        state.info = info; state.setupError = "";
+        if (changed || !info.running) {
+          ++statusRevision; pending = false; cancelTimer(providerTimer); cancelTimer(expiryTimer);
+          state.status = null; state.stale = false; state.error = "";
+        }
+        paint();
+        if (info.running && (changed || !state.status)) await refreshProvider();
       } catch (error) {
         if (!current()) return;
-        state.stale = true; state.error = message(error); cancelTimer(expiryTimer); paint(); schedule();
-      } finally { if (g === generation && revision === readRevision) pending = false; }
+        state.setupError = message(error);
+        if (!state.info?.running) { state.stale = true; state.error = state.setupError; }
+        paint();
+      } finally {
+        if (current()) { infoPending = false; infoTimer = setTimer(refreshInfo, POLL); }
+      }
+    }
+    async function refreshProvider() {
+      if (!active || pending || state.busy || !state.info?.running) return;
+      pending = true; cancelTimer(providerTimer);
+      const g = generation, revision = readRevision, sr = statusRevision;
+      const current = () => active && g === generation && revision === readRevision && sr === statusRevision;
+      try {
+        const status = await read("provider-public-status"); if (!current()) return;
+        state.status = status; state.stale = false; state.error = "";
+        paint(); armExpiry();
+      } catch (error) {
+        if (!current()) return;
+        state.stale = true; state.error = message(error); cancelTimer(expiryTimer); paint();
+      } finally { if (current()) { pending = false; schedule(); } }
     }
     async function refreshRewards() {
       if (!active || rewardPending) return;
@@ -200,7 +226,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       if (name === "models" && (!validSelection(input) || !modelRows(state.info).some(model => model.compatible && selectedModels(input, modelRows(state.info)).has(model.id)))) return;
       const g = generation, operation = ++actionRevision;
       const current = () => g === generation && operation === actionRevision;
-      ++readRevision; pending = false; cancelTimer(providerTimer); cancelTimer(expiryTimer);
+      ++readRevision; pending = false; infoPending = false; cancelTimer(infoTimer); cancelTimer(providerTimer); cancelTimer(expiryTimer);
       state.busy = true; state.action = name; state.stale = true; state.notice = ""; state.error = ""; paint();
       try {
         const result = await credit("provider-public-" + name, input); if (!current()) return;
@@ -211,7 +237,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
         if (name === "models") state.draft = null;
         if (name === "stop" && state.info) state.info = { ...state.info, enabled: false, running: false };
       } catch (error) { if (current()) state.notice = message(error); }
-      finally { if (current()) { state.busy = false; state.action = ""; paint(); await refreshProvider(); } }
+      finally { if (current()) { state.busy = false; state.action = ""; state.status = null; paint(); await refreshInfo(); } }
     }
     function toggle() {
       const view = providerPresentation(state, now()); if (view.disabled) return;
@@ -228,20 +254,20 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       }
       state.notice = ""; paint();
     }
-    function leave() { active = false; ++readRevision; ++rewardRevision; ++legacyRevision; pending = false; rewardPending = false; legacyPending = false; cancelTimer(providerTimer); cancelTimer(rewardTimer); cancelTimer(expiryTimer); cancelTimer(legacyTimer); cancelTimer(legacyExpiryTimer); }
+    function leave() { active = false; ++readRevision; ++rewardRevision; ++legacyRevision; pending = false; infoPending = false; rewardPending = false; legacyPending = false; cancelTimer(infoTimer); cancelTimer(providerTimer); cancelTimer(rewardTimer); cancelTimer(expiryTimer); cancelTimer(legacyTimer); cancelTimer(legacyExpiryTimer); }
     function enter() {
       if (active) return;
       active = true; state.rewardLoading = !state.rewards; paint(); armExpiry();
-      void refreshProvider(); void refreshRewards(); void refreshLegacy();
+      void refreshInfo(); void refreshProvider(); void refreshRewards(); void refreshLegacy();
     }
     function reset() {
       const wasActive = active; leave(); ++generation; ++actionRevision; rewardPending = false;
-      Object.assign(state, { info: null, status: null, draft: null, stale: false, error: "", busy: false, action: "", notice: "", rewards: null, rewardError: "", rewardLoading: false, legacy: null, legacyAt: 0, legacyError: "" });
+      Object.assign(state, { info: null, status: null, draft: null, stale: false, error: "", setupError: "", busy: false, action: "", notice: "", rewards: null, rewardError: "", rewardLoading: false, legacy: null, legacyAt: 0, legacyError: "" });
       paint(); if (wasActive) enter();
     }
     return { enter, leave, reset,
       setForeground(value) { foreground = value === true; if (active && !rewardPending) { cancelTimer(rewardTimer); void refreshRewards(); } },
-      refresh: () => Promise.all([refreshProvider(), refreshRewards(), refreshLegacy()]), action, toggle, editSelection,
+      refresh: () => Promise.all([refreshInfo(), refreshProvider(), refreshRewards(), refreshLegacy()]), action, toggle, editSelection,
       resetSelection() { if (!state.busy && validSelection(state.info?.selection)) { state.draft = clone(state.info.selection); state.notice = ""; paint(); } },
       applySelection() { if (state.draft) return action("models", clone(state.draft)); }, getState: () => state };
   }
@@ -308,7 +334,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       text("provider-detail", (presentation.status.detail || "") + (presentation.status.state === "online" && info?.deviceAuthorized && info.walletLocked && !String(presentation.status.detail).includes("Wallet locked") ? " Wallet locked — earning continues." : ""));
       text("provider-qualification", qualificationDetail(presentation.status.qualification)); hide("provider-qualification", !presentation.status.qualification);
       text("provider-model", presentation.modelSummary); text("provider-readiness", presentation.readiness); paintModels(state, presentation);
-      text("provider-setup", state.error || (state.busy ? presentation.status.detail : info?.running && !info.blocked ? "Sharing is on. Installed supported models load automatically when needed." : info?.blocked || info?.detail || "Start earning to prepare the installed models and connect.") + (info?.progress && Number.isFinite(info.progress.pct) ? ` ${info.progress.pct}% downloaded.` : ""));
+      text("provider-setup", state.error || state.setupError || (state.busy ? presentation.status.detail : info?.running && !info.blocked ? "Sharing is on. Installed supported models load automatically when needed." : info?.blocked || info?.detail || "Start earning to prepare the installed models and connect.") + (info?.progress && Number.isFinite(info.progress.pct) ? ` ${info.progress.pct}% downloaded.` : ""));
       hide("provider-authorization", !info?.deviceAuthorized); text("provider-authorization", (info?.sessionOnly ? KaiLocale.message(["This device is enabled for this session. Enable earning again after closing the app."]) : (Number.isSafeInteger(info?.expiresAt) ? KaiLocale.message`Device authorized until ${new Date(info.expiresAt).toLocaleString(KaiLocale.language)}.` : KaiLocale.message(["This device is authorized to earn."]))));
       actionNotice.show(state.notice); hide("provider-revoke", !info?.deviceAuthorized); disable("provider-revoke", state.busy);
       hide("provider-download", info?.state !== "download-required" || state.stale && !state.busy); disable("provider-download", state.busy); hide("provider-cancel", !state.busy); disable("provider-cancel", state.action === "stop"); disable("provider-reload", state.busy);

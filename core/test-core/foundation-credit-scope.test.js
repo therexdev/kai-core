@@ -8,7 +8,7 @@ const { registerTestPaymentIPC } = require("../../electron/koin-test-ipc");
 // Keep the real payment dispatcher, per-publisher service construction and
 // CreditRuns persistence/lookup. The authenticated network is a deterministic
 // fixture: no purchase, chain transaction, account or external model is used.
-function fixture(t) {
+function fixture(t, powerMonitor) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-foundation-finance-"));
   const scopes = new Set();
   t.mock.method(global, "setInterval", () => ({ unref() {} }));
@@ -37,15 +37,29 @@ function fixture(t) {
   window.webContents = contents("http://127.0.0.1:9000/");
   let handler;
   const registration = registerTestPaymentIPC({ dataDir, core: { gateway: { network: { status: () => ({ privacyMode: "network" }), trackShadowRequest: () => () => {} } } }, isTest: false,
-    dialog: {}, origin: "http://127.0.0.1:9000", getMainWindow: () => window, ipcMain: { handle(_channel, fn) { handler = fn; } } });
+    dialog: {}, powerMonitor, origin: "http://127.0.0.1:9000", getMainWindow: () => window, ipcMain: { handle(_channel, fn) { handler = fn; } } });
   const plugin = (pluginId, fingerprint) => {
     const entry = `kai-plugin://${pluginId}/index.html`, webContents = contents(entry);
     return (action, input) => registration.runForPlugin(action, input, { pluginId, fingerprint, entry, window, webContents, isVisible: () => true });
   };
   const core = (action, input) => handler({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, action, input);
   t.after(async () => { await registration.dispose(); fs.rmSync(dataDir, { recursive: true, force: true }); });
-  return { dataDir, scopes, plugin, core };
+  return { dataDir, scopes, plugin, core, registration };
 }
+
+test("OS resume recovers earning once and releases its listener on shutdown", async t => {
+  const powerMonitor = new EventEmitter(); let wakes = 0, release;
+  t.mock.method(CreditProvider.prototype, "wake", () => { wakes++; return new Promise(resolve => { release = resolve; }); });
+  const f = fixture(t, powerMonitor);
+  powerMonitor.emit("resume"); powerMonitor.emit("resume"); await Promise.resolve();
+  assert.equal(wakes, 1, "wake requests must not overlap or rotate tokens twice");
+  release(); await new Promise(resolve => setImmediate(resolve));
+  powerMonitor.emit("resume"); await Promise.resolve(); assert.equal(wakes, 2);
+  let disposed = false; const disposal = f.registration.dispose().then(() => { disposed = true; });
+  await Promise.resolve(); assert.equal(disposed, false, "shutdown waits for the wake operation");
+  assert.equal(powerMonitor.listenerCount("resume"), 0); release(); await disposal;
+  powerMonitor.emit("resume"); assert.equal(wakes, 2);
+});
 
 test("Core and two unrelated publishers cannot read each other's recoveries or saved credit runs", async t => {
   const f = fixture(t), first = f.plugin("community.writer", "1".repeat(64)), second = f.plugin("another.researcher", "2".repeat(64));
