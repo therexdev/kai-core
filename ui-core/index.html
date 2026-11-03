@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="alpha-migration.css">
   <link rel="stylesheet" href="credit-connection.css">
   <link rel="stylesheet" href="language.css">
+  <link rel="stylesheet" href="model-storage.css">
 </head>
 <body>
   <aside id="sidebar">
@@ -178,6 +179,12 @@
           </div>
 
         </article>
+        <article id="model-storage-settings"><h2>Model storage</h2><p>Choose where downloaded models and custom GGUF files are stored.</p>
+          <div class="model-storage-row"><div><h3>Downloaded models</h3><code id="model-storage-models-path" translate="no"></code><p class="muted">Changes the folder for catalog GGUF models, vision projectors and partial downloads.</p></div><button id="model-storage-models-choose" type="button">Change folder</button></div>
+          <div class="model-storage-row"><div><h3>Custom GGUF files</h3><code id="model-storage-custom-path"></code><p class="muted">Copies existing imports to your chosen folder and uses it for future imports. New imports keep their source files.</p></div><button id="model-storage-custom-choose" type="button">Choose folder</button></div>
+          <p class="muted">You can keep the originals or remove them after verification. Wallets, plugin data, runtime files and Ollama caches keep their current locations.</p>
+          <div id="model-storage-job" class="model-storage-job" hidden><p id="model-storage-status" role="status" aria-live="polite"></p><progress id="model-storage-progress" max="100" value="0" aria-label="Model transfer progress"></progress><p id="model-storage-detail" class="model-storage-detail" translate="no"></p><button id="model-storage-cancel" type="button" hidden>Cancel transfer</button></div>
+        </article>
         <article><h2>Closing the window</h2><p id="closing-window-detail">Checking system tray availability…</p></article>
         <article id="application-updates" class="application-updates" aria-labelledby="updates-heading">
           <div class="core-updates-heading"><div><h2 id="updates-heading">Application updates</h2><p id="updates-version" class="muted">KAI Core Beta</p></div><span id="updates-badge" class="pill" hidden></span></div>
@@ -219,6 +226,6 @@
     <p id="language-error" class="language-error" role="alert"></p><button id="language-continue" class="primary" type="button">Continue</button>
   </dialog>
   <script src="locales/catalogs.js"></script><script src="locales/core.js"></script><script src="i18n.js"></script><script src="language.js"></script>
-  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="apps.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="account.js"></script><script src="models.js"></script><script src="updates.js"></script><script src="core.js"></script><script src="credit-connection.js"></script><script src="alpha-migration.js"></script>
+  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="apps.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="account.js"></script><script src="models.js"></script><script src="updates.js"></script><script src="model-storage.js"></script><script src="core.js"></script><script src="credit-connection.js"></script><script src="alpha-migration.js"></script>
 </body>
 </html>

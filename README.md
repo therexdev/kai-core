@@ -10,6 +10,14 @@ The Beta name is display branding. Core keeps the `io.koinosai.core` application
 
 Follow the [illustrated transfer guide](docs/TRANSFER_GUIDE.md) to migrate models, your Core wallet and the regular Koinos Node. It includes snapshots, a PDF download and guidance for creating a separate Node wallet.
 
+## Model storage folders
+
+**Settings → Model storage** lets you choose separate folders for downloaded models and custom GGUF imports, including folders on another drive. Downloaded models default to `models` inside the Foundation profile. Custom imports stay at their original locations until you choose a custom folder. New catalog downloads and GGUF imports use the selected folders immediately, and the choices survive restart. New imports always keep their source files.
+
+Changing a folder shows a review with the destination and file count. Core copies and SHA-256 verifies the files, durably saves their new locations, and only then removes originals if you selected **Remove original files after verification** (off by default). Downloaded model transfers include vision projectors and partial downloads; unrelated files and subdirectories stay in place. Existing imports keep their names and aliases. Different files at a destination are never overwritten. Cancellation before saving keeps the original locations and files; already completed, verified destination copies can be reused on retry. Keep the destination drive connected: Core reports an unavailable saved model folder instead of silently reverting to the system drive.
+
+Finish or cancel local model requests, downloads and queued loads before transferring. Core pauses new network work, lets assigned network work finish and unloads the local model during transfer. Wallets, plugin data, runtime files and Ollama caches keep their current locations; node storage remains a setting of the Node plugin.
+
 ## Application updates
 
 Settings shows the installed version, checks for new Core releases, and offers an optional automatic-check setting (on by default). Local-Only privacy pauses checks and downloads. An update badge appears on Settings when a newer release is available.

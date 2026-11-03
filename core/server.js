@@ -58,7 +58,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
   const keys = new ApiKeys(settings);
   const models = new ModelManager({
     catalogPath: path.join(__dirname, "models", "catalog.json"),
-    modelsDir: path.join(dataDir, "models"),
+    modelsDir: require("./lib/model-storage").configuredModelsDir(state, path.join(dataDir, "models")),
     state,
     onEvent: events,
   });

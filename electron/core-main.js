@@ -7,7 +7,7 @@ const { app, BrowserWindow, dialog, ipcMain, protocol } = electron;
 const { channelConfig, configureDesktop } = require("../core/lib/release-channel");
 const release = channelConfig("core"); configureDesktop(app, release);
 protocol.registerSchemesAsPrivileged([{ scheme: "kai-plugin", privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false } }]);
-let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, appUpdates, alphaMigration, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
+let core, win, pluginHost, pluginReview, features, payments, coreChat, coreWallet, catalogMonitor, appUpdates, alphaMigration, modelStorage, report, pluginDownload, desktopTray, stopping, shuttingDown = false, shutdownComplete = false, installBusy = false;
 const pluginIO = new Set();
 async function trackPluginIO(task) { pluginIO.add(task); try { return await task; } finally { pluginIO.delete(task); } }
 const messageDialogs = require("./core-dialogs").createCoreDialogs({ electron, getWindow: () => win, isClosing: () => shuttingDown, getLanguage: () => core?.locale?.get().language || "en" });
@@ -28,7 +28,7 @@ function stop() {
   if (!stopping) stopping = (async () => {
     pluginDownload?.abort(); messageDialogs.dispose(); const errors = [];
     // Finish every cleanup even if an earlier service cannot stop normally.
-    for (const dispose of [() => appUpdates?.dispose(), () => alphaMigration?.dispose(), () => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => Promise.allSettled([...pluginIO]), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
+    for (const dispose of [() => modelStorage?.dispose(), () => appUpdates?.dispose(), () => alphaMigration?.dispose(), () => pluginReview?.dispose(), () => catalogMonitor?.dispose(), () => Promise.allSettled([...pluginIO]), () => coreWallet?.dispose(), () => coreChat?.dispose(), () => pluginHost?.closeAll(), () => features?.dispose(), () => payments?.dispose(), () => core?.stop()]) {
       try { await dispose(); } catch (error) { errors.push(error); }
     }
     desktopTray?.dispose();
@@ -164,6 +164,7 @@ async function start() {
     } });
   win.webContents.on("render-process-gone", () => { void coreChat.stop(); });
   win.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) void coreChat.stop(); });
+  modelStorage = require("./core-model-storage").createModelStorageController({ core, dataDir, electron, getWindow: () => win, isClosing: () => shuttingDown });
   ipcMain.handle("kai-core:call", async (event, method, input) => {
     if (!trustedMainDocument(event, win, origin)) throw Error("Core desktop access denied");
     if (shuttingDown) throw Error("Core is closing.");
@@ -174,6 +175,12 @@ async function start() {
         const frame = event.senderFrame;
         return require("./core-renderer-dialogs").showRendererDialog({ dialog, parent: win, name: release.productName, kind: method.slice(7), input,
           reviewable: () => !shuttingDown && win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && trustedMainDocument({ sender: event.sender, senderFrame: frame }, win, origin) });
+      }
+      case "storage.status": return modelStorage.status();
+      case "storage.cancel": return modelStorage.cancel();
+      case "storage.choose": {
+        const frame = event.senderFrame;
+        return modelStorage.choose(input?.kind, () => !shuttingDown && win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && trustedMainDocument({ sender: event.sender, senderFrame: frame }, win, origin));
       }
       case "migration.scan": return alphaMigration.scan();
       case "migration.chooseSource": return alphaMigration.chooseSource();
