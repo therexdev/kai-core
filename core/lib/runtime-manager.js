@@ -177,6 +177,7 @@ class RuntimeManager {
    *  plain language up front instead of after a gigabyte. A forced binary
    *  or a working fallback engine counts as viable. */
   async preflight({ signal } = {}) {
+    if (this.models._storageMigration) throw Error("Wait for the model folder transfer to finish");
     signal?.throwIfAborted();
     if (!this.provisioner) return; // forced binary (KAI_LLAMA_BIN) — viable
     try {
@@ -230,6 +231,7 @@ class RuntimeManager {
   }
 
   _assertDemand(epoch, signal) {
+    if (this.models._storageMigration) throw Error("Wait for the model folder transfer to finish");
     signal?.throwIfAborted();
     if (epoch !== this._stopEpoch) throw new DOMException("Local model request stopped", "AbortError");
   }

@@ -39,12 +39,13 @@ class ModelManager {
     this._active = null; // in-flight download {alias, controller}
     this._progress = null; // last emitted progress for the UI
     this._importing = null; // in-flight custom import {path, pct}
+    this._storageMigration = null; // exclusive model-folder transfer
     this._alphaMigration = null; // exclusive model-copy lease held by Settings migration
     this._removing = new Set(); // removals started before a migration may begin
   }
 
   // ----- custom models (§27 extended: bring your own GGUF) -----
-  // Imported models are referenced in place (nobody wants a 19 GB copy),
+  // Imported models are referenced in place unless a custom folder was chosen,
   // identified by their SHA-256 exactly like catalog packages — so the §32
   // kill switch and dedupe both work on them — and marked "missing" with a
   // clean error if the file later moves.
@@ -62,6 +63,7 @@ class ModelManager {
   }
 
   async importCustom({ path: filePath, label }) {
+    if (this._storageMigration) throw new Error("Wait for the model folder transfer to finish");
     if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     filePath = String(filePath || "");
     if (!filePath.toLowerCase().endsWith(".gguf")) throw new Error("Pick a .gguf model file");
@@ -93,10 +95,11 @@ class ModelManager {
       if (q) throw new Error(`This model was revoked by the network operator: ${q.reason}`);
       const dupCatalog = Object.entries(this.catalog.packages).find(([, p]) => String(p.sha256).toLowerCase() === sha256);
       if (dupCatalog) throw new Error(`This file is already in the catalog (${dupCatalog[0]}) — download it from Models instead`);
-      const customs = this._customs();
+      const customs = this._customs().slice();
       const dup = customs.find((c) => c.sha256 === sha256);
       if (dup) throw new Error(`Already imported as “${dup.label}”`);
 
+      const importedPath = await require("./model-storage").storeCustomImport(this, filePath, sha256);
       const base = path.basename(filePath, path.extname(filePath));
       let alias = `custom-${base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "model"}`;
       let n = 2;
@@ -105,7 +108,7 @@ class ModelManager {
       const entry = {
         alias,
         label: String(label || base).slice(0, 60),
-        path: filePath,
+        path: importedPath,
         sha256,
         sizeBytes,
         contextSize: 4096,
@@ -114,7 +117,7 @@ class ModelManager {
       };
       customs.push(entry);
       this._saveCustoms(customs);
-      this.onEvent({ type: "model:imported", alias, sha256, path: filePath });
+      this.onEvent({ type: "model:imported", alias, sha256, path: importedPath });
       return entry;
     } finally {
       this._importing = null;
@@ -122,6 +125,8 @@ class ModelManager {
   }
 
   removeCustom(alias) {
+    if (this._importing) throw new Error("Wait for the current model import to finish");
+    if (this._storageMigration) throw new Error("Wait for the model folder transfer to finish");
     if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     const customs = this._customs();
     if (!customs.some((c) => c.alias === alias)) throw new Error("No such imported model");
@@ -261,6 +266,7 @@ class ModelManager {
    */
   async ensurePackage(packageId, { signal } = {}) {
     signal?.throwIfAborted();
+    if (this._storageMigration) throw new Error("Wait for the model folder transfer to finish");
     if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     if (String(packageId).startsWith("custom:")) {
       const sha = packageId.slice(7);
@@ -333,6 +339,7 @@ class ModelManager {
    *  Returns the local path, or null when the package has no projector. */
   async ensureMmproj(packageId, { signal } = {}) {
     signal?.throwIfAborted();
+    if (this._storageMigration) throw new Error("Wait for the model folder transfer to finish");
     if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     const pkg = this.catalog.packages[packageId];
     const mm = pkg && pkg.mmproj;
@@ -461,6 +468,7 @@ class ModelManager {
    * wrong; it was just done on the thread that runs the user interface.
    */
   async removePackage(packageId, { isInUse = false } = {}) {
+    if (this._storageMigration) throw new Error("Wait for the model folder transfer to finish");
     if (this._alphaMigration) throw new Error("Wait for Alpha model migration to finish");
     const plan = this.removalPlan(packageId);
     if (isInUse) {

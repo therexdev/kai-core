@@ -233,7 +233,7 @@ async function recoverPublishedStage(target,sha256,sizeBytes,signal) {
 async function migrateAlphaModels({sourceDir,models,signal,onProgress=()=>{},deleteOldModels=false}={}) {
   if(typeof deleteOldModels!=="boolean")throw Error("Choose whether to delete old model files");
   if(!models?.catalog||!models?.state||typeof models.modelsDir!=="string")throw Error("Core model service is unavailable");
-  if(models._active||models._importing||models._alphaMigration||models._removing?.size)throw Error("Wait for the current model download, import or removal before migrating");
+  if(models._active||models._importing||models._alphaMigration||models._storageMigration||models._removing?.size)throw Error("Wait for the current model download, import, removal or folder transfer before migrating");
   const source=rootDirectory(sourceDir),profile=rootDirectory(path.dirname(models.modelsDir));
   const sourceKey=pathKey(source),profileKey=pathKey(profile);
   if(sourceKey===profileKey||sourceKey.startsWith(profileKey+path.sep)||profileKey.startsWith(sourceKey+path.sep))throw Error("Alpha and Core model profiles must be separate");

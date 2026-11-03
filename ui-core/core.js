@@ -59,7 +59,7 @@ function showPage(next, app) {
     if (page === "network") window.KaiCoreNetwork?.leave();
     if (page === "wallet") window.KaiCoreWallet?.leave();
     if (page === "credits") window.KaiCreditConnection?.leave();
-    if (page === "settings") window.KaiCoreUpdates?.leave();
+    if (page === "settings") { window.KaiCoreUpdates?.leave(); window.KaiModelStorage?.leave(); }
     if (page === "app") void bridge.call("plugins.hide").catch(error => notify(error.message, true));
     priceGeneration++;
   }
@@ -80,7 +80,7 @@ function showPage(next, app) {
   if (next === "network") window.KaiCoreNetwork?.enter();
   if (next === "wallet") window.KaiCoreWallet?.enter();
   if (next === "plugins") void checkPluginCatalog();
-  if (next === "settings") { window.KaiCoreAccount?.enter(); void window.KaiCoreUpdates?.enter(); }
+  if (next === "settings") { window.KaiCoreAccount?.enter(); void window.KaiCoreUpdates?.enter(); window.KaiModelStorage?.enter(); }
   if (next === "credits") { renderCredits(); void refreshCreditActivity(); void window.KaiCreditConnection?.enter(); }
   if (next === "buy-credits") void price();
 }

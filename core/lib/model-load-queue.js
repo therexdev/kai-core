@@ -16,6 +16,7 @@ class ModelLoadQueue {
 
   enqueue(alias) {
     if (this.closed) throw Error("Core is stopping");
+    if (this.models._storageMigration) throw Error("Wait for the model folder transfer to finish");
     if (this.models._alphaMigration) throw Error("Wait for Alpha model migration to finish");
     const resolved = this.models.resolveAlias(alias);
     const existing = this.entries.get(alias);
@@ -86,6 +87,7 @@ class ModelLoadQueue {
     this.onChange(job);
     job.promise = Promise.resolve().then(async () => {
       if (this.closed) throw Error("Core is stopping");
+      if (this.models._storageMigration) throw Error("Wait for the model folder transfer to finish");
       if (this.models._alphaMigration) throw Error("Wait for Alpha model migration to finish");
       job.controller.signal.throwIfAborted();
       this.models.resolveAlias(job.alias); // recheck revocation before its turn

@@ -30,7 +30,8 @@
     "test:updates": "node scripts/foundation/updates-smoke.js",
     "test:wallet-send": "node scripts/foundation/wallet-send-smoke.js",
     "test:language": "node scripts/foundation/language-smoke.js",
-    "build:locales": "node scripts/foundation/build-locales.js"
+    "build:locales": "node scripts/foundation/build-locales.js",
+    "test:model-storage": "node scripts/foundation/model-storage-smoke.js"
   },
   "devDependencies": {
     "electron": "^43.8.1",
@@ -101,6 +102,7 @@
       "core/lib/local-chat-messages.js",
       "core/lib/model-load-queue.js",
       "core/lib/model-manager.js",
+      "core/lib/model-storage.js",
       "core/lib/network-overview.js",
       "core/lib/plugins/download.js",
       "core/lib/plugins/first-party.json",
@@ -139,6 +141,7 @@
       "electron/core-linux-updates.js",
       "electron/core-locale.js",
       "electron/core-main.js",
+      "electron/core-model-storage.js",
       "electron/core-plugin-catalog.js",
       "electron/core-plugin-host.js",
       "electron/core-plugin-install-preload.js",
@@ -184,6 +187,7 @@
       "electron/wallet-session-secret.js",
       "electron/window-security.js",
       "package.json",
+      "ui-core/locales/core.json",
       "ui-core/reward-summary.js",
       "ui-core/**",
       "core/models/**",
