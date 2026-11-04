@@ -161,9 +161,12 @@ class OllamaRuntime {
    * Ensure our verified GGUF is registered in Ollama under `modelName`,
    * then treat Ollama as the serving endpoint.
    */
-  async start({ modelPath, sha256, modelName, signal }) {
+  async start({ modelPath, sha256, modelName, contextSize = 4096, signal }) {
     signal?.throwIfAborted();
-    const name = modelName || "koinos-model";
+    if (!Number.isSafeInteger(contextSize) || contextSize < 2048 || contextSize > 262144) throw Error("Invalid model context window");
+    // Separate registrations prevent a cached 4K model from defeating a new
+    // context choice. Ollama reuses the same content-addressed weight blob.
+    const name = `${modelName || "koinos-model"}-ctx${contextSize}`;
     const digest = `sha256:${String(sha256).toLowerCase()}`;
 
     const shown = await this._api("/api/show", { model: name }, { timeoutMs: 5000, signal }).catch(error => { signal?.throwIfAborted(); return null; });
@@ -188,11 +191,11 @@ class OllamaRuntime {
       if (!blob.ok && blob.status !== 201) {
         throw new Error(`Ollama rejected the model blob: HTTP ${blob.status}`);
       }
-      let created = await this._api("/api/create", { model: name, files: { "model.gguf": digest } }, { signal });
+      let created = await this._api("/api/create", { model: name, files: { "model.gguf": digest }, parameters: { num_ctx: contextSize }, stream: false }, { signal });
       if (!created.ok) {
         await created.body?.cancel();
         // Older Ollama versions take a Modelfile that references the path.
-        created = await this._api("/api/create", { name, modelfile: `FROM ${modelPath}` }, { signal });
+        created = await this._api("/api/create", { name, modelfile: `FROM ${JSON.stringify(modelPath)}\nPARAMETER num_ctx ${contextSize}`, stream: false }, { signal });
       }
       if (!created.ok) {
         throw new Error(`Ollama could not create the model: HTTP ${created.status} ${await created.text().catch(() => "")}`);

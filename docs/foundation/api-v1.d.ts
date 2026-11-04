@@ -35,6 +35,14 @@ export interface ModelAlias {
   label?: string;
   status: string;
   blurb?: string;
+  /** Effective local input + output token window; respects the user's saved model setting. */
+  contextSize?: number;
+  defaultContextSize?: number;
+  minContextSize?: number;
+  maxContextSize?: number;
+  contextOverride?: number | null;
+  /** False when an imported GGUF's supported context could not be read. */
+  contextLimitKnown?: boolean;
   /** Expected weights-file size, excluding any vision projector. */
   sizeBytes?: number | null;
   /** Core 0.7.5+: expected weights plus projector; null when unknown. */

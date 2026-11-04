@@ -5,6 +5,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 
 const { downloadFile } = require("./download");
+const { contextSettings, readGgufContext } = require("./model-context");
 
 // Display metadata only: count current model files without reading their contents.
 // Missing files consume no space; inaccessible files have an unknown size.
@@ -105,13 +106,16 @@ class ModelManager {
       let n = 2;
       while (customs.some((c) => c.alias === alias) || this.catalog.aliases[alias]) alias = `${alias}-${n++}`;
 
+      const detectedContext = await readGgufContext(importedPath);
       const entry = {
         alias,
         label: String(label || base).slice(0, 60),
         path: importedPath,
         sha256,
         sizeBytes,
-        contextSize: 4096,
+        contextSize: detectedContext || 4096,
+        contextUnknown: !detectedContext,
+        contextMetadataVersion: 1,
         minRamGb: Math.max(4, Math.ceil((sizeBytes / 1e9) * 1.4 + 1)),
         importedAt: new Date().toISOString(),
       };
@@ -122,6 +126,38 @@ class ModelManager {
     } finally {
       this._importing = null;
     }
+  }
+
+  async refreshCustomContexts() {
+    const customs = this._customs().map(entry => ({ ...entry }));
+    let changed = false;
+    for (const entry of customs) {
+      if (entry.contextMetadataVersion === 1 || !fs.existsSync(entry.path)) continue;
+      const detected = await readGgufContext(entry.path);
+      Object.assign(entry, { contextSize: detected || entry.contextSize || 4096, contextUnknown: !detected, contextMetadataVersion: 1 });
+      changed = true;
+    }
+    if (changed) this._saveCustoms(customs);
+  }
+
+  contextFor(packageId, model) {
+    const overrides = this.state.get("modelContextOverrides", {});
+    const value = overrides && Object.hasOwn(overrides, packageId) ? overrides[packageId] : null;
+    return contextSettings(model, value);
+  }
+
+  setContextSize(alias, value) {
+    if (this._storageMigration || this._alphaMigration) throw Error("Wait for model migration to finish");
+    const model = this.resolveAlias(alias);
+    if (value !== null && (!Number.isSafeInteger(value) || value < model.minContextSize || value > model.maxContextSize))
+      throw Error(`Context window must be between ${model.minContextSize} and ${model.maxContextSize} tokens`);
+    const overrides = { ...this.state.get("modelContextOverrides", {}) };
+    if (value === null) delete overrides[model.packageId];
+    else overrides[model.packageId] = value;
+    this.state.set("modelContextOverrides", overrides);
+    const updated = this.resolveAlias(alias);
+    this.onEvent({ type: "model:context", alias, contextSize: updated.contextSize });
+    return updated;
   }
 
   removeCustom(alias) {
@@ -153,6 +189,7 @@ class ModelManager {
         label: a.label,
         blurb: a.blurb || "",
         package: a.package,
+        ...this.contextFor(a.package, pkg),
         sizeBytes: pkg.sizeBytes ?? null,
         downloadSizeBytes,
         diskBytes: files.length ? modelDiskBytes(files) : null,
@@ -173,6 +210,7 @@ class ModelManager {
         label: c.label,
         blurb: `Imported from your files · ${(c.sizeBytes / 1e9).toFixed(1)} GB`,
         package: `custom:${c.sha256}`,
+        ...this.contextFor(`custom:${c.sha256}`, { ...c, contextUnknown: c.contextUnknown !== false }),
         sizeBytes: c.sizeBytes,
         downloadSizeBytes: Number.isSafeInteger(c.sizeBytes) && c.sizeBytes > 0 ? c.sizeBytes : null,
         diskBytes: modelDiskBytes([c.path]),
@@ -199,7 +237,7 @@ class ModelManager {
         filename: path.basename(c.path),
         sha256: c.sha256,
         sizeBytes: c.sizeBytes,
-        contextSize: c.contextSize || 4096,
+        ...this.contextFor(`custom:${c.sha256}`, { ...c, contextUnknown: c.contextUnknown !== false }),
         runtime: "llamacpp",
         custom: true,
       };
@@ -208,7 +246,7 @@ class ModelManager {
     if (!pkg) throw new Error(`Catalog is broken: missing package ${a.package}`);
     const q = this.quarantineOf(a.package);
     if (q) throw new Error(`Model package "${a.package}" is quarantined: ${q.reason}`);
-    return { alias, packageId: a.package, ...pkg };
+    return { alias, packageId: a.package, ...pkg, ...this.contextFor(a.package, pkg) };
   }
 
   /** §32: why a package is quarantined, or null. */

@@ -347,6 +347,15 @@ class Gateway {
           : null,
       });
     }
+    if (path === "/core/models/context" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.alias !== "string" ||
+            !Object.hasOwn(body, "contextSize") || Object.keys(body).some(key => !["alias", "contextSize"].includes(key))) throw Error("Invalid context setting");
+        const model = this.runtime.configureContext(body.alias, body.contextSize);
+        return this._json(res, 200, { ok: true, model });
+      } catch (error) { return this._json(res, 400, { ok: false, error: { message: String(error.message) } }); }
+    }
     // UI onboarding: download + load a model in the background; poll /core/models.
     if (path === "/core/models/ensure" && req.method === "POST") {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
@@ -749,13 +758,16 @@ class Gateway {
     // request without changing persisted history or any network request.
     const localMessages = require("./local-chat-messages").localChatMessages(body.messages, localModel);
     const estTok = Math.max(estimateMessageTokens(body.messages), estimateMessageTokens(localMessages));
-    if (localCtx && estTok > localCtx - CTX_HEADROOM_TOKENS) {
+    if (body.max_tokens !== undefined && (!Number.isSafeInteger(body.max_tokens) || body.max_tokens < 1))
+      return this._json(res, 400, { error: { message: "max_tokens must be a positive integer", type: "invalid_request_error" } });
+    const headroom = Math.max(CTX_HEADROOM_TOKENS, body.max_tokens || 0);
+    if (localCtx && estTok > localCtx - headroom) {
       const net = this.network ? this.network.status() : null;
       // A grounded request never overflows to the network: the whole promise
       // is that the fetched material and the question stay on this machine.
       const canNetwork = !privateDesktop && net && net.privacyMode !== "local-only" && net.schedulerUrl;
       const netCtx = canNetwork ? (await this._networkRates(net.schedulerUrl)).ctxTokens : 0;
-      if (canNetwork && estTok <= netCtx - CTX_HEADROOM_TOKENS) {
+      if (canNetwork && estTok <= netCtx - headroom) {
         const reason = `prompt ~${estTok} tokens exceeds the ${localCtx}-token local context`;
         this.onEvent({ type: "gateway:overflow", from: alias, reason });
         return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: reason });

@@ -62,6 +62,7 @@ class RuntimeManager {
     this.appVersion = arguments[0]?.appVersion || null; // scopes that memory to one app version
     this.runtime = null;
     this.activeAlias = null;
+    this.activeContextSize = null;
     this._loading = null; // in-flight ensure() promise
     this._stopped = false; // stop() raced against an in-flight load
     this._testedBins = new Set(); // self-test once per binary per session
@@ -90,6 +91,16 @@ class RuntimeManager {
    *  during our own work is ours, and never a reason to back off. */
   busy() {
     return this._inflight > 0 || !!this._loading;
+  }
+
+  configureContext(alias, contextSize) {
+    if (this.busy() || this._generationActive || this._generationQueue.length)
+      throw Error("Wait for active model requests and preparation to finish before changing context");
+    return this.models.setContextSize(alias, contextSize);
+  }
+
+  _matchesContext(alias) {
+    return this.activeContextSize === (this.models.resolveAlias(alias).contextSize || 4096);
   }
 
   networkWorkPaused() { return this._localCheckRequests > 0; }
@@ -160,6 +171,7 @@ class RuntimeManager {
   status() {
     return {
       activeAlias: this.activeAlias,
+      contextSize: this.activeContextSize,
       loading: !!this._loading,
       loadingAlias: this._loading?.alias || null,
       loadingStage: this._loading?.stage || null,
@@ -220,7 +232,7 @@ class RuntimeManager {
       await waitWithSignal(loading.promise.catch(() => {}), signal);
     }
     this._assertDemand(epoch, signal);
-    if (this.activeAlias === alias && this.runtime?.status().running) return this.runtime.endpoint;
+    if (this.activeAlias === alias && this._matchesContext(alias) && this.runtime?.status().running) return this.runtime.endpoint;
     const loading = { alias, stage: "waiting", controller: new AbortController(), waiters: new Set(), settled: false };
     this._loading = loading;
     loading.promise = Promise.resolve().then(() => this._load(alias, loading.controller.signal)).finally(() => {
@@ -292,7 +304,7 @@ class RuntimeManager {
         this._assertDemand(epoch, signal);
         const endpoint = await this.ensure(alias, { signal });
         this._assertDemand(epoch, signal);
-        if (this.activeAlias !== alias || !this.runtime?.status().running) continue;
+        if (this.activeAlias !== alias || !this._matchesContext(alias) || !this.runtime?.status().running) continue;
         this._inflight += 1;
         let done = false;
         return { endpoint, release: () => {
@@ -378,17 +390,18 @@ class RuntimeManager {
         const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
         this._loadStage(signal, "starting");
         switching = true;
-        await rt.start({ modelPath, sha256: resolved.sha256, modelName, signal });
+        await rt.start({ modelPath, sha256: resolved.sha256, modelName, contextSize: resolved.contextSize || 4096, signal });
         signal?.throwIfAborted();
         if (this._stopped) {
           this.stop();
           throw new Error("Core is stopping");
         }
         this.activeAlias = alias;
+        this.activeContextSize = resolved.contextSize || 4096;
         this.lastLoadError = null;
         return rt.endpoint;
       } catch (e) {
-        if (signal?.aborted && switching) { await rt.stop(); if (this.runtime === rt) { this.runtime = null; this.activeAlias = null; } }
+        if (signal?.aborted && switching) { await rt.stop(); if (this.runtime === rt) { this.runtime = null; this.activeAlias = null; this.activeContextSize = null; } }
         signal?.throwIfAborted();
         if (this._stopped || e.code === "runtime_busy") throw e;
         // The daemon died under us: fall through to the full path, which
@@ -409,6 +422,7 @@ class RuntimeManager {
       signal?.throwIfAborted();
       this.runtime = null;
       this.activeAlias = null;
+      this.activeContextSize = null;
     }
 
     // Escalation ladder (§5: never strand the user): CUDA/Vulkan/Metal when
@@ -567,7 +581,7 @@ class RuntimeManager {
       if (why) this.onEvent({ type: "runtime:fallback", from: "llamacpp", to: fb.status().kind, reason: why });
       const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
       this._loadStage(signal, "starting");
-      try { await fb.start({ modelPath, sha256: resolved.sha256, modelName, signal }); signal?.throwIfAborted(); }
+      try { await fb.start({ modelPath, sha256: resolved.sha256, modelName, contextSize: resolved.contextSize || 4096, signal }); signal?.throwIfAborted(); }
       catch (error) { await fb.stop(); throw error; }
       return fb;
     };
@@ -601,6 +615,7 @@ class RuntimeManager {
     if (signal?.aborted) { await runtime.stop(); signal.throwIfAborted(); }
     this.runtime = runtime;
     this.activeAlias = alias;
+    this.activeContextSize = resolved.contextSize || 4096;
     // stop() may have run while this load was in flight (quick app quit
     // during the warm start): the child it never saw must not outlive us.
     if (this._stopped) {
@@ -622,6 +637,7 @@ class RuntimeManager {
     if (this.runtime) this._runtimeStopPromise = Promise.resolve(this.runtime.stop());
     this.runtime = null;
     this.activeAlias = null;
+    this.activeContextSize = null;
     return Promise.all([this._runtimeStopPromise, loading?.promise.catch(() => {})]).then(() => undefined);
   }
 }

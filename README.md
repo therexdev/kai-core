@@ -18,6 +18,14 @@ Changing a folder shows a review with the destination and file count. Core copie
 
 Finish or cancel local model requests, downloads and queued loads before transferring. Core pauses new network work, lets assigned network work finish and unloads the local model during transfer. Wallets, plugin data, runtime files and Ollama caches keep their current locations; node storage remains a setting of the Node plugin.
 
+## Model context windows
+
+**Models → Context** shows each model's effective input + output window. Catalog models start at their native configured context: Qwen 2.5 and Mistral at 32K, Phi-4 at 16K, Llama and Gemma 3 at 128K, DeepSeek R1 Distill Qwen at 128K, and LFM3 at 256K. Qwen's optional YaRN extension is not enabled. See [model limits and sources](docs/foundation/MODEL_CONTEXT.md).
+
+Choose a smaller per-model window to reduce memory use. Choices persist across restarts; **Model default** resets the override. Changes take effect on the next reply or model load, including when the same model is already loaded. Active requests must finish before changing context. Larger windows need more RAM/VRAM and can be slower; the model's minimum-RAM label is not a guarantee that its maximum context fits.
+
+Custom GGUF imports use their embedded context metadata when readable. Existing imports are inspected once on upgrade without moving or changing model files. An unknown limit is labelled explicitly, retains a 4K fallback, and allows a manual choice after checking the model's documentation. Plugins receive the effective `contextSize` through the public model list. Core's local Chat retains history according to the selected window; network request limits remain governed separately by the network protocol.
+
 ## Application updates
 
 Settings shows the installed version, checks for new Core releases, and offers an optional automatic-check setting (on by default). Local-Only privacy pauses checks and downloads. An update badge appears on Settings when a newer release is available.

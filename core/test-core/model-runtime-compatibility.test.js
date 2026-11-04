@@ -22,7 +22,7 @@ function fixture({ alias = "lfm3-1.7b", preferFallback = false, failLlama = fals
 
 test("LFM startup uses bounded reasoning and its own sampling defaults without changing existing model defaults", async () => {
   const f = fixture(); await f.runtime.ensure("lfm3-1.7b");
-  assert.equal(f.starts[0].contextSize, 4096);
+  assert.equal(f.starts[0].contextSize, 262144);
   const args = f.starts[0].extraArgs;
   for (const [flag, value] of [["--reasoning", "on"], ["--reasoning-format", "deepseek"], ["--reasoning-budget", "0"], ["--temp", "0.1"], ["--top-k", "50"], ["--repeat-penalty", "1.1"]]) assert.equal(args[args.indexOf(flag) + 1], value);
   const old = fixture({ alias: "koinos-fast" }); await old.runtime.ensure("koinos-fast");

@@ -110,7 +110,7 @@
       "url": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
       "sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
       "sizeBytes": 2019377696,
-      "contextSize": 4096,
+      "contextSize": 131072,
       "license": "llama3.2",
       "creator": "Meta (quantized by bartowski)",
       "runtime": "llamacpp"
@@ -120,7 +120,7 @@
       "url": "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
       "sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
       "sizeBytes": 4683074240,
-      "contextSize": 4096,
+      "contextSize": 32768,
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
       "runtime": "llamacpp"
@@ -130,7 +130,7 @@
       "url": "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
       "sha256": "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370",
       "sizeBytes": 986048768,
-      "contextSize": 4096,
+      "contextSize": 32768,
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
       "runtime": "llamacpp"
@@ -140,7 +140,7 @@
       "url": "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q8_0.gguf",
       "sha256": "5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83",
       "sizeBytes": 144811360,
-      "contextSize": 4096,
+      "contextSize": 8192,
       "license": "apache-2.0",
       "creator": "HuggingFaceTB (quantized by bartowski)",
       "runtime": "llamacpp"
@@ -152,7 +152,7 @@
       "sizeBytes": 2489758112,
       "license": "gemma",
       "creator": "Google DeepMind (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 131072,
       "runtime": "llamacpp",
       "mmproj": {
         "filename": "gemma-3-4b-it-mmproj-model-f16.gguf",
@@ -169,7 +169,7 @@
       "sizeBytes": 4372812000,
       "license": "apache-2.0",
       "creator": "Mistral AI (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 32768,
       "runtime": "llamacpp"
     },
     "qwen2.5-coder-7b-instruct-q4_k_m@1": {
@@ -179,7 +179,7 @@
       "sizeBytes": 4683074336,
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 32768,
       "runtime": "llamacpp"
     },
     "meta-llama-3.1-8b-instruct-q4_k_m@1": {
@@ -189,7 +189,7 @@
       "sizeBytes": 4920739232,
       "license": "llama3.1",
       "creator": "Meta (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 131072,
       "runtime": "llamacpp"
     },
     "google_gemma-3-12b-it-q4_k_m@1": {
@@ -199,7 +199,7 @@
       "sizeBytes": 7300575264,
       "license": "gemma",
       "creator": "Google DeepMind (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 131072,
       "runtime": "llamacpp"
     },
     "qwen2.5-14b-instruct-q4_k_m@1": {
@@ -209,7 +209,7 @@
       "sizeBytes": 8988110976,
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 32768,
       "runtime": "llamacpp"
     },
     "phi-4-q4_k_m@1": {
@@ -219,7 +219,7 @@
       "sizeBytes": 9053114816,
       "license": "mit",
       "creator": "Microsoft (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 16384,
       "runtime": "llamacpp"
     },
     "mistral-small-24b-instruct-2501-q4_k_m@1": {
@@ -229,7 +229,7 @@
       "sizeBytes": 14333908672,
       "license": "apache-2.0",
       "creator": "Mistral AI (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 32768,
       "runtime": "llamacpp"
     },
     "google_gemma-3-27b-it-q4_k_m@1": {
@@ -239,7 +239,7 @@
       "sizeBytes": 16546404992,
       "license": "gemma",
       "creator": "Google DeepMind (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 131072,
       "runtime": "llamacpp"
     },
     "qwen2.5-32b-instruct-q4_k_m@1": {
@@ -249,7 +249,7 @@
       "sizeBytes": 19851336576,
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 32768,
       "runtime": "llamacpp"
     },
     "qwen2.5-coder-32b-instruct-q4_k_m@1": {
@@ -259,7 +259,7 @@
       "sizeBytes": 19851336672,
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 32768,
       "runtime": "llamacpp"
     },
     "deepseek-r1-distill-qwen-32b-q4_k_m@1": {
@@ -269,7 +269,7 @@
       "sizeBytes": 19851335840,
       "license": "mit",
       "creator": "DeepSeek (quantized by bartowski)",
-      "contextSize": 4096,
+      "contextSize": 131072,
       "runtime": "llamacpp"
     },
     "liquid-lfm3-1.7b-q4_k_m@1": {
@@ -277,7 +277,7 @@
       "url": "https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/resolve/bad5729bba61d076fff20d2548e62526665af215/LFM3-1.7B-Q4_K_M.gguf",
       "sha256": "3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4",
       "sizeBytes": 1099627808,
-      "contextSize": 4096,
+      "contextSize": 262144,
       "runtime": "llamacpp",
       "license": "LFM Open License v1.0",
       "allowFallback": false,

@@ -246,3 +246,9 @@ Run `node --test examples/test/*.test.js` for the included example checks. Test 
 Install the package from Plugins → Install 3rd Party Plugins using a local file or approved package URL. Review the displayed publisher fingerprint and capabilities. Native packages require the explicit full-access notice. Updates must retain the same publisher key for an existing plugin ID; Core binds that ID to its first installed publisher. Use a new immutable version for each release.
 
 Foundation stores verified packages, materialized code and per-plugin writable data under its new `plugins-v3` directory. Remove/disable stops a service; removing an installation does not silently delete its retained saved data or publisher binding. This architecture does not read or migrate the old app's documents, connected accounts or plugin state.
+
+## Local model context
+
+`api.models.list()` and sandboxed `models.list` include `contextSize` (the user's effective input + output window), `defaultContextSize`, `minContextSize`, `maxContextSize`, `contextOverride` and `contextLimitKnown`. Use the current `contextSize` to budget prompt history and retrieved material; reserve space for the response and chat-template overhead. Refresh model metadata before a new request rather than caching a 4K assumption. The runtime and gateway use the same saved selection, and reload the model on its next request after a change.
+
+Context is configured by the user in Core's Models screen. Native plugins share that choice; their UI can navigate to Models using the existing Core navigation API. Network/provider context limits remain separate. See [context limits](MODEL_CONTEXT.md) for defaults and custom-GGUF behavior.

@@ -311,6 +311,8 @@ class LlamaCppRuntime {
       "--host", this.host,
       "--port", String(this.port),
       "--ctx-size", String(contextSize),
+      // Core serializes generations; keep the full window in one slot.
+      "--parallel", "1",
       // GPU offload only when hardware detection approved it; 0 = pure CPU.
       "--n-gpu-layers", String(gpuLayers),
       ...extraArgs,
