@@ -1,4 +1,14 @@
-# KAI Core Beta 0.7.20
+# KAI Core Beta 0.7.21
+
+Fixes empty Wallet history and missing KAI airdrop payment receipts when the first RPC node has an empty account-history index.
+
+- Wallet and Earn now check the remaining configured history services before accepting an empty result.
+- The drop monitor allows more time for fallback and canonical receipt verification. The exact amount, sender, recipient, KOIN contract and irreversible mainnet block must still match before **PAID** and **TX** appear.
+- Existing payments are detected automatically when Wallet or Earn refreshes. Do not resend a completed drop.
+
+Update through **Settings → Check for updates → Download update → Restart and install**, then open **Wallet** and **Earn**. Portable Windows and macOS users can download the new build from this release.
+
+## Previous release: 0.7.20
 
 Earn now shows the exact final KAI-to-KOIN airdrop allocation for each eligible wallet:
 

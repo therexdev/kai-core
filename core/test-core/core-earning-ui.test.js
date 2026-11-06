@@ -213,6 +213,21 @@ test("a delayed KAI refresh retains an explicitly stale amount and leaving disca
   assert.equal(f.controller.getState().legacy.kai, "12,345.67890123"); assert.equal(f.timers.size, 0);
 });
 
+test("Earn waits for canonical drop verification beyond the setup-check timeout", async () => {
+  const f = fixture(info(), { legacy: true }); let release;
+  f.setLegacy(() => new Promise(resolve => { release = resolve; })); await f.enter();
+  await f.advance(25000); assert.equal(f.controller.getState().legacyError, "");
+  const manifest = require("../lib/legacy-kai-drop.json"), address = Object.keys(manifest.allocations)[0];
+  const txId = "0x1220" + "a".repeat(64);
+  release({ wallet: { address }, drop: { campaign: manifest.id, address, network: "mainnet", token: "KOIN",
+    ...manifest.allocations[address], eligible: true, state: "paid",
+    payment: { txId, blockId: "0x1220" + "b".repeat(64), blockHeight: "42", verifiedAt: start + 25000 } } });
+  await flush();
+  assert.equal(f.controller.getState().legacy.drop.state, "paid");
+  assert.equal(f.controller.getState().legacy.drop.txUrl, "https://koinosblocks.com/tx/" + txId);
+  f.controller.leave();
+});
+
 test("privacy or identity reset clears KAI and rejects an earlier account's delayed read", async () => {
   const f = fixture(info(), { legacy: true }); await f.enter();
   let release; f.setLegacy(() => new Promise(resolve => { release = resolve; })); const oldRead = f.controller.refresh(); await flush();

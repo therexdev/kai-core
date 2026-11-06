@@ -118,6 +118,23 @@ test("timed out read releases loading state and cannot overwrite a newer refresh
   slow.resolve(summary({ koin: "999" })); await flush(); assert.equal(f.latest().state.summary.koin, "7");
 });
 
+test("slow history fallback can finish after 20 seconds without losing the incoming payment", async () => {
+  const f = fixture(), slow = deferred(); f.setHistory(slow.promise); await f.enter();
+  await f.advance(25000);
+  assert.equal(f.latest().state.loading, true); assert.equal(f.latest().state.historyError, "");
+  slow.resolve(history({ observedAt: NOW + 25000 })); await flush();
+  assert.equal(f.latest().state.loading, false); assert.equal(f.latest().state.rows[0].id, row().id);
+  assert.equal(f.latest().state.summary.observedAt, NOW, "history does not refresh the spendable balance timestamp");
+});
+
+test("history still has a bounded timeout and late rows cannot replace a newer read", async () => {
+  const f = fixture(), slow = deferred(); f.setHistory(slow.promise); await f.enter();
+  await f.advance(45001); assert.equal(f.latest().state.loading, false); assert.match(f.latest().state.historyError, /timed out/);
+  f.setSummary(summary({ observedAt: NOW + 45001 })); f.setHistory(history({ observedAt: NOW + 45001, rows: [row("b")] }));
+  await f.controller.refresh(); slow.resolve(history({ observedAt: NOW + 45001 })); await flush();
+  assert.equal(f.latest().state.rows[0].id, row("b").id);
+});
+
 test("Send All binds the filled amount to the selected token, wallet and network", async () => {
   const f = fixture(); await f.enter({ exists: true, address: ADDRESS, unlocked: true });
   f.action(async () => ({ address: ADDRESS, network: "mainnet", token: "vhp", amount: "184467440737.09551615", observedAt: NOW }));
