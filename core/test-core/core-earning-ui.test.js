@@ -233,7 +233,7 @@ test("reopening Earn retains KAI and reward totals until a fresh read arrives", 
 
 test("Earn's mounted page warms without navigation, pauses hidden, and purges data on identity/privacy changes", async()=>{
  const fs=require("node:fs"),vm=require("node:vm"),path=require("node:path"),events=new Map(),documentEvents=new Map(),nodes=new Map(),calls=[],timers=new Map();let timer=0,now=start;
- const node=id=>{if(!nodes.has(id))nodes.set(id,{hidden:false,disabled:false,dataset:{},textContent:"",innerHTML:"",value:"",addEventListener(){},setAttribute(){},querySelector(){return null;},querySelectorAll(){return [];}});return nodes.get(id);};
+ const node=id=>{if(!nodes.has(id))nodes.set(id,{hidden:false,disabled:false,dataset:{},textContent:"",innerHTML:"",value:"",addEventListener(){},setAttribute(){},removeAttribute(){},querySelector(){return null;},querySelectorAll(){return [];}});return nodes.get(id);};
  const document={hidden:false,getElementById:node,addEventListener:(name,fn)=>documentEvents.set(name,fn)};
  const window={document,KaiRewardSummary:summaryApi,KaiCoreNotice:{create:()=>({show(){}})},addEventListener:(name,fn)=>events.set(name,fn),dispatchEvent(){},
   kaiCore:{credit:async action=>{calls.push(action);return action==="provider-public-info"?{state:"ready",enabled:false,running:false,models:[]}:rewards();},call:async()=>({wallet:{address:"fixture-wallet"},earnings:{address:"fixture-wallet",kai:"125"}})}};

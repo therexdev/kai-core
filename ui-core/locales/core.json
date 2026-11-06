@@ -364,7 +364,16 @@
     "Transfer cancelled. Original files were kept.": "Transferencia cancelada. Se conservaron los archivos originales.",
     "Transfer could not finish: {0}": "No se pudo completar la transferencia: {0}",
     "Model transfer progress": "Progreso de la transferencia de modelos",
-    "Cancel transfer": "Cancelar transferencia"
+    "Cancel transfer": "Cancelar transferencia",
+    "KAI snapshot:": "KAI de la instantánea:",
+    "KAI snapshot and KOIN drop": "Instantánea de KAI y airdrop de KOIN",
+    "PAID": "PAGADO",
+    "TX": "TX",
+    "Open airdrop transaction": "Abrir transacción del airdrop",
+    "Received on Koinos mainnet": "Recibido en la red principal de Koinos",
+    "Not included in this drop": "No incluido en este airdrop",
+    "Payment check unavailable — retrying": "Comprobación de pago no disponible — reintentando",
+    "Final snapshot allocation: 5 KAI = 1 KOIN, rounded to the nearest 0.00000001 KOIN per wallet. PAID requires a finalized matching KOIN transfer from the drop wallet.": "Asignación de la instantánea final: 5 KAI = 1 KOIN, redondeada a 0.00000001 KOIN por billetera. PAGADO requiere una transferencia KOIN finalizada y coincidente desde la billetera del airdrop."
   },
   "pt-BR": {
     "AI credit account": "Conta de créditos de IA",
@@ -731,7 +740,16 @@
     "Transfer cancelled. Original files were kept.": "Transferência cancelada. Os arquivos originais foram mantidos.",
     "Transfer could not finish: {0}": "Não foi possível concluir a transferência: {0}",
     "Model transfer progress": "Progresso da transferência de modelos",
-    "Cancel transfer": "Cancelar transferência"
+    "Cancel transfer": "Cancelar transferência",
+    "KAI snapshot:": "KAI no snapshot:",
+    "KAI snapshot and KOIN drop": "Snapshot de KAI e airdrop de KOIN",
+    "PAID": "PAGO",
+    "TX": "TX",
+    "Open airdrop transaction": "Abrir transação do airdrop",
+    "Received on Koinos mainnet": "Recebido na rede principal Koinos",
+    "Not included in this drop": "Não incluído neste airdrop",
+    "Payment check unavailable — retrying": "Verificação de pagamento indisponível — tentando novamente",
+    "Final snapshot allocation: 5 KAI = 1 KOIN, rounded to the nearest 0.00000001 KOIN per wallet. PAID requires a finalized matching KOIN transfer from the drop wallet.": "Alocação do snapshot final: 5 KAI = 1 KOIN, arredondada para 0.00000001 KOIN por carteira. PAGO exige uma transferência KOIN finalizada e correspondente da carteira do airdrop."
   },
   "fr": {
     "AI credit account": "Compte de crédits IA",
@@ -1098,7 +1116,16 @@
     "Transfer cancelled. Original files were kept.": "Transfert annulé. Les fichiers sources ont été conservés.",
     "Transfer could not finish: {0}": "Le transfert n’a pas pu se terminer : {0}",
     "Model transfer progress": "Progression du transfert des modèles",
-    "Cancel transfer": "Annuler le transfert"
+    "Cancel transfer": "Annuler le transfert",
+    "KAI snapshot:": "KAI de l’instantané :",
+    "KAI snapshot and KOIN drop": "Instantané KAI et airdrop KOIN",
+    "PAID": "PAYÉ",
+    "TX": "TX",
+    "Open airdrop transaction": "Ouvrir la transaction de l’airdrop",
+    "Received on Koinos mainnet": "Reçu sur le réseau principal Koinos",
+    "Not included in this drop": "Non inclus dans cet airdrop",
+    "Payment check unavailable — retrying": "Vérification du paiement indisponible — nouvel essai",
+    "Final snapshot allocation: 5 KAI = 1 KOIN, rounded to the nearest 0.00000001 KOIN per wallet. PAID requires a finalized matching KOIN transfer from the drop wallet.": "Allocation de l’instantané final : 5 KAI = 1 KOIN, arrondie à 0.00000001 KOIN par portefeuille. PAYÉ exige un transfert KOIN finalisé et correspondant depuis le portefeuille de l’airdrop."
   },
   "de": {
     "AI credit account": "KI-Guthabenkonto",
@@ -1465,6 +1492,15 @@
     "Transfer cancelled. Original files were kept.": "Übertragung abgebrochen. Originaldateien wurden behalten.",
     "Transfer could not finish: {0}": "Übertragung konnte nicht abgeschlossen werden: {0}",
     "Model transfer progress": "Fortschritt der Modellübertragung",
-    "Cancel transfer": "Übertragung abbrechen"
+    "Cancel transfer": "Übertragung abbrechen",
+    "KAI snapshot:": "KAI im Snapshot:",
+    "KAI snapshot and KOIN drop": "KAI-Snapshot und KOIN-Airdrop",
+    "PAID": "BEZAHLT",
+    "TX": "TX",
+    "Open airdrop transaction": "Airdrop-Transaktion öffnen",
+    "Received on Koinos mainnet": "Im Koinos-Mainnet empfangen",
+    "Not included in this drop": "Nicht in diesem Airdrop enthalten",
+    "Payment check unavailable — retrying": "Zahlungsprüfung nicht verfügbar — erneuter Versuch",
+    "Final snapshot allocation: 5 KAI = 1 KOIN, rounded to the nearest 0.00000001 KOIN per wallet. PAID requires a finalized matching KOIN transfer from the drop wallet.": "Zuteilung des finalen Snapshots: 5 KAI = 1 KOIN, auf 0.00000001 KOIN pro Wallet gerundet. BEZAHLT erfordert einen finalisierten passenden KOIN-Transfer von der Airdrop-Wallet."
   }
 }

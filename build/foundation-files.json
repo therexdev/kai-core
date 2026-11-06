@@ -55,6 +55,8 @@
     "core/lib/koinos/wallet-history.js",
     "core/lib/koinos/wallet-nonce.js",
     "core/lib/legacy-kai-balance.js",
+    "core/lib/legacy-kai-drop.js",
+    "core/lib/legacy-kai-drop.json",
     "core/lib/local-chat-messages.js",
     "core/lib/model-load-queue.js",
     "core/lib/model-manager.js",

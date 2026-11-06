@@ -1,0 +1,11 @@
+# Temporary legacy KAI drop receipt display
+
+Earn shows each wallet's fixed entitlement from `KAI-Testnet-Drop-Record-2026-11-01.xlsx`, captured on November 2, 2026 at 03:52:48.642 UTC. The campaign includes 32 wallets and 99,235.10871539 minted testnet KAI. Each wallet receives 1 KOIN per 5 KAI, rounded to the nearest 0.00000001 KOIN; the allocations sum to **19,847.02174310 KOIN**. Pending unminted claims are excluded. The checked-in `core/lib/legacy-kai-drop.json` records the exact integer amounts, avoiding changes caused by live balances or rounding down.
+
+A green PAID badge and TX link appear only after an irreversible Koinos mainnet KOIN transfer matches the recipient's exact allocation and sender `15CM9Qr4GKREDgqnyXJ8tckPj2biERTM1T`. The monitor verifies the canonical block receipt, contract, chain, sender, recipient and atomic amount. VHP, other senders, failed transfers and partial payments do not count. Payments must be at or after the snapshot timestamp. The TX link opens the verified transaction in Koinos Blocks through Core's existing external-link handler.
+
+Opening Earn starts read-only polling even with earning disabled or the wallet locked. The latest history page is checked on each refresh while older pages are searched incrementally, so payments received while the app was closed can be found. Finalized proofs are cached for the current process and rediscovered after restart. RPC outages retain the exact entitlement and show a retry message without inventing payment evidence. Changing wallets clears the displayed receipt. This feature never unlocks a wallet, signs or sends a transaction.
+
+The native smoke check (`npm run test:legacy-drop`) uses synthetic receipts with network access blocked. It verifies exact amounts, badge and link behavior, shared language changes, and wallet switching. It does not verify a live payment. Unit coverage additionally checks receipt validation, finality, pagination, retry behavior and snapshot totals.
+
+When retiring this campaign, remove `core/lib/legacy-kai-drop.js`, its JSON manifest, the `legacyDrop` server wiring, the Earn legacy panel and related styles/translations/tests. Regenerate the production manifest and locale bundle. No persistent payment journal or user data migration is needed.
