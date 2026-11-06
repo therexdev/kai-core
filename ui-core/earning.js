@@ -139,7 +139,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
     const cancelTimer = timer => { if (timer !== undefined) clearTimer(timer); };
     const read = async (action, request = () => credit(action)) => {
       let timer;
-      try { return await Promise.race([request(), new Promise((_, reject) => { timer = setTimer(() => reject(Error("Setup check timed out. Use Reload setup to try again.")), 15000); })]); }
+      try { return await Promise.race([request(), new Promise((_, reject) => { timer = setTimer(() => reject(Error("Setup check timed out. Use Reload setup to try again.")), action === "legacy-balance" ? 35000 : 15000); })]); }
       finally { cancelTimer(timer); }
     };
     function schedule(delay = STATUS_POLL) { cancelTimer(providerTimer); if (active && state.info?.running) providerTimer = setTimer(refreshProvider, delay); }

@@ -65,6 +65,12 @@ jobs:
       - name: Legacy drop receipt desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:legacy-drop
+      - name: Sidebar wallet desktop check (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:sidebar-wallet
+      - name: Sidebar wallet desktop check (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:sidebar-wallet
       - name: Model storage desktop check (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:model-storage

@@ -50,9 +50,9 @@ async function verifyPayment(provider, id, address, allocation, now, signal) {
   }
   return null;
 }
-function createLegacyKaiDrop({ getAddress, now = Date.now, providerFactory, timeoutMs = 10000 } = {}) {
+function createLegacyKaiDrop({ getAddress, now = Date.now, providerFactory, timeoutMs = 30000 } = {}) {
   const states = new Map(), lifetime = new AbortController();
-  const providerFor = providerFactory || (signal => createProvider(MAINNET_RPC_URLS, { timeoutMs: 2000,
+  const providerFor = providerFactory || (signal => createProvider(MAINNET_RPC_URLS, { timeoutMs: 5000,
     fetchImpl: (url, options) => fetch(url, { ...options, signal: AbortSignal.any([signal, options.signal]) }) }));
   function allocationFor(address) { return Object.hasOwn(manifest.allocations, address || "") ? manifest.allocations[address] : null; }
   function snapshot(address, record) {
@@ -64,8 +64,8 @@ function createLegacyKaiDrop({ getAddress, now = Date.now, providerFactory, time
   }
   async function scan(address, allocation, record, signal) {
     const provider = providerFor(signal), active = () => { signal.throwIfAborted(); if (getAddress() !== address) throw Error("Wallet changed."); };
-    if (await provider.getChainId() !== manifest.chainId) throw Error("Mainnet is required for drop verification."); active();
-    const contract = await provider.invokeGetContractAddress("koin"); active();
+    const [chainId, contract] = await Promise.all([provider.getChainId(), provider.invokeGetContractAddress("koin")]); active();
+    if (chainId !== manifest.chainId) throw Error("Mainnet is required for drop verification.");
     if (contract?.value?.address !== manifest.token) throw Error("KOIN contract could not be verified.");
     const readPage = async cursor => {
       active();

@@ -6,6 +6,8 @@ A green PAID badge and TX link appear only after an irreversible Koinos mainnet 
 
 Opening Earn starts read-only polling even with earning disabled or the wallet locked. The latest history page is checked on each refresh while older pages are searched incrementally, so payments received while the app was closed can be found. Finalized proofs are cached for the current process and rediscovered after restart. RPC outages retain the exact entitlement and show a retry message without inventing payment evidence. Changing wallets clears the displayed receipt. This feature never unlocks a wallet, signs or sends a transaction.
 
+A synced RPC can have an empty or filtered account-history index. The shared RPC adapter checks the remaining configured services before accepting an empty account-history page; it does not merge sequence numbers from different replies. This fallback is limited to `account_history.get_account_history`. Balance reads and signed submissions keep their original semantics. The monitor has a 30-second overall read budget with 5-second endpoint timeouts, including canonical receipt verification.
+
 The native smoke check (`npm run test:legacy-drop`) uses synthetic receipts with network access blocked. It verifies exact amounts, badge and link behavior, shared language changes, and wallet switching. It does not verify a live payment. Unit coverage additionally checks receipt validation, finality, pagination, retry behavior and snapshot totals.
 
 When retiring this campaign, remove `core/lib/legacy-kai-drop.js`, its JSON manifest, the `legacyDrop` server wiring, the Earn legacy panel and related styles/translations/tests. Regenerate the production manifest and locale bundle. No persistent payment journal or user data migration is needed.

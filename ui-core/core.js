@@ -116,6 +116,7 @@ async function refresh() {
     text("wallet-address", ((_value) => _value ? KaiLocale.literal(_value) : KaiLocale.message(["No wallet created"]))(address)); text("wallet-detail", (s.wallet.unlocked ? KaiLocale.message(["Wallet unlocked. Core’s plugin API does not share its private key."]) : KaiLocale.message(["Unlock to authorize wallet actions."])));
     $("create-wallet").hidden = s.wallet.exists; $("restore-wallet").hidden = s.wallet.exists; $("unlock-button").hidden = !s.wallet.exists || s.wallet.unlocked; $("lock-wallet").hidden = !s.wallet.unlocked;
     window.KaiCoreWallet?.observe(s.wallet, s.network.privacyMode);
+    window.KaiSidebarWallet?.observe(s.wallet, s.network.privacyMode);
     window.KaiCoreEarning?.observe(s.wallet, s.network.privacyMode);
     window.KaiCoreNetwork?.observe(s.wallet, s.network.privacyMode);
     window.KaiCreditConnection?.observe(s.wallet, s.network.privacyMode);

@@ -1,4 +1,15 @@
-# KAI Core Beta 0.7.20
+# KAI Core Beta 0.7.21
+
+Adds a compact KOIN wallet summary beneath the upper sidebar menu and fixes missing wallet history and KAI airdrop receipts.
+
+- The sidebar shows your liquid KOIN balance with its estimated USD value underneath. Click it to open Wallet; hover to see all eight decimals. Missing or stale price data shows a dash, and USD price requests pause in Local-Only mode.
+- Wallet and Earn now check the remaining configured history services before accepting an empty result.
+- The drop monitor allows more time for fallback and canonical receipt verification. The exact amount, sender, recipient, KOIN contract and irreversible mainnet block must still match before **PAID** and **TX** appear.
+- Existing payments are detected automatically when Wallet or Earn refreshes. Do not resend a completed drop.
+
+Update through **Settings → Check for updates → Download update → Restart and install**, then open **Wallet** and **Earn**. Portable Windows and macOS users can download the new build from this release.
+
+## Previous release: 0.7.20
 
 Earn now shows the exact final KAI-to-KOIN airdrop allocation for each eligible wallet:
 
