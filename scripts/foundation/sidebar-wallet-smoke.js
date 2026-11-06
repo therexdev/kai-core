@@ -28,16 +28,18 @@ fs.writeFileSync(path.join(temp, "desktop.cjs"), `const {app,BrowserWindow,sessi
       await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setContentSize(width, 850), width);
       await page.waitForFunction(w => innerWidth === w, width);
       const geometry = await page.evaluate(() => {
-        const rect = id => { const r = document.getElementById(id).getBoundingClientRect(); return { x: r.x, right: r.right, y: r.y, bottom: r.bottom, width: r.width, height: r.height }; };
-        return { card: rect("sidebar-wallet"), menu: rect("plugin-nav"), rail: rect("sidebar"), amount: rect("sidebar-wallet-amount"), usd: rect("sidebar-wallet-usd"), overflow: document.documentElement.scrollWidth > innerWidth };
+        const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x, right: r.right, y: r.y, bottom: r.bottom, width: r.width, height: r.height }; };
+        return { card: rect("#sidebar-wallet"), chat: rect('[data-page="chat"]'), rail: rect("#sidebar"), amount: rect("#sidebar-wallet-amount"), usd: rect("#sidebar-wallet-usd"), overflow: document.documentElement.scrollWidth > innerWidth };
       });
-      assert.ok(geometry.card.y >= geometry.menu.bottom && geometry.card.y - geometry.menu.bottom <= 24);
+      assert.ok(geometry.card.bottom <= geometry.chat.y && geometry.chat.y - geometry.card.bottom <= 24);
       assert.ok(geometry.card.right < geometry.rail.right && geometry.card.height <= 80); assert.equal(geometry.overflow, false);
       if (width > 600) assert.ok(geometry.usd.y > geometry.amount.y);
       else assert.equal(await page.locator(".sidebar-wallet-icon").isVisible(), true);
       await page.screenshot({ path: path.join(output, `sidebar-${width}.png`) });
     }
-    report.checks.push("Compact two-line KOIN/USD card fits below the upper menu at desktop, narrow and collapsed widths");
+    assert.equal(await page.locator('.nav-item[data-page="wallet"]').count(), 0);
+    assert.equal(await page.locator('[data-page="wallet"]').count(), 1);
+    report.checks.push("Compact two-line KOIN/USD card sits above Chat at desktop, narrow and collapsed widths, replacing the Wallet menu item");
     await page.locator("#sidebar-wallet").click(); assert.equal(await page.evaluate(() => window.destination), "wallet");
     report.checks.push("Clicking the card opens Wallet");
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1150, 850));
