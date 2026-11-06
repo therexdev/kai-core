@@ -170,12 +170,18 @@ async function main() {
       await until(async () => (await call("status")).wallet.unlocked === false, "Wallet did not lock"); assert.equal(fs.existsSync(path.join(profile, "wallet/session.bin")), false);
       assert.deepEqual(fs.readFileSync(targetWallet), savedWalletBytes); assert.deepEqual(snapshot(source), sourceBefore);
     });
-    await check("Earn shows the locked imported wallet's synthetic KAI balance and 1:5 drop in Local-Only", async () => {
+    await check("Earn excludes the locked imported synthetic wallet from the fixed drop without starting earning", async () => {
       const readEarn = () => page.evaluate(async () => { const response = await fetch("/core/earn"); return { status: response.status, body: await response.json() }; });
       const before = await readEarn(); assert.equal(before.status, 200); assert.equal(before.body.worker.running, false); assert.equal(before.body.wallet.unlocked, false);
       await page.locator('[data-page="earning"]').click();
-      await until(async () => await page.locator("#earn-wallet-kai").textContent() === "12,345.67890123", "Earn did not show the synthetic wallet KAI balance");
-      assert.equal(await page.locator("#earn-koin-drop").textContent(), "2,469.13578024");
+      // A newly generated migration wallet is outside the final allocation.
+      // Its live testnet balance must not create a new drop entitlement.
+      assert.equal(Object.hasOwn(require(path.join(appRoot, "core/lib/legacy-kai-drop.json")).allocations, signer.getAddress()), false);
+      await until(async () => await page.locator("#earn-legacy-status").textContent() === "Not included in this drop", "Earn did not identify the wallet as outside the final snapshot");
+      assert.equal(await page.locator("#earn-wallet-kai").textContent(), "0");
+      assert.equal(await page.locator("#earn-koin-drop").textContent(), "0");
+      assert.equal(await page.locator("#earn-drop-paid").isVisible(), false);
+      assert.equal(await page.locator("#earn-drop-tx").isVisible(), false);
       const after = await readEarn(); assert.equal(after.status, 200); assert.equal(after.body.worker.running, false); assert.equal(after.body.wallet.unlocked, false);
       assert.equal((await call("status")).network.privacyMode, "local-only"); assert.equal(readJson(path.join(profile, "settings.json")).earn.autoStart, false);
       assert.ok(balanceRequests.length > 0); for (const request of balanceRequests) { assert.equal(request.address, signer.getAddress()); assert.equal(request.authorization, undefined); assert.equal(request.cookie, undefined); }
