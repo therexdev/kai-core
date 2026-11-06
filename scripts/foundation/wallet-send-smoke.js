@@ -39,8 +39,8 @@ async function main(){
  await page.locator("#wallet-send-password").fill(password);await page.locator("#wallet-send-close").click();await page.waitForFunction(()=>document.getElementById("wallet-send-password").value==="");assert.equal(await page.locator("#wallet-send-password").inputValue(),"");assert.equal(await page.locator("#wallet-send-amount").inputValue(),"");
  await page.locator("#wallet-open-send").click();await page.keyboard.press("Escape");await page.locator("#wallet-send-panel").waitFor({state:"hidden"});
  report.checks.push("Themed modal, exact KOIN/VHP maxima, mana limit, token-change reset, X/Escape closure and password clearing");
- await page.locator('[data-page="earning"]').click();assert.equal(await page.locator("#earn-legacy-status").innerText(),"Drop Date: Nov 15, 2026");assert.equal(await page.locator("#reward-today-detail,#reward-pending-detail").count(),0);assert.match(await page.locator(".product-reward-summary").innerText(),/Daily Estimated Earnings/);
- report.checks.push("Reward date and compact labels render in Core");assert.deepEqual(errors,[]);report.status="passed";
+ await page.locator('[data-page="earning"]').click();await page.waitForFunction(()=>document.getElementById("earn-legacy-status").textContent==="Not included in this drop");assert.equal(await page.locator("#earn-drop-paid").isVisible(),false);assert.equal(await page.locator("#earn-drop-tx").isVisible(),false);assert.equal(await page.locator("#reward-today-detail,#reward-pending-detail").count(),0);assert.match(await page.locator(".product-reward-summary").innerText(),/Daily Estimated Earnings/);
+ report.checks.push("Unlisted wallet drop status and compact reward labels render in Core");assert.deepEqual(errors,[]);report.status="passed";
  }catch(e){report.status="failed";report.error=e.stack;throw e;}finally{if(app)await app.close();fs.writeFileSync(path.join(output,"report.json"),JSON.stringify(report,null,2));fs.rmSync(temp,{recursive:true,force:true});}
  console.log(JSON.stringify(report));
 }
