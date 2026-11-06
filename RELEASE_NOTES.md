@@ -1,7 +1,8 @@
 # KAI Core Beta 0.7.21
 
-Fixes empty Wallet history and missing KAI airdrop payment receipts when the first RPC node has an empty account-history index.
+Adds a compact KOIN wallet summary beneath the upper sidebar menu and fixes missing wallet history and KAI airdrop receipts.
 
+- The sidebar shows your liquid KOIN balance with its estimated USD value underneath. Click it to open Wallet; hover to see all eight decimals. Missing or stale price data shows a dash, and USD price requests pause in Local-Only mode.
 - Wallet and Earn now check the remaining configured history services before accepting an empty result.
 - The drop monitor allows more time for fallback and canonical receipt verification. The exact amount, sender, recipient, KOIN contract and irreversible mainnet block must still match before **PAID** and **TX** appear.
 - Existing payments are detected automatically when Wallet or Earn refreshes. Do not resend a completed drop.

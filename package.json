@@ -32,7 +32,8 @@
     "test:language": "node scripts/foundation/language-smoke.js",
     "build:locales": "node scripts/foundation/build-locales.js",
     "test:model-storage": "node scripts/foundation/model-storage-smoke.js",
-    "test:legacy-drop": "node scripts/foundation/legacy-drop-smoke.js"
+    "test:legacy-drop": "node scripts/foundation/legacy-drop-smoke.js",
+    "test:sidebar-wallet": "node scripts/foundation/sidebar-wallet-smoke.js"
   },
   "devDependencies": {
     "electron": "^43.8.1",
