@@ -124,6 +124,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     getAddress: () => wallet.address,
     getSchedulerUrl: () => settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
   });
+  const legacyDrop = require("./lib/legacy-kai-drop").createLegacyKaiDrop({ getAddress: () => wallet.address });
   const fetchEarnings = () => legacyBalance.read();
   const { inactiveStatus, shadowStatus } = require("./lib/koin-network/status");
   let koinCache = { key: "", at: 0, data: null };
@@ -143,7 +144,12 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     return data;
   };
   const earn = {
-    legacyBalance: async () => ({ wallet: { address: wallet.address }, earnings: await fetchEarnings() }),
+    legacyBalance: async () => {
+      const address = wallet.address;
+      const [earnings, drop] = await Promise.all([fetchEarnings(), legacyDrop.read()]);
+      if (wallet.address !== address) return null;
+      return { wallet: { address }, earnings, drop };
+    },
     status: async () => ({
       wallet: wallet.status(),
       worker: worker ? worker.status() : { running: false, jobsDone: 0, receiptsAccepted: 0 },
@@ -172,6 +178,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
       }
       settings.set("earn.schedulerUrl", u);
       legacyBalance.clear();
+      legacyDrop.clear();
       syncKillSwitch().catch(() => {}); // §32: check the new scheduler's list promptly
       return earn.status();
     },
@@ -377,6 +384,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
       return p;
     },
     async stop() {
+      legacyDrop.close();
       gateway.stopModelQueue();
       for (const controller of shadowRequests) controller.abort();
       wallet.disposeCreditStorage();
