@@ -1,4 +1,10 @@
-# KAI Core Beta 0.7.21
+# KAI Core Beta 0.7.22
+
+Moves the compact KOIN/USD balance box to the top of the sidebar, directly above **Chat with KAI**. Click the box to open Wallet; it replaces the separate Wallet menu item and highlights when Wallet is open.
+
+Update through **Settings → Application updates**, or download the appropriate installer below.
+
+## Previous release: 0.7.21
 
 Adds a compact KOIN wallet summary beneath the upper sidebar menu and fixes missing wallet history and KAI airdrop receipts.
 
