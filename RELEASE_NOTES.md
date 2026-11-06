@@ -1,4 +1,17 @@
-# KAI Core Beta 0.7.19
+# KAI Core Beta 0.7.20
+
+Earn now shows the exact final KAI-to-KOIN airdrop allocation for each eligible wallet:
+
+- Amounts match the final 32-wallet drop record, using 5 KAI per KOIN and rounding to eight decimal places per wallet.
+- A green **PAID** badge and **TX** link appear after a finalized mainnet KOIN transfer matches the exact amount, recipient and designated Master Node sending wallet.
+- Payments received while Core was closed are found when Earn checks history again. Checking works with the wallet locked and earning disabled.
+- Network outages retain the fixed allocation and retry. Unrelated transfers, VHP and failed transactions do not count as this KOIN drop.
+
+This temporary display will be removed when the legacy drop is retired. It does not send funds or start earning.
+
+Update through **Settings → Check for updates → Download update → Restart and install**, or download the appropriate installer below. Update **Master KAI Koinos Node** separately in Plugins to version **0.1.7** for the new Airdrops tab.
+
+## Previous release: 0.7.19
 
 Choose where Core stores your models in **Settings → Model storage**:
 
