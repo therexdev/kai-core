@@ -1,8 +1,8 @@
 # Local model context windows
 
-Core uses the native configured context for each pinned catalog model. These are total input + output windows, not output-token limits. Users can select a smaller window in **Models → Context**; the saved choice is shared by Core Chat and plugins using Core's local runtime.
+Core uses each model's native context as the ceiling for automatic allocation. Input and output share the window. Short tasks start at 4K (or the model's smaller limit). Longer tasks allocate the next power of two that fits their estimated prompt and output allowance, bounded by the model ceiling and any advanced user cap. A sufficiently large loaded window can serve subsequent smaller tasks.
 
-| Catalog model | Default / supported ceiling | Primary configuration or model card |
+| Catalog model | Supported ceiling | Primary configuration or model card |
 | --- | ---: | --- |
 | Qwen 2.5 1.5B | 32,768 | [Qwen configuration](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/blob/main/config.json) |
 | Qwen 2.5 7B | 32,768 | [Qwen configuration](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/blob/main/config.json) |
@@ -22,16 +22,42 @@ Core uses the native configured context for each pinned catalog model. These are
 
 Sources checked November 4, 2026. Qwen's advertised 128K extension requires additional YaRN configuration; Core deliberately uses the ordinary 32K configuration and does not claim that extension. The catalog Llama 3.2 GGUF is a conversion of the original model, not Meta's separate 8K QAT release.
 
-## User choices and hardware
+## Automatic allocation and optional caps
 
-The selector offers powers of two from 4K up to the known model limit (or 2K for an imported model with a 2K native window). The 4K catalog floor preserves existing network provider capacity. **Model default** removes the package-specific override. A custom model with an unreadable header retains its previous default (4K for a new import), clearly reports an unknown model limit, and permits an explicit choice up to Core's 256K administrative ceiling. That ceiling is not a claim that an unknown model supports 256K.
+Core Chat and plugins can send ordinary inference requests without configuring context. Core estimates the prompt and reserves the larger of 512 tokens or the requested `max_tokens`. It prepares enough context for that task and verifies the engine's actual allocation. The estimate is approximate, especially for images and different tokenizers, so the engine remains the authority on exact token counts. A model that cannot load or verify sufficient capacity returns an error with no partial completion. Plugins can shorten or summarize their own history and retry.
 
-More context requires additional KV-cache memory and increases the work needed to process long prompts. Native context support does not guarantee that the maximum fits a particular computer. Choose a smaller window if startup fails or memory use is too high; Core does not silently substitute a smaller context. Existing minimum-RAM hints describe model weights and are not full-context memory estimates.
+The collapsed **Automatic context** control offers an optional upper limit. A saved limit applies across local requests, while each plugin's `context_tokens` request applies only to that call. **Automatic** restores the model ceiling. Changing the limit waits for active requests and preparation to finish. Catalog models retain a 4K floor for provider work. Existing minimum-RAM hints describe weights, and full-context memory requirements depend on the model and hardware.
 
-New imports read at most the first 1 MiB of GGUF v2/v3 metadata, looking for `general.architecture` and its matching `*.context_length`. Existing imports are inspected once during startup. Unknown, inaccessible, oversized or malformed metadata falls back without changing model files. Settings remain keyed to package identity, so changing an alias does not lose a saved choice.
+New imports read at most the first 1 MiB of GGUF v2/v3 metadata, looking for `general.architecture` and its matching `*.context_length`. Existing imports are inspected once during startup. Unknown metadata keeps a conservative 4K ceiling for a new import. An informed owner can choose a higher ceiling up to Core's 256K administrative maximum. Package identity preserves saved caps through alias changes.
 
-## Runtime and consumers
+## Public plugin API
 
-llama.cpp receives the effective `--ctx-size` and one parallel slot, matching Core's serialized generation queue. Ollama registrations include `num_ctx` and a context-specific model name, so an old cached registration cannot silently retain 4K. The same alias reloads on its next request when its context changed. Settings cannot change while a generation or model preparation is active. Idle provider polling does not block the setting; the catalog floor retains the existing 4K network capacity.
+```js
+// Automatic context for this task.
+const answer = await api.models.chat({
+  model: "koinos-smart",
+  messages: [{ role: "user", content: "Summarize this document…" }],
+  max_tokens: 1024,
+});
 
-The public model list exposes `contextSize`, `defaultContextSize`, `minContextSize`, `maxContextSize`, `contextOverride` and `contextLimitKnown`. Plugins should refresh that metadata before budgeting history. Core Chat uses a context-aware history budget with room for its reply, rather than the old 24 KB / 15-turn ceiling. The gateway reserves at least its normal headroom and the requested `max_tokens`; its character-based token estimate is approximate and the engine remains the final tokenizer authority. Core Chat's output limit and network request/payment limits are independent and unchanged.
+// An optional minimum for a task with a specific context requirement.
+const larger = await api.models.chat({
+  model: "koinos-smart",
+  messages,
+  max_tokens: 2048,
+  context_tokens: 32768,
+});
+console.log(larger.kai_context); // { contextSize: 32768, verified: true }
+```
+
+`context_tokens` is a positive integer denoting minimum total input plus output capacity for one request. Core also reserves enough for the estimated prompt and requested output when these exceed that minimum. Requests above the model/user ceiling fail before model preparation. Allocations are queued and shared safely, with active generations retaining their model until they finish. Preparing a model alone uses the small baseline. A plugin can read the actual allocation from `kai_context` on `api.models.chat`, or the `x-kai-context-size` response header from `api.models.request`, including streaming responses. The model list's `contextSize` remains the permitted ceiling. `api.runtime.status()` reports the active `contextSize`, `requestedContextSize` and `contextVerified` state.
+
+Plugins choose which messages, documents and memories to send. A manual settings action and the `models.manage` permission are unnecessary for ordinary inference or an optional context requirement. The usual `inference.local` grant applies. Context requirements apply independently to each request and leave saved model preferences intact.
+
+## Runtime verification and provider work
+
+llama.cpp uses one parallel slot and Core reads `/props` to verify the per-slot `n_ctx`. Ollama registers each context size separately, warms a missing runner, and reads `/api/ps` to verify its `context_length`. Core checks Ollama again before acquiring a generation because the daemon can evict a model independently. Switching away releases Core's previous Ollama registration from memory. Missing or insufficient runtime evidence prevents serving the request.
+
+Provider preparation uses the baseline. Signed network jobs allocate for their quoted input plus output tokens. The existing prepaid tariff determines which context requirements network clients can request. A larger requested window is rejected during request validation when it exceeds that tariff, before creating spending terms. Larger paid-network windows require a matching scheduler/protocol rollout.
+
+The engine verification approach follows the contribution in [kaiapp PR #10](https://github.com/therexdev/kaiapp/pull/10). This implementation integrates it with Foundation's per-request API and generation queue.

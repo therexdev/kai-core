@@ -1,5 +1,7 @@
 "use strict";
 
+const { contextPlan } = require("./model-context");
+
 /*
  * Runtime manager (spec §4/§6): owns which model is loaded on which runtime.
  * M1 scope: one active runtime + one loaded model at a time; the gateway
@@ -63,6 +65,7 @@ class RuntimeManager {
     this.runtime = null;
     this.activeAlias = null;
     this.activeContextSize = null;
+    this.requestedContextSize = null;
     this._loading = null; // in-flight ensure() promise
     this._stopped = false; // stop() raced against an in-flight load
     this._testedBins = new Set(); // self-test once per binary per session
@@ -99,8 +102,18 @@ class RuntimeManager {
     return this.models.setContextSize(alias, contextSize);
   }
 
-  _matchesContext(alias) {
-    return this.activeContextSize === (this.models.resolveAlias(alias).contextSize || 4096);
+  _matchesContext(alias, required) {
+    const plan = contextPlan(this.models.resolveAlias(alias), required);
+    return this.activeContextSize >= plan.required && this.requestedContextSize <= plan.limit;
+  }
+
+  _adoptContext(runtime, requested) {
+    const actual = runtime.contextSize;
+    if (!Number.isSafeInteger(actual) || actual < requested) {
+      throw Object.assign(Error(`The engine could not verify the requested ${requested}-token context window`), { code: "context_unavailable" });
+    }
+    this.activeContextSize = actual;
+    this.requestedContextSize = requested;
   }
 
   networkWorkPaused() { return this._localCheckRequests > 0; }
@@ -172,6 +185,8 @@ class RuntimeManager {
     return {
       activeAlias: this.activeAlias,
       contextSize: this.activeContextSize,
+      requestedContextSize: this.requestedContextSize,
+      contextVerified: !!this.runtime?.status().running && Number.isSafeInteger(this.activeContextSize) && this.runtime.contextSize === this.activeContextSize,
       loading: !!this._loading,
       loadingAlias: this._loading?.alias || null,
       loadingStage: this._loading?.stage || null,
@@ -213,7 +228,7 @@ class RuntimeManager {
     );
   }
 
-  async ensure(alias, { signal } = {}) {
+  async ensure(alias, { signal, contextSize } = {}) {
     const epoch = this._stopEpoch;
     this._assertDemand(epoch, signal);
     this._stopped = false; // new demand revives the manager
@@ -222,20 +237,21 @@ class RuntimeManager {
       if (this.activeAlias === alias && this.runtime?.status().running) this.stop();
       throw error;
     }
+    const plan = contextPlan(this.models.resolveAlias(alias), contextSize);
     // A cancelled caller can leave the queue immediately. It must not start
     // an orphan model load when the preceding model eventually becomes ready.
     for (;;) {
       this._assertDemand(epoch, signal);
       const loading = this._loading;
       if (!loading) break;
-      if (loading.alias === alias && !loading.controller.signal.aborted) return this._joinLoad(loading, signal);
+      if (loading.alias === alias && loading.contextSize >= plan.contextSize && loading.contextSize <= plan.limit && !loading.controller.signal.aborted) return this._joinLoad(loading, signal);
       await waitWithSignal(loading.promise.catch(() => {}), signal);
     }
     this._assertDemand(epoch, signal);
-    if (this.activeAlias === alias && this._matchesContext(alias) && this.runtime?.status().running) return this.runtime.endpoint;
-    const loading = { alias, stage: "waiting", controller: new AbortController(), waiters: new Set(), settled: false };
+    if (this.activeAlias === alias && this._matchesContext(alias, plan.required) && this.runtime?.status().running) return this.runtime.endpoint;
+    const loading = { alias, contextSize: plan.contextSize, stage: "waiting", controller: new AbortController(), waiters: new Set(), settled: false };
     this._loading = loading;
-    loading.promise = Promise.resolve().then(() => this._load(alias, loading.controller.signal)).finally(() => {
+    loading.promise = Promise.resolve().then(() => this._load(alias, loading.controller.signal, plan.contextSize)).finally(() => {
       loading.settled = true;
       if (this._loading === loading) this._loading = null;
     });
@@ -296,24 +312,39 @@ class RuntimeManager {
 
   /** One local generation at a time, in request order. A second plugin cannot
    * consume the first request's memory/compute or repeatedly switch its model. */
-  async acquireFor(alias, { signal } = {}) {
+  async acquireFor(alias, { signal, contextSize } = {}) {
     const epoch = this._stopEpoch;
     const releaseSlot = await this._generationSlot(alias, signal);
     try {
       for (;;) {
         this._assertDemand(epoch, signal);
-        const endpoint = await this.ensure(alias, { signal });
+        const endpoint = await this.ensure(alias, { signal, contextSize });
         this._assertDemand(epoch, signal);
-        if (this.activeAlias !== alias || !this._matchesContext(alias) || !this.runtime?.status().running) continue;
+        if (this.activeAlias !== alias || !this._matchesContext(alias, contextSize) || !this.runtime?.status().running) continue;
+        const runtime = this.runtime;
         this._inflight += 1;
         let done = false;
-        return { endpoint, release: () => {
+        const release = () => {
           if (done) return;
           done = true;
           this._inflight = Math.max(0, this._inflight - 1);
           if (!this._inflight) for (const wake of this._drainWaiters.splice(0)) wake();
           releaseSlot();
-        } };
+        };
+        try {
+          // Hold the engine before awaiting verification so a concurrent
+          // model preparation cannot switch it during an Ollama warm-up.
+          if (runtime.status().kind === "ollama" && runtime.verifyContext) {
+            await runtime.verifyContext(this.requestedContextSize, { signal });
+            this._assertDemand(epoch, signal);
+            this._adoptContext(runtime, this.requestedContextSize);
+          }
+          return { endpoint, contextSize: this.activeContextSize, release };
+        } catch (error) {
+          if (this.runtime === runtime) this.activeContextSize = null;
+          release();
+          throw error;
+        }
       }
     } catch (error) { releaseSlot(); throw error; }
   }
@@ -357,7 +388,7 @@ class RuntimeManager {
     });
   }
 
-  async _load(alias, signal) {
+  async _load(alias, signal, contextSize) {
     signal?.throwIfAborted();
     await this._runtimeStopPromise;
     signal?.throwIfAborted();
@@ -390,14 +421,14 @@ class RuntimeManager {
         const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
         this._loadStage(signal, "starting");
         switching = true;
-        await rt.start({ modelPath, sha256: resolved.sha256, modelName, contextSize: resolved.contextSize || 4096, signal });
+        await rt.start({ modelPath, sha256: resolved.sha256, modelName, contextSize, signal });
+        this._adoptContext(rt, contextSize);
         signal?.throwIfAborted();
         if (this._stopped) {
           this.stop();
           throw new Error("Core is stopping");
         }
         this.activeAlias = alias;
-        this.activeContextSize = resolved.contextSize || 4096;
         this.lastLoadError = null;
         return rt.endpoint;
       } catch (e) {
@@ -502,12 +533,12 @@ class RuntimeManager {
       this._loadStage(signal, "starting");
       try { await runtime.start({
         modelPath,
-        contextSize: resolved.contextSize || 4096,
+        contextSize,
         gpuLayers,
         sizeBytes: resolved.sizeBytes || 0,
         signal,
         extraArgs: [...(mmprojPath ? ["--mmproj", mmprojPath] : []), ...generationArgs(resolved.generation)],
-      }); signal?.throwIfAborted(); }
+      }); signal?.throwIfAborted(); this._adoptContext(runtime, contextSize); }
       catch (error) { await runtime.stop(); throw error; }
       return runtime;
     };
@@ -552,7 +583,9 @@ class RuntimeManager {
           // "exited during startup" without those codes stays retryable —
           // port conflicts and OOM are transient.
           const hardCrash = /exit code 32212\d+|SIGSEGV|SIGILL/i.test(String(e.message));
-          if (this.state && (hardCrash || /self-test failed/i.test(String(e.message))) && cap !== "cpu") {
+          // A large allocation can fail on an otherwise working GPU build.
+          // Only baseline crashes or model-independent self-tests classify it.
+          if (this.state && ((hardCrash && contextSize <= 4096) || /self-test failed/i.test(String(e.message))) && cap !== "cpu") {
             const bad = this.state.get("badBuilds", {});
             try {
               bad[await this.provisioner.ensure(kind, { cap, signal })] = {
@@ -581,7 +614,7 @@ class RuntimeManager {
       if (why) this.onEvent({ type: "runtime:fallback", from: "llamacpp", to: fb.status().kind, reason: why });
       const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
       this._loadStage(signal, "starting");
-      try { await fb.start({ modelPath, sha256: resolved.sha256, modelName, contextSize: resolved.contextSize || 4096, signal }); signal?.throwIfAborted(); }
+      try { await fb.start({ modelPath, sha256: resolved.sha256, modelName, contextSize, signal }); signal?.throwIfAborted(); this._adoptContext(fb, contextSize); }
       catch (error) { await fb.stop(); throw error; }
       return fb;
     };
@@ -615,7 +648,6 @@ class RuntimeManager {
     if (signal?.aborted) { await runtime.stop(); signal.throwIfAborted(); }
     this.runtime = runtime;
     this.activeAlias = alias;
-    this.activeContextSize = resolved.contextSize || 4096;
     // stop() may have run while this load was in flight (quick app quit
     // during the warm start): the child it never saw must not outlive us.
     if (this._stopped) {
@@ -638,6 +670,7 @@ class RuntimeManager {
     this.runtime = null;
     this.activeAlias = null;
     this.activeContextSize = null;
+    this.requestedContextSize = null;
     return Promise.all([this._runtimeStopPromise, loading?.promise.catch(() => {})]).then(() => undefined);
   }
 }

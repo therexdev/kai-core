@@ -35,7 +35,7 @@ export interface ModelAlias {
   label?: string;
   status: string;
   blurb?: string;
-  /** Effective local input + output token window; respects the user's saved model setting. */
+  /** Local context ceiling, including an optional user cap. Actual allocation is task-dependent. */
   contextSize?: number;
   defaultContextSize?: number;
   minContextSize?: number;
@@ -58,10 +58,15 @@ export interface ModelRequest {
   messages: ChatMessage[];
   stream?: boolean;
   max_tokens?: number;
+  /** Optional minimum total input + output window for this request. Core sizes it automatically when omitted.
+   * Local requests stay within the model/user ceiling. Network requests must fit the approved tariff. */
+  context_tokens?: number;
   temperature?: number;
   [option: string]: unknown;
 }
 export interface ChatCompletion {
+  /** Verified local allocation for this response, when served by a supporting Core. */
+  kai_context?: { contextSize: number; verified: true };
   id?: string;
   model?: string;
   choices?: Array<{ index?: number; message?: { role?: string; content?: string }; finish_reason?: string }>;

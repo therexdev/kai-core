@@ -257,7 +257,23 @@ class LlamaCppRuntime {
       pid: this.child?.pid ?? null,
       endpoint: this.child ? this.endpoint : null,
       model: this.model,
+      contextSize: this.child ? this.contextSize ?? null : null,
     };
+  }
+
+  async verifyContext(requested, { signal } = {}) {
+    this.contextSize = null;
+    const response = await fetch(`${this.endpoint}/props`, {
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(5000)]),
+    });
+    if (!response.ok) { await response.body?.cancel(); throw Error("The engine's context window could not be verified"); }
+    const props = await response.json();
+    const actual = props.default_generation_settings?.n_ctx;
+    if (props.total_slots !== 1 || !Number.isSafeInteger(actual) || actual < requested) {
+      throw Error(`The engine could not provide a verified ${requested}-token context window`);
+    }
+    this.contextSize = actual;
+    return actual;
   }
 
   async _waitHealthy(timeoutMs = HEALTH_TIMEOUT_MS, signal) {
@@ -303,6 +319,7 @@ class LlamaCppRuntime {
     signal?.throwIfAborted();
     if (this.child) throw new Error("Runtime already running — stop it first");
     this._stopping = false;
+    this.contextSize = null;
     this._startError = null;
     this.port = this._fixedPort ?? (await freePort(this.host));
     signal?.throwIfAborted();
@@ -385,6 +402,7 @@ class LlamaCppRuntime {
       // the patience with the weights instead of failing a healthy load.
       const budget = Math.max(HEALTH_TIMEOUT_MS, Math.ceil((sizeBytes / 1e9) * 30000));
       await this._waitHealthy(budget, signal);
+      await this.verifyContext(contextSize, { signal });
       signal?.throwIfAborted();
     } catch (e) {
       const tail = stderrTail.slice(-600);
@@ -402,6 +420,7 @@ class LlamaCppRuntime {
     this._stopping = true;
     this.child = null;
     this.model = null;
+    this.contextSize = null;
     // Wait for the old process to leave before loading another model. Merely
     // sending SIGTERM let two model-sized processes overlap during switches.
     const stopped = new Promise(resolve => {

@@ -134,7 +134,14 @@ function createFoundationApi(ctx, record) {
         const response = await fetch(`http://127.0.0.1:${core.gateway.port}/core/embeddings`, { method:"POST", signal:combined(extraSignal),redirect:"error",headers:{"content-type":"application/json",...(core.gateway.coreToken?{authorization:`Bearer ${core.gateway.coreToken}`}:{})},body });
         active(); const result = await response.json(); active(); if (!response.ok) throw Error(result?.error?.message || "Local embeddings failed"); return result;
       },
-      async chat(input,s){const r=await modelRequest({...input,stream:false},s),j=await r.json();if(!r.ok)throw Error(j?.error?.message||"Model request failed");return j;},
+      async chat(input, extraSignal) {
+        const response = await modelRequest({ ...input, stream: false }, extraSignal);
+        const result = await response.json();
+        if (!response.ok) throw Object.assign(Error(result?.error?.message || "Model request failed"), { code: result?.error?.type });
+        const contextSize = Number(response.headers.get("x-kai-context-size"));
+        if (Number.isSafeInteger(contextSize) && contextSize > 0) result.kai_context = { contextSize, verified: true };
+        return result;
+      },
     }),
     runtime:Object.freeze({status(){requireGrant("models.read");return structuredClone(core.runtime.status());}}),
     network:Object.freeze({

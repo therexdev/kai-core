@@ -40,12 +40,12 @@ async function current(page) { return page.evaluate(async () => (await window.ka
     assert.ok(!(await select.locator("option").allTextContents()).some(text => /65,536/.test(text)));
     await select.selectOption("8192");
     await page.waitForFunction(async () => (await window.kaiCore.call("status")).models.find(model => model.alias === "koinos-smart").contextSize === 8192);
-    checks.push("Qwen defaults to 32K, rejects choices above its limit, and saves an 8K override through the real UI");
+    checks.push("Qwen automatically supports up to 32K and saves an optional 8K ceiling through the real UI");
     await page.screenshot({ path: path.join(output, "model-context.png") });
     for (const language of ["es", "pt-BR", "fr", "de", "en"]) {
       await page.evaluate(language => window.kaiCore.locale.set(language), language);
       await page.waitForFunction(language => document.documentElement.lang === language, language);
-      const label = require("../../ui-core/locales/core.json")[language]?.["Context window"] || "Context window";
+      const label = require("../../ui-core/locales/core.json")[language]?.["Advanced context limit"] || "Advanced context limit";
       assert.equal(await card.locator(".model-context-label span").innerText(), label);
       assert.equal(await select.inputValue(), "8192");
     }
@@ -56,7 +56,7 @@ async function current(page) { return page.evaluate(async () => (await window.ka
     await reopened.locator("select").selectOption("default");
     await page.waitForFunction(async () => (await window.kaiCore.call("status")).models.find(model => model.alias === "koinos-smart").contextSize === 32768);
     assert.equal((await current(page)).contextOverride, null);
-    checks.push("Model default restores 32K without downloading weights");
+    checks.push("Automatic restores the 32K ceiling without downloading weights");
     assert.deepEqual(errors, []); await quit();
     fs.writeFileSync(path.join(output, "report.json"), JSON.stringify({ ok: true, syntheticProfile: true, syntheticLock: process.env.KAI_SMOKE_SYNTHETIC_LOCK === "1", deviceInferenceTested: false, checks }, null, 2));
     console.log(JSON.stringify({ ok: true, output, checks }, null, 2));

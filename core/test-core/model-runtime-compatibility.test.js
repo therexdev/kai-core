@@ -9,20 +9,21 @@ function fixture({ alias = "lfm3-1.7b", preferFallback = false, failLlama = fals
   const resolved = { ...source, packageId: catalog.aliases[alias].package, ...(projectorError ? { vision: true, mmproj: {} } : {}) };
   const starts = [], downloads = [], fallbacks = [];
   const models = { resolveAlias: () => resolved, ensurePackage: async id => { downloads.push(id); return "/fixture/model.gguf"; }, ensureMmproj: async () => { throw projectorError; } };
-  const makeRuntime = () => ({ endpoint: "http://fixture", status: () => ({ kind: "llamacpp", running: true }), stop() {}, start: async options => {
+  const makeRuntime = () => ({ endpoint: "http://fixture", status: () => ({ kind: "llamacpp", running: true }), stop() {}, async start(options) {
+    this.contextSize = options.contextSize;
     starts.push(options);
     if (failLlama) throw Error("Fixture engine unavailable");
   } });
   const runtime = new RuntimeManager({ models, makeRuntime, preferFallback, makeFallback: async () => {
     fallbacks.push(true);
-    return { endpoint: "http://fallback", status: () => ({ kind: "ollama", running: true }), stop() {}, start: async () => {} };
+    return { endpoint: "http://fallback", status: () => ({ kind: "ollama", running: true }), stop() {}, async start({ contextSize }) { this.contextSize = contextSize; } };
   } });
   return { runtime, starts, downloads, fallbacks, resolved };
 }
 
 test("LFM startup uses bounded reasoning and its own sampling defaults without changing existing model defaults", async () => {
   const f = fixture(); await f.runtime.ensure("lfm3-1.7b");
-  assert.equal(f.starts[0].contextSize, 262144);
+  assert.equal(f.starts[0].contextSize, 4096);
   const args = f.starts[0].extraArgs;
   for (const [flag, value] of [["--reasoning", "on"], ["--reasoning-format", "deepseek"], ["--reasoning-budget", "0"], ["--temp", "0.1"], ["--top-k", "50"], ["--repeat-penalty", "1.1"]]) assert.equal(args[args.indexOf(flag) + 1], value);
   const old = fixture({ alias: "koinos-fast" }); await old.runtime.ensure("koinos-fast");
@@ -74,7 +75,7 @@ test("a queued fallback switch keeps an active caller's served model until its l
   let model = "old-model", starts = 0;
   f.runtime._llamaDead = true;
   f.runtime.activeAlias = "old-model";
-  f.runtime.runtime = { endpoint: "http://fallback", status: () => ({ kind: "ollama", running: true }), servedName: () => model, stop() {}, start: async options => { starts++; model = options.modelName; } };
+  f.runtime.runtime = { endpoint: "http://fallback", status: () => ({ kind: "ollama", running: true }), servedName: () => model, stop() {}, async start(options) { this.contextSize = options.contextSize; starts++; model = options.modelName; } };
   const lease = f.runtime.acquireCurrent("old-model");
   const switching = f.runtime.ensure("koinos-fast");
   await new Promise(resolve => setImmediate(resolve));

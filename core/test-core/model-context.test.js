@@ -13,7 +13,7 @@ function fixture(t) {
   models.ensurePackage = async packageId => packageId;
   const runtime = new RuntimeManager({ models, makeRuntime: () => {
     let running = false;
-    return { endpoint: "http://fixture", status: () => ({ running }), async start(options) { starts.push(options); running = true; }, async stop() { stops.push(true); running = false; } };
+    return { endpoint: "http://fixture", status: () => ({ running }), async start(options) { starts.push(options); this.contextSize = options.contextSize; running = true; }, async stop() { stops.push(true); running = false; } };
   } });
   t.after(() => runtime.stop());
   return { root, models, runtime, starts, stops, reopen };
@@ -49,7 +49,7 @@ test("a per-package choice survives restart, leaves other models alone and reset
 
 test("changing context reloads the same alias on its next request and cannot interrupt an active reply", async t => {
   const f = fixture(t);
-  const hold = await f.runtime.acquireFor("koinos-smart");
+  const hold = await f.runtime.acquireFor("koinos-smart", { contextSize: 32768 });
   assert.equal(f.starts[0].contextSize, 32768);
   assert.throws(() => f.runtime.configureContext("koinos-smart", 8192), /active model requests/);
   assert.equal(f.stops.length, 0); hold.release();
@@ -57,10 +57,107 @@ test("changing context reloads the same alias on its next request and cannot int
   f.runtime.configureContext("koinos-smart", 8192);
   f.runtime._networkWork = 0;
   assert.equal(f.runtime.status().contextSize, 32768);
-  const next = await f.runtime.acquireFor("koinos-smart");
+  const next = await f.runtime.acquireFor("koinos-smart", { contextSize: 8000 });
   assert.equal(f.stops.length, 1); assert.deepEqual(f.starts.map(start => start.contextSize), [32768, 8192]);
   assert.equal(f.runtime.status().contextSize, 8192); next.release();
   await f.runtime.ensure("koinos-smart"); assert.equal(f.starts.length, 2);
+});
+
+test("automatic tasks grow context, reuse a sufficient window and never change the saved model ceiling", async t => {
+  const f = fixture(t);
+  const first = await f.runtime.acquireFor("koinos-smart");
+  assert.equal(first.contextSize, 4096);
+  let secondReady = false;
+  const second = f.runtime.acquireFor("koinos-smart", { contextSize: 12000 }).then(lease => { secondReady = true; return lease; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(secondReady, false);
+  assert.equal(f.stops.length, 0);
+  first.release();
+  const larger = await second;
+  assert.equal(larger.contextSize, 16384);
+  larger.release();
+  const smaller = await f.runtime.acquireFor("koinos-smart");
+  assert.equal(smaller.contextSize, 16384);
+  smaller.release();
+  assert.deepEqual(f.starts.map(start => start.contextSize), [4096, 16384]);
+  assert.equal(f.models.resolveAlias("koinos-smart").contextSize, 32768);
+  assert.equal(f.models.resolveAlias("koinos-smart").contextOverride, null);
+  await assert.rejects(f.runtime.acquireFor("koinos-smart", { contextSize: 65536 }), /32768-token limit/);
+  assert.equal(f.starts.length, 2);
+});
+
+test("a reported smaller window cannot satisfy a larger plugin request", async t => {
+  const f = fixture(t);
+  f.runtime.makeRuntime = () => ({ contextSize: 4096, endpoint: "http://fixture", status: () => ({ running: true }), async start() {}, async stop() {} });
+  await assert.rejects(f.runtime.acquireFor("koinos-smart", { contextSize: 32768 }), /could not verify/);
+  assert.equal(f.runtime.status().contextVerified, false);
+  assert.equal(f.runtime.status().inference.activeAlias, null);
+  assert.equal(f.models.resolveAlias("koinos-smart").contextOverride, null);
+});
+
+test("Ollama verification holds the engine against concurrent model preparation", async t => {
+  const f = fixture(t);
+  let finishVerification, stops = 0;
+  f.runtime.makeRuntime = () => ({
+    endpoint: "http://fixture", status: () => ({ running: true, kind: "ollama" }),
+    async start({ contextSize }) { this.contextSize = contextSize; },
+    async stop() { stops++; },
+    async verifyContext() { await new Promise(resolve => { finishVerification = resolve; }); },
+  });
+  const pending = f.runtime.acquireFor("koinos-smart");
+  await new Promise(resolve => setImmediate(resolve));
+  const preparing = f.runtime.ensure("koinos-smart", { contextSize: 32768 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stops, 0);
+  finishVerification();
+  const lease = await pending;
+  assert.equal(lease.contextSize, 4096);
+  assert.equal(stops, 0);
+  lease.release();
+  await preparing;
+  assert.equal(stops, 1);
+  assert.equal(f.runtime.status().contextSize, 32768);
+});
+
+test("runtime verification reads the live engine and refuses wrong slots, missing runners and undersized contexts", async t => {
+  const http = require("node:http"), { LlamaCppRuntime } = require("../lib/runtimes/llamacpp");
+  let size = 32768, slots = 1, runnerName = "qwen-ctx32768:latest", warmups = 0;
+  const engine = http.createServer((req, res) => {
+    req.resume();
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/props") return res.end(JSON.stringify({ total_slots: slots, default_generation_settings: { n_ctx: size } }));
+    if (req.url === "/api/ps") return res.end(JSON.stringify({ models: [{ name: runnerName, context_length: size }] }));
+    warmups++;
+    res.end("{}");
+  });
+  await new Promise(resolve => engine.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { engine.closeAllConnections(); await new Promise(resolve => engine.close(resolve)); });
+  const llama = new LlamaCppRuntime({ binPath: "/fixture", port: engine.address().port });
+  const ollama = new OllamaRuntime({ port: engine.address().port });
+  ollama.model = "qwen-ctx32768";
+  assert.equal(await llama.verifyContext(32768), 32768);
+  assert.equal(await ollama.verifyContext(32768), 32768);
+  assert.equal(warmups, 0);
+  slots = 2;
+  await assert.rejects(llama.verifyContext(32768), /verified/);
+  slots = 1; size = 4096;
+  await assert.rejects(llama.verifyContext(32768), /verified/);
+  await assert.rejects(ollama.verifyContext(32768), /verified/);
+  size = 32768; runnerName = "someone-elses-model";
+  await assert.rejects(ollama.verifyContext(32768), /verified/);
+  assert.equal(warmups, 1);
+  assert.equal(ollama.contextSize, null);
+});
+
+test("network context requirements are checked against approved tariffs before creating spending terms", () => {
+  const { request } = require("../../electron/koin-chat-flow");
+  const config = { model: "qwen", maxOutput: 256 };
+  const tariffs = [{ model: "qwen", contextTokens: 4096, maxOutputTokens: 256 }];
+  const input = { model: "koinos-network:qwen", messages: [{ role: "user", content: "Hello" }] };
+  const automatic = request(input, config, tariffs);
+  assert.deepEqual(request({ ...input, context_tokens: 4096 }, config, tariffs), automatic);
+  for (const context_tokens of [32768, 0, null, "4096", 4096.5])
+    assert.throws(() => request({ ...input, context_tokens }, config, tariffs), /4096 context tokens/);
 });
 
 test("bounded GGUF metadata discovers a native context and rejects malformed or unsupported headers", () => {
@@ -87,6 +184,7 @@ test("new and existing custom imports get their GGUF context, without losing pat
 
 test("Ollama registrations carry num_ctx and use a distinct name for each context", async () => {
   const runtime = new OllamaRuntime(), calls = [];
+  runtime._runningContext = async () => Number(runtime.model.split("-ctx")[1]);
   runtime._api = async (route, body) => { calls.push({ route, body }); return new Response("{}", { status: route === "/api/show" ? 404 : 200 }); };
   // A real tiny file keeps the upload-stream path exercised without large weights.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-ollama-context-")), file = path.join(root, "model.gguf"); fs.writeFileSync(file, gguf(32768));
@@ -117,19 +215,23 @@ test("local chat retains more than 24 KB and 15 turns when the selected window a
 });
 
 test("gateway accepts a prompt above 4K under 32K, enforces saved reductions and reserves requested output", async t => {
-  const f = fixture(t); let forwarded = 0;
+  const f = fixture(t); let forwarded = 0, forwardedBody;
   const http = require("node:http");
-  const engine = http.createServer((req, res) => { req.resume(); req.on("end", () => { forwarded++; res.setHeader("content-type", "application/json"); res.end('{"choices":[{"message":{"content":"ok"}}]}'); }); });
+  const engine = http.createServer((req, res) => { let raw = ""; req.on("data", chunk => { raw += chunk; }); req.on("end", () => { forwarded++; forwardedBody = JSON.parse(raw); res.setHeader("content-type", "application/json"); res.end('{"choices":[{"message":{"content":"ok"}}]}'); }); });
   await new Promise(resolve => engine.listen(0, "127.0.0.1", resolve));
-  f.runtime.makeRuntime = () => ({ endpoint: `http://127.0.0.1:${engine.address().port}`, status: () => ({ running: true }), start: async () => {}, stop: async () => {} });
+  f.runtime.makeRuntime = () => ({ endpoint: `http://127.0.0.1:${engine.address().port}`, status: () => ({ running: true }), async start({ contextSize }) { this.contextSize = contextSize; }, stop: async () => {} });
   const gateway = new Gateway({ port: 0, models: f.models, runtime: f.runtime, keys: { required: () => false } }); await gateway.listen();
   t.after(async () => { await gateway.close(); engine.closeAllConnections(); await new Promise(resolve => engine.close(resolve)); });
   const post = (route, body) => fetch(`http://127.0.0.1:${gateway.port}${route}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const request = { model: "koinos-smart", messages: [{ role: "user", content: "x".repeat(24000) }], max_tokens: 1024, kai_private_desktop: true };
-  let reply = await post("/core/chat/completions", request); assert.equal(reply.status, 200); await reply.text();
+  let reply = await post("/core/chat/completions", request); assert.equal(reply.status, 200); assert.equal(reply.headers.get("x-kai-context-size"), "8192"); await reply.text();
+  reply = await post("/core/chat/completions", { ...request, context_tokens: 32768 });
+  assert.equal(reply.status, 200); assert.equal(reply.headers.get("x-kai-context-size"), "32768"); await reply.text();
+  assert.equal(forwardedBody.context_tokens, undefined);
+  assert.equal(f.models.resolveAlias("koinos-smart").contextOverride, null);
   reply = await post("/core/models/context", { alias: "koinos-smart", contextSize: 4096 }); assert.equal(reply.status, 200); await reply.text();
   reply = await post("/core/chat/completions", request); assert.equal(reply.status, 400); await reply.text();
   reply = await post("/core/models/context", { alias: "koinos-smart", contextSize: 65536 }); assert.equal(reply.status, 400); await reply.text();
   reply = await post("/core/chat/completions", { ...request, messages: [{ role: "user", content: "x".repeat(8000) }], max_tokens: 3000 });
-  assert.equal(reply.status, 400); await reply.text(); assert.equal(forwarded, 1);
+  assert.equal(reply.status, 400); await reply.text(); assert.equal(forwarded, 2);
 });

@@ -203,7 +203,7 @@ test("cancelling a model-library request preserves a shared real model download 
   const { RuntimeManager } = require("../lib/runtime-manager"), f = realModels(t); let stream;
   t.mock.method(global, "fetch", async () => new Response(new ReadableStream({ start(controller) { stream = controller; } })));
   const runtime = new RuntimeManager({ models: f.models, makeRuntime: () => {
-    let running = false; return { endpoint: "http://fixture", status: () => ({ running, kind: "llamacpp" }), start: async () => { running = true; }, stop: () => { running = false; } };
+    let running = false; return { endpoint: "http://fixture", status: () => ({ running, kind: "llamacpp" }), async start({ contextSize }) { this.contextSize = contextSize; running = true; }, stop: () => { running = false; } };
   } });
   t.after(() => runtime.stop());
   const queue = new ModelLoadQueue({ models: f.models, runtime }); queue.enqueue("b");

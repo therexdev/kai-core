@@ -268,7 +268,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       }
       const selectedLocal = state.models.find(model => model.alias === state.selected.local);
       $("chat-input").maxLength = network ? 16000 : Math.min(8 * 1024 * 1024, (selectedLocal?.contextSize || 4096) * 8);
-      if (!network && selectedLocal?.contextSize) KaiLocale.setText($("chat-model-detail"), KaiLocale.message`Runs locally · ${selectedLocal.contextSize.toLocaleString()} token context window`);
+      if (!network && selectedLocal?.contextSize) KaiLocale.setText($("chat-model-detail"), KaiLocale.message`Automatic local context · up to ${selectedLocal.contextSize.toLocaleString()} tokens`);
       $("chat-messages").hidden = !turns.length; $("chat-empty").hidden = !!turns.length;
       $("chat-setup").hidden = !!picked?.available && (!network || state.privacyMode !== "local-only");
       KaiLocale.setText($("chat-setup"), (network ? (state.privacyMode === "local-only" ? KaiLocale.message(["Open Settings"]) : KaiLocale.message(["Open Network"])) : KaiLocale.message(["Open Models"])));

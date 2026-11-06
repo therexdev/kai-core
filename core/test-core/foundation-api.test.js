@@ -50,6 +50,21 @@ test("network inference requires spending capability and carries plugin identity
   const f=fixture(t);await f.api.models.chat({model:"koinos-network:test",messages:[]});const call=f.calls.find(c=>c[0]==="payment");assert.equal(call[3].pluginId,"community.test");assert.equal(call[3].fingerprint,"a".repeat(64));
   const denied=fixture(t,{permissions:["inference.network"]});await assert.rejects(denied.api.models.chat({model:"koinos-network:test",messages:[]}),/wallet.authorize/);
 });
+test("plugins can optionally request context through the shared SDK and read verified response metadata", async t => {
+  const first = fixture(t, { permissions: ["inference.local"] });
+  const second = fixture(t, { id: "community.other", permissions: ["inference.local"] });
+  const sent = [];
+  mockFetch(t, async (_url, options) => {
+    sent.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ready" } }] }), { headers: { "x-kai-context-size": "32768" } });
+  });
+  const result = await first.api.models.chat({ model: "local-model", messages: [], context_tokens: 32768 });
+  await second.api.models.chat({ model: "local-model", messages: [] });
+  assert.equal(sent[0].context_tokens, 32768);
+  assert.equal(sent[1].context_tokens, undefined);
+  assert.deepEqual(result.kai_context, { contextSize: 32768, verified: true });
+  assert.equal(first.calls.length, 0, "inference requires no model-settings confirmation");
+});
 test("native approvals require this exact visible plugin document before and after review",async t=>{
   const f=fixture(t);f.setVisible(false);assert.equal(await f.api.desktop.confirm("Do work?","Bounded details"),false);f.setVisible(true);
   f.context.electron.dialog.showMessageBox=async()=>{f.wc.mainFrame={url:"kai-plugin://community.other/index.html"};return{response:1};};

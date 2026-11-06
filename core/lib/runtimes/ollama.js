@@ -137,6 +137,7 @@ class OllamaRuntime {
       pid: null, // Ollama owns its own process lifecycle
       endpoint: this.running ? this.endpoint : null,
       model: this.model,
+      contextSize: this.running ? this.contextSize ?? null : null,
     };
   }
 
@@ -164,6 +165,8 @@ class OllamaRuntime {
   async start({ modelPath, sha256, modelName, contextSize = 4096, signal }) {
     signal?.throwIfAborted();
     if (!Number.isSafeInteger(contextSize) || contextSize < 2048 || contextSize > 262144) throw Error("Invalid model context window");
+    if (this.model) await this.stop();
+    signal?.throwIfAborted();
     // Separate registrations prevent a cached 4K model from defeating a new
     // context choice. Ollama reuses the same content-addressed weight blob.
     const name = `${modelName || "koinos-model"}-ctx${contextSize}`;
@@ -205,15 +208,53 @@ class OllamaRuntime {
 
     signal?.throwIfAborted();
     this.model = name;
+    try { await this.verifyContext(contextSize, { signal }); }
+    catch (error) { await this.stop(); throw error; }
     this.running = true;
     this.onEvent({ type: "runtime:ready", kind: "ollama", endpoint: this.endpoint });
     return { endpoint: this.endpoint };
   }
 
-  stop() {
-    // We never own the Ollama daemon — just detach.
+  async _runningContext(signal) {
+    const response = await fetch(`${this.endpoint}/api/ps`, {
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(5000)]),
+    });
+    if (!response.ok) { await response.body?.cancel(); throw Error("Ollama's context window could not be verified"); }
+    const body = await response.json();
+    const names = [this.model, `${this.model}:latest`];
+    const runner = body.models?.find(model => names.includes(model.name) || names.includes(model.model));
+    return runner?.context_length ?? null;
+  }
+
+  async verifyContext(requested, { signal } = {}) {
+    this.contextSize = null;
+    let actual = await this._runningContext(signal);
+    if (actual === null) {
+      const warm = await this._api("/api/generate", {
+        model: this.model, prompt: "", stream: false, keep_alive: "5m",
+        options: { num_ctx: requested, num_predict: 1 },
+      }, { signal });
+      if (!warm.ok) { await warm.body?.cancel(); throw Error("Ollama could not load the requested context window"); }
+      await warm.text();
+      actual = await this._runningContext(signal);
+    }
+    if (!Number.isSafeInteger(actual) || actual < requested) throw Error(`Ollama could not provide a verified ${requested}-token context window`);
+    this.contextSize = actual;
+    return actual;
+  }
+
+  async stop() {
+    const model = this.model;
     this.running = false;
     this.model = null;
+    this.contextSize = null;
+    // Release only this registration. The shared daemon remains available.
+    if (model) {
+      try {
+        const response = await this._api("/api/generate", { model, keep_alive: 0, stream: false }, { timeoutMs: 5000 });
+        await response.body?.cancel();
+      } catch { /* The daemon may already have stopped or evicted this runner. */ }
+    }
   }
 }
 

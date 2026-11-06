@@ -13,6 +13,19 @@ function contextSettings(model, override) {
   return { contextSize: contextOverride ?? defaultContextSize, defaultContextSize, minContextSize, maxContextSize, contextOverride, contextLimitKnown: known };
 }
 
+// Catalog context is a ceiling. Allocate for the current task, with a small
+// baseline for model preparation and network providers that omit a preference.
+function contextPlan(model, required) {
+  const limit = valid(model.contextSize) ? model.contextSize : FALLBACK_CONTEXT;
+  const minimum = Math.min(FALLBACK_CONTEXT, limit);
+  const requested = required === undefined ? minimum : required;
+  if (!Number.isSafeInteger(requested) || requested < 1 || requested > limit) {
+    throw Object.assign(Error(`Requested context must be a positive integer within this model's ${limit}-token limit`), { code: "context_limit", contextSize: limit });
+  }
+  const contextSize = Math.min(limit, 2 ** Math.ceil(Math.log2(Math.max(minimum, requested))));
+  return { contextSize, required: requested, limit };
+}
+
 // Read only a bounded header, never the weights. GGUF v2/v3 metadata normally
 // places architecture/context before the tokenizer. Unknown/truncated metadata
 // keeps the conservative fallback; it never invents a model's supported limit.
@@ -60,4 +73,4 @@ async function readGgufContext(file) {
   finally { await handle?.close(); }
 }
 
-module.exports = { MIN_CONTEXT, MAX_CONTEXT, FALLBACK_CONTEXT, contextSettings, ggufContext, readGgufContext };
+module.exports = { MIN_CONTEXT, MAX_CONTEXT, FALLBACK_CONTEXT, contextSettings, contextPlan, ggufContext, readGgufContext };
