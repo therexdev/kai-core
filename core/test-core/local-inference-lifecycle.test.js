@@ -27,7 +27,7 @@ function manager({ download, endpoint = "http://127.0.0.1:1", start } = {}) {
   const runtime = new RuntimeManager({ models, makeRuntime: () => {
     let running = false, alias;
     return { endpoint, status: () => ({ running, kind: "llamacpp" }),
-      start: async options => { alias = options.modelPath; starts.push(alias); if (start) await start(options); running = true; },
+      async start(options) { this.contextSize = options.contextSize; alias = options.modelPath; starts.push(alias); if (start) await start(options); running = true; },
       stop: () => { if (running) stops.push(alias); running = false; },
     };
   } });

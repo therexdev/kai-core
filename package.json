@@ -31,7 +31,8 @@
     "test:wallet-send": "node scripts/foundation/wallet-send-smoke.js",
     "test:language": "node scripts/foundation/language-smoke.js",
     "build:locales": "node scripts/foundation/build-locales.js",
-    "test:model-storage": "node scripts/foundation/model-storage-smoke.js"
+    "test:model-storage": "node scripts/foundation/model-storage-smoke.js",
+    "test:context": "node scripts/foundation/model-context-smoke.js"
   },
   "devDependencies": {
     "electron": "^43.8.1",
@@ -100,6 +101,7 @@
       "core/lib/koinos/wallet-nonce.js",
       "core/lib/legacy-kai-balance.js",
       "core/lib/local-chat-messages.js",
+      "core/lib/model-context.js",
       "core/lib/model-load-queue.js",
       "core/lib/model-manager.js",
       "core/lib/model-storage.js",

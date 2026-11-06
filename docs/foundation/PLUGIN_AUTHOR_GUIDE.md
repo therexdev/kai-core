@@ -246,3 +246,11 @@ Run `node --test examples/test/*.test.js` for the included example checks. Test 
 Install the package from Plugins → Install 3rd Party Plugins using a local file or approved package URL. Review the displayed publisher fingerprint and capabilities. Native packages require the explicit full-access notice. Updates must retain the same publisher key for an existing plugin ID; Core binds that ID to its first installed publisher. Use a new immutable version for each release.
 
 Foundation stores verified packages, materialized code and per-plugin writable data under its new `plugins-v3` directory. Remove/disable stops a service; removing an installation does not silently delete its retained saved data or publisher binding. This architecture does not read or migrate the old app's documents, connected accounts or plugin state.
+
+## Local model context
+
+Core automatically sizes context for ordinary `api.models.chat({ model, messages, max_tokens })` requests. Plugins select their own history, documents and memories. A task that needs a particular minimum can add `context_tokens`, for example `api.models.chat({ model, messages, max_tokens: 1024, context_tokens: 32768 })`. This affects that request and requires the normal inference permission. Core queues growth behind active replies and verifies the running engine's window.
+
+`api.models.list()` and sandboxed `models.list` include `contextSize` as the permitted ceiling, plus `defaultContextSize`, `minContextSize`, `maxContextSize`, `contextOverride` and `contextLimitKnown`. The optional advanced user cap bounds local requests. Refresh this metadata before budgeting long history. `api.models.chat()` exposes the verified allocation as `kai_context: { contextSize, verified: true }`. Streaming callers can read `x-kai-context-size` from the `Response` returned by `api.models.request()`. Runtime status also reports the active allocation and verification state.
+
+A request that cannot fit or verify fails clearly so the plugin can adjust its task. Network requests must fit the selected model's approved tariff. See [context allocation and limits](MODEL_CONTEXT.md) for examples, runtime behavior and custom GGUF handling.

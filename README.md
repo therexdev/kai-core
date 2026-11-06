@@ -18,6 +18,14 @@ Changing a folder shows a review with the destination and file count. Core copie
 
 Finish or cancel local model requests, downloads and queued loads before transferring. Core pauses new network work, lets assigned network work finish and unloads the local model during transfer. Wallets, plugin data, runtime files and Ollama caches keep their current locations; node storage remains a setting of the Node plugin.
 
+## Model context windows
+
+Core automatically sizes local context for each task, within the selected model's supported ceiling. Qwen 2.5 supports up to 32K in its ordinary configuration. Short requests start with a small allocation, and longer requests grow the window as needed. The running engine must confirm the allocated size before serving requests. See [model limits and behavior](docs/foundation/MODEL_CONTEXT.md).
+
+Every plugin uses the same inference API. Supply `model` and `messages` for automatic sizing, or include an optional `context_tokens` minimum for that request. Core serializes model changes and generations. Plugins own their history and document selection. Users can optionally cap context under **Models → Automatic context** to limit memory use. Saved caps survive restart.
+
+Custom GGUF imports use bounded model metadata to determine their ceiling. Unknown limits begin at 4K and are labelled explicitly. Network requests use the context limit in their approved tariff, and providers allocate for the signed job's input and output requirement.
+
 ## Application updates
 
 Settings shows the installed version, checks for new Core releases, and offers an optional automatic-check setting (on by default). Local-Only privacy pauses checks and downloads. An update badge appears on Settings when a newer release is available.
