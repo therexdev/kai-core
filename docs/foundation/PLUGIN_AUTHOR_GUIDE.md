@@ -1,5 +1,7 @@
 # Build a KAI Foundation plugin
 
+For your first plugin, follow the [step-by-step quickstart](PLUGIN_QUICKSTART.md). This guide is the detailed reference.
+
 A plugin owns its feature UI, logic, assets, dependencies and saved data. Foundation provides shared models, network policy, reviewed credit operations, OS encryption, desktop integration, plugin lifecycle and declared local service calls. These interfaces are available to every publisher; an official plugin ID does not unlock a private feature API.
 
 There are two distinct version numbers: the signed package uses **schema 2 / `apiVersion: 3`**, and its native service receives **`api.version === 1`**. The TypeScript contract is [api-v1.d.ts](api-v1.d.ts). The implementations are `electron/foundation-api.js`, `electron/foundation-plugin-services.js`, `electron/core-plugin-host.js` and `core/lib/plugins/package.js`.
