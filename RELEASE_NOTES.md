@@ -4,6 +4,8 @@ Fixes model availability expiring while Core checks network eligibility. Pricing
 
 Adds a public native SDK signal for availability failures confirmed to occur before generation starts. Automatic-model plugins can refresh and select another eligible model while preserving normal credit approval. Interrupted requests and saved answers retain their recovery records; uncertain outcomes are never marked safe to retry.
 
+Replies that exhaust their verified output token budget now report the length limit, allowing existing workflow continuations to finish long outlines and sections instead of treating a clipped answer as complete.
+
 Install Workflows 0.3.8 from the in-app catalog for automatic research, outline and writing fallback. Existing imported article workflows continue to work without reimporting.
 
 Update through **Settings → Application updates**, then restart Core before updating Workflows.

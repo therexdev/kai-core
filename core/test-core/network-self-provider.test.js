@@ -20,7 +20,7 @@ function fixture(t) {
   const config = { owner: "account-" + P.hash("independent-free-buyer"), version: 1, model, maxOutput: 16, schedulerUrl: "https://network.invalid/scheduler",
     policyHash: P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", tariff])), deployment: { product: "prepaid-usd-v1",
       chainId: require("../lib/koin-network/payment-network").MAINNET_CHAIN, credits: other.getAddress(), creditsHash: "0x1220" + P.hash("wasm") } };
-  const state = { providers: [local.getAddress()], wallet: local.getAddress(), calls: [], offline: false, afterEstimate: null, afterCapabilities: null, result: null, answerProvider: remote };
+  const state = { providers: [local.getAddress()], wallet: local.getAddress(), calls: [], offline: false, afterEstimate: null, afterCapabilities: null, result: null, answerProvider: remote, outputTokens: 3 };
   const storage = { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value).map(n => n ^ 19), decryptString: value => value.map(n => n ^ 19).toString() };
   const flow = new PrepaidChat({ config, file: path.join(dir, "chat.json"), storage, providerWallets: () => [state.wallet], enforcedProviderWallets: () => state.linked === false ? [] : [local.getAddress()], access: { authorize: () => ({ owner: config.owner }) } });
   flow.call = async (action, body = {}) => {
@@ -42,7 +42,7 @@ function fixture(t) {
     const receipt = { product: "prepaid-usd-v1", job: id, owner: config.owner, provider: state.answerProvider.getAddress(), attempt,
       quoteHash: q.hash, outputHash: P.hash(output), dispatchedAt: at, completedAt: at + 1,
       signature: Buffer.from(await state.answerProvider.signHash(fundedResultHash(flow.target, { id, session, attempt, quote: q }, output))).toString("base64"),
-      usage: { inputTokens: 5, outputTokens: 3, amount: "8" } };
+      usage: { inputTokens: 5, outputTokens: state.outputTokens, amount: String(5 + state.outputTokens) } };
     state.result = { id, choices: [{ message: { content: output } }], koin: { product: "prepaid-usd-v1", state: "ready", target: flow.target, session, quote: q, receipt, receiptHash: P.hash(JSON.stringify(receipt)) } };
     return { completion: state.result };
   };
@@ -136,6 +136,18 @@ test("transport or post-dispatch availability errors cannot authorize another ge
     await assert.rejects(f.flow.chat(null, f.input, signal()), e => e === failure && e.safeToRetry !== true);
     assert.equal(f.flow.read().state, "pending");
   }
+});
+
+test("verified token limits distinguish a clipped reply from an ended reply, including recovery", async t => {
+  const f = fixture(t); f.state.providers = [remote.getAddress()];
+  const ended = await f.flow.chat(null, f.input, signal());
+  assert.equal(ended.choices[0].finish_reason, "stop");
+  f.flow.acknowledge(ended.id); f.state.outputTokens = f.input.max_tokens;
+  const clipped = await f.flow.chat(null, { ...f.input, messages: [{ role: "user", content: "Longer answer" }] }, signal());
+  assert.equal(clipped.choices[0].finish_reason, "length");
+  f.state.offline = true;
+  assert.equal((await f.flow.recover(null, signal())).completion.choices[0].finish_reason, "length");
+  assert.equal(f.state.calls.filter(action => action === "chat").length, 2);
 });
 
 test("independent guest identity cannot reserve credits while its unlinked earning wallet serves the same model", async t => {

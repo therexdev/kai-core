@@ -167,7 +167,10 @@ class PrepaidChat extends ChatFlow {
         { schedulerUrl: this.config.schedulerUrl, target: this.target, wallet: r.provider, now: this.clock(), historical: true, completedAt: r.completedAt });
     } else P.signatureMatches(proofHash, r.signature, r.provider);
     return { id, object: "chat.completion", model: "koinos-network", servedModel: input.model,
-      choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: k.state === "streaming" ? null : "stop" }],
+      // The service's generic "stop" is not a verified end-of-sequence signal.
+      // A receipt that consumed the entire approved output budget must expose
+      // the limit so callers can explicitly continue instead of truncating.
+      choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: k.state === "streaming" ? null : r.usage.outputTokens === q.maxOutput ? "length" : "stop" }],
       usage: { prompt_tokens: r.usage.inputTokens, completion_tokens: r.usage.outputTokens, total_tokens: r.usage.inputTokens + r.usage.outputTokens }, costUsd: isUsd(this.product) ? Number(r.usage.amount) / 1e8 : 0,
       koin: { product: this.product, state: k.state, target: jobTarget, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
   }
