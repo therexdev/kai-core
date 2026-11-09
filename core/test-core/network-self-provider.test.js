@@ -20,7 +20,7 @@ function fixture(t) {
   const config = { owner: "account-" + P.hash("independent-free-buyer"), version: 1, model, maxOutput: 16, schedulerUrl: "https://network.invalid/scheduler",
     policyHash: P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", tariff])), deployment: { product: "prepaid-usd-v1",
       chainId: require("../lib/koin-network/payment-network").MAINNET_CHAIN, credits: other.getAddress(), creditsHash: "0x1220" + P.hash("wasm") } };
-  const state = { providers: [local.getAddress()], wallet: local.getAddress(), calls: [], offline: false, afterEstimate: null, afterCapabilities: null, result: null, answerProvider: remote };
+  const state = { providers: [local.getAddress()], wallet: local.getAddress(), calls: [], offline: false, afterEstimate: null, afterCapabilities: null, result: null, answerProvider: remote, outputTokens: 3 };
   const storage = { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value).map(n => n ^ 19), decryptString: value => value.map(n => n ^ 19).toString() };
   const flow = new PrepaidChat({ config, file: path.join(dir, "chat.json"), storage, providerWallets: () => [state.wallet], enforcedProviderWallets: () => state.linked === false ? [] : [local.getAddress()], access: { authorize: () => ({ owner: config.owner }) } });
   flow.call = async (action, body = {}) => {
@@ -42,7 +42,7 @@ function fixture(t) {
     const receipt = { product: "prepaid-usd-v1", job: id, owner: config.owner, provider: state.answerProvider.getAddress(), attempt,
       quoteHash: q.hash, outputHash: P.hash(output), dispatchedAt: at, completedAt: at + 1,
       signature: Buffer.from(await state.answerProvider.signHash(fundedResultHash(flow.target, { id, session, attempt, quote: q }, output))).toString("base64"),
-      usage: { inputTokens: 5, outputTokens: 3, amount: "8" } };
+      usage: { inputTokens: 5, outputTokens: state.outputTokens, amount: String(5 + state.outputTokens) } };
     state.result = { id, choices: [{ message: { content: output } }], koin: { product: "prepaid-usd-v1", state: "ready", target: flow.target, session, quote: q, receipt, receiptHash: P.hash(JSON.stringify(receipt)) } };
     return { completion: state.result };
   };
@@ -82,9 +82,72 @@ test("self-only catalog blocks estimates, new chats and advanced-run admission b
 test("remote provider disappearing during price or capability reads never submits the request", async t => {
   for (const hook of ["afterEstimate", "afterCapabilities"]) {
     const f = fixture(t); f.state.providers.push(remote.getAddress()); f.state[hook] = () => { f.state.providers = [local.getAddress()]; };
-    await assert.rejects(f.flow.chat(null, f.input, signal()), /own computer or account/);
+    await assert.rejects(f.flow.chat(null, f.input, signal()), e => e.code === "network-model-unavailable" && e.safeToRetry === true);
     assert.equal(f.state.calls.includes("chat"), false);
+    assert.equal(f.flow.read()?.state, "cancelled", "a new undispatched journal is retained as cancelled");
   }
+});
+
+test("expired catalog and provider reads refresh together without accepting stale availability", async t => {
+  for (const stale of ["models", "network"]) {
+    const f = fixture(t), call = f.flow.call; let count = 0;
+    f.state.providers = [remote.getAddress()];
+    f.flow.call = async (action, body) => {
+      const result = await call(action, body);
+      if (action === stale && ++count === 1) {
+        const old = Date.now() - 16000;
+        if (stale === "models") Object.assign(result.catalog, { asOf: old, validUntil: old + 15000 });
+        else result.network = snapshot(f.state.providers, old);
+      }
+      return result;
+    };
+    assert.equal((await f.flow.models(signal())).models[0].available, true);
+    assert.equal(count, 2); assert.equal(f.state.calls.includes("chat"), false);
+  }
+  const f = fixture(t), call = f.flow.call;
+  f.flow.call = async (action, body) => {
+    const result = await call(action, body);
+    if (action === "models") { const old = Date.now() - 16000; Object.assign(result.catalog, { asOf: old, validUntil: old + 15000 }); }
+    return result;
+  };
+  await assert.rejects(f.flow.estimate(f.input, signal()), e => e.code === "network-models-stale" && e.safeToRetry === true);
+  assert.equal(f.state.calls.filter(action => action === "models").length, 3);
+  assert.equal(f.state.calls.includes("estimate"), false);
+  const now = Date.now();
+  assert.throws(() => consumerCatalog({ asOf: now - 16000, validUntil: now - 1000, models: [{ model }] }, snapshot([remote.getAddress()], now), [], now), { code: "network-models-stale" });
+});
+
+test("availability retry never abandons an earlier pending request or delivered answer", async t => {
+  const f = fixture(t); f.state.providers = [remote.getAddress()];
+  await f.flow.chat(null, f.input, signal());
+  const answer = f.flow.read(); f.state.providers = [];
+  await assert.rejects(f.flow.estimate(f.input, signal()), e => e.code === "network-model-unavailable" && e.safeToRetry === false);
+  assert.deepEqual(f.flow.read(), answer);
+  f.flow.save({ ...answer, state: "pending" }); f.state.result = null;
+  await assert.rejects(f.flow.chat(null, f.input, signal()), e => e.code === "network-model-unavailable" && e.safeToRetry === false);
+  assert.equal(f.flow.read().id, answer.id); assert.equal(f.flow.read().state, "pending");
+  assert.equal(f.state.calls.filter(action => action === "chat").length, 1);
+});
+
+test("transport or post-dispatch availability errors cannot authorize another generation", async t => {
+  for (const failure of [Error("This network model is unavailable"), Object.assign(Error("Unavailable after admission"), { code: "network-model-unavailable", safeToRetry: true })]) {
+    const f = fixture(t), call = f.flow.call; f.state.providers = [remote.getAddress()];
+    f.flow.call = async (action, body) => { if (action === "chat") throw failure; return call(action, body); };
+    await assert.rejects(f.flow.chat(null, f.input, signal()), e => e === failure && e.safeToRetry !== true);
+    assert.equal(f.flow.read().state, "pending");
+  }
+});
+
+test("verified token limits distinguish a clipped reply from an ended reply, including recovery", async t => {
+  const f = fixture(t); f.state.providers = [remote.getAddress()];
+  const ended = await f.flow.chat(null, f.input, signal());
+  assert.equal(ended.choices[0].finish_reason, "stop");
+  f.flow.acknowledge(ended.id); f.state.outputTokens = f.input.max_tokens;
+  const clipped = await f.flow.chat(null, { ...f.input, messages: [{ role: "user", content: "Longer answer" }] }, signal());
+  assert.equal(clipped.choices[0].finish_reason, "length");
+  f.state.offline = true;
+  assert.equal((await f.flow.recover(null, signal())).completion.choices[0].finish_reason, "length");
+  assert.equal(f.state.calls.filter(action => action === "chat").length, 2);
 });
 
 test("independent guest identity cannot reserve credits while its unlinked earning wallet serves the same model", async t => {

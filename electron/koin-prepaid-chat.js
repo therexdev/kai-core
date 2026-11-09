@@ -67,11 +67,23 @@ class PrepaidChat extends ChatFlow {
   async models(signal) {
     if (!isUsd(this.product)) return null;
     const excluded = this.excludedProviders();
-    const response = await this.call("models", {}, signal);
-    let catalog = Models.catalog(response.catalog, this.config, this.clock());
-    if (this.providerWallets) {
-      const response = await this.call("network", {}, signal);
-      catalog = require("./credit-network-eligibility").consumerCatalog(catalog, response.network, excluded, this.clock(), this.enforcedProviders());
+    let catalog;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      signal?.throwIfAborted();
+      // Independent read-only snapshots share one account identity. Fetch both
+      // together, then validate at receipt time so neither expires waiting for
+      // the other. Only an expired observation gets a bounded read retry.
+      const [response, network] = await Promise.all([
+        this.call("models", {}, signal), this.providerWallets ? this.call("network", {}, signal) : null
+      ]);
+      try {
+        const now = this.clock();
+        catalog = Models.catalog(response.catalog, this.config, now);
+        if (this.providerWallets) catalog = require("./credit-network-eligibility").consumerCatalog(catalog, network.network, excluded, now, this.enforcedProviders());
+        break;
+      } catch (error) {
+        if (error.code !== "network-models-stale" || attempt === 2) throw error;
+      }
     }
     if (JSON.stringify(excluded) !== JSON.stringify(this.excludedProviders())) throw Error("Your network identity changed. Refresh models before sending.");
     this.modelCatalog = catalog; this.modelProviderIdentity = JSON.stringify(excluded);
@@ -90,12 +102,34 @@ class PrepaidChat extends ChatFlow {
   available(model) {
     if (!isUsd(this.product)) return;
     if (this.providerWallets && this.modelProviderIdentity !== JSON.stringify(this.excludedProviders())) throw Error("Your network identity changed. Refresh models before sending.");
+    if (!this.modelCatalog || this.modelCatalog.validUntil <= this.clock())
+      throw Object.assign(Error("Network model availability expired. Refresh models and try again."), { code: "network-models-stale", model });
     if (this.modelCatalog?.models.some(m => m.model === model && m.unavailableReason === "self-only"))
-      throw Error("This model is only being shared by your own computer or account. Choose Local model, or wait for another network provider.");
+      throw Object.assign(Error("This model is only being shared by your own computer or account. Choose Local model, or wait for another network provider."), { code: "network-model-unavailable", model });
     if (this.modelCatalog?.models.some(m => m.model === model && m.unavailableReason === "wallet-connection-required"))
-      throw Error("Connect your wallet to network credits before using a network model that this computer also shares, or choose Local model.");
-    if (!this.modelCatalog || this.modelCatalog.validUntil <= this.clock() || !this.modelCatalog.models.some(m => m.model === model && m.available))
-      throw Error("This network model is unavailable. Choose an available model or try again shortly");
+      throw Object.assign(Error("Connect your wallet to network credits before using a network model that this computer also shares, or choose Local model."), { code: "network-model-unavailable", model });
+    if (!this.modelCatalog.models.some(m => m.model === model && m.available))
+      throw Object.assign(Error(`The network model ${model} is unavailable. Choose an available model or try again shortly`), { code: "network-model-unavailable", model });
+  }
+  async trackAvailability(operation, signal) {
+    const previous = this.read(), attempt = { dispatched: false, recovery: ["pending", "answered"].includes(previous?.state), created: null };
+    try { return await operation(attempt); }
+    catch (error) {
+      // A model-selection retry must never abandon a possibly charged request
+      // or a saved answer. Do not infer safety from a server error's wording.
+      if (["network-model-unavailable", "network-models-stale"].includes(error.code)) {
+        error.safeToRetry = false;
+        if (!attempt.dispatched && !attempt.recovery && !signal?.aborted) {
+          const current = this.read();
+          if (attempt.created) {
+            if (current?.id !== attempt.created.id || current.state !== "pending") throw error;
+            this.save({ ...current, state: "cancelled" });
+          } else if (["pending", "answered"].includes(current?.state)) throw error;
+          error.safeToRetry = true;
+        }
+      }
+      throw error;
+    }
   }
   async recover(window, signal) {
     const record = this.read();
@@ -133,7 +167,10 @@ class PrepaidChat extends ChatFlow {
         { schedulerUrl: this.config.schedulerUrl, target: this.target, wallet: r.provider, now: this.clock(), historical: true, completedAt: r.completedAt });
     } else P.signatureMatches(proofHash, r.signature, r.provider);
     return { id, object: "chat.completion", model: "koinos-network", servedModel: input.model,
-      choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: k.state === "streaming" ? null : "stop" }],
+      // The service's generic "stop" is not a verified end-of-sequence signal.
+      // A receipt that consumed the entire approved output budget must expose
+      // the limit so callers can explicitly continue instead of truncating.
+      choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: k.state === "streaming" ? null : r.usage.outputTokens === q.maxOutput ? "length" : "stop" }],
       usage: { prompt_tokens: r.usage.inputTokens, completion_tokens: r.usage.outputTokens, total_tokens: r.usage.inputTokens + r.usage.outputTokens }, costUsd: isUsd(this.product) ? Number(r.usage.amount) / 1e8 : 0,
       koin: { product: this.product, state: k.state, target: jobTarget, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
   }
@@ -143,6 +180,9 @@ class PrepaidChat extends ChatFlow {
     if (result.capabilities?.creditPriority !== true) throw Error("Paid-first is unavailable on this network. Turn it off in Settings to use free credits first.");
   }
   async estimate(value, signal, catalogReady = false) {
+    return this.trackAvailability(() => this.estimateRequest(value, signal, catalogReady), signal);
+  }
+  async estimateRequest(value, signal, catalogReady) {
     if (isUsd(this.product) && !catalogReady) await this.models(signal);
     const input = this.input(value); this.available(input.model);
     if (input.paidFirst) await this.requireCreditPriority(signal);
@@ -155,6 +195,9 @@ class PrepaidChat extends ChatFlow {
     return e;
   }
   async chat(window, value, signal) {
+    return this.trackAvailability(attempt => this.chatRequest(window, value, signal, attempt), signal);
+  }
+  async chatRequest(window, value, signal, attempt) {
     signal.throwIfAborted();
     if (!this.storage?.isEncryptionAvailable?.()) throw Error("Unlock secure storage to chat");
     let record = this.read(), input, requestHash;
@@ -201,6 +244,7 @@ class PrepaidChat extends ChatFlow {
       record = { schema: 1, owner: this.config.owner, deployment: P.hash(JSON.stringify(this.config)), id: crypto.randomBytes(32).toString("hex"),
         session: P.hash("prepaid-account:" + this.config.owner), requestHash, state: "pending", excludedProviders: this.excludedProviders(), ...(this.approvedTariffs ? { tariffs: this.approvedTariffs } : {}), maxPaid: estimate.maxPaid, costEstimate: estimate, input: this.storage.encryptString(JSON.stringify(value)).toString("base64") };
       this.save(record);
+      attempt.created = record;
     }
     this.progress(record.costEstimate ? `Generating your answer · maximum ${require("../core/lib/koin-network/purchase-quote").credits(record.costEstimate.maxCharge)} credits · up to ${require("../core/lib/koin-network/purchase-quote").credits(record.maxPaid)} purchased credits ${input.paidFirst ? "before" : "after"} free credits` : "Generating your answer…");
     try {
@@ -223,6 +267,7 @@ class PrepaidChat extends ChatFlow {
       // flight. Check immediately before admission; saved completed replies
       // above remain recoverable independently of live provider availability.
       if (isUsd(this.product) && this.providerWallets) { await this.models(signal); this.available(input.model); }
+      attempt.dispatched = true;
       const response = await this.call("chat", { ...(providerDeviceProof ? { providerDeviceProof: 1 } : {}), billing: "koin-" + this.product, requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput,
         stream: value.stream !== false, ...(record.maxPaid !== undefined ? { maxPaid: record.maxPaid } : {}), ...(input.freeOnly !== undefined ? { freeOnly: input.freeOnly } : {}), ...(input.paidFirst ? { paidFirst: true } : {}), ...(input.runId ? { runId: input.runId } : {}) }, signal, delivered);
       const answer = this.verify(response.completion, input, record.id, [...this.recoveryProviders(record), ...this.excludedProviders()]);
@@ -233,7 +278,7 @@ class PrepaidChat extends ChatFlow {
       await this.call("acknowledge", { requestId: record.id, receiptHash: answer.koin.receiptHash }, signal).catch(() => {});
       return answer;
     } catch (e) {
-      if (this.read()?.state === "pending" && !signal.aborted) {
+      if (attempt.dispatched && this.read()?.state === "pending" && !signal.aborted) {
         await this.call("cancel", { requestId: record.id }, signal).catch(() => {});
         // Preserve the request ID: the server may have committed an answer
         // before a lost response. Retry retrieves it without another debit.

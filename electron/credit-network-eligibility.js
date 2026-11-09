@@ -16,7 +16,7 @@ const providerId = wallet => P.hash("public-provider:" + wallet).slice(0, 12);
 function consumerNetwork(network, excludedWallets, now = Date.now(), enforcedWallets = excludedWallets) {
   const n = network, fail = () => { throw Error("Network provider availability could not be verified. Refresh models and try again."); };
   if (!n || !Number.isSafeInteger(n.observedAt) || !Number.isSafeInteger(n.validUntil) || n.observedAt > now + 5000 ||
-      n.observedAt < now - 15000 || n.validUntil <= now || n.validUntil <= n.observedAt || n.validUntil > n.observedAt + 15000 ||
+      n.validUntil <= n.observedAt || n.validUntil > n.observedAt + 15000 ||
       !["available", "paused"].includes(n.state) || !Array.isArray(n.providers) || n.providers.length > 256 ||
       !Array.isArray(n.models) || n.models.length > 64 || n.providersTruncated === true) fail();
   const ids = new Set(), aliases = new Set(), excluded = new Set(wallets(excludedWallets).map(providerId)), enforced = new Set(wallets(enforcedWallets).map(providerId));
@@ -45,10 +45,12 @@ function consumerNetwork(network, excludedWallets, now = Date.now(), enforcedWal
     return { ...m, providers: remote.length, totalProviders: ready.length, available, selectable: available && m.selectable !== false,
       ...(ready.length && !remote.length ? { unavailableReason: "self-only" } : unlinkedSelf ? { unavailableReason: "wallet-connection-required" } : {}) };
   });
+  if (n.validUntil <= now) throw Object.assign(Error("Network provider availability expired. Refresh models and try again."), { code: "network-models-stale" });
   return { ...n, models, providers: n.providers.map(p => ({ ...p, self: excluded.has(p.id) })) };
 }
 function consumerCatalog(catalog, network, excludedWallets, now = Date.now(), enforcedWallets = excludedWallets) {
   const eligible = consumerNetwork(network, excludedWallets, now, enforcedWallets);
+  if (catalog.validUntil <= now || catalog.validUntil <= eligible.observedAt) throw Object.assign(Error("Network model availability expired. Refresh models and try again."), { code: "network-models-stale" });
   const models = catalog.models.map(m => {
     const row = eligible.models.find(row => row.id === m.model);
     if (!row) throw Error("Network provider availability is incomplete. Refresh models and try again.");
