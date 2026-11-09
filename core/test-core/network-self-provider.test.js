@@ -82,8 +82,59 @@ test("self-only catalog blocks estimates, new chats and advanced-run admission b
 test("remote provider disappearing during price or capability reads never submits the request", async t => {
   for (const hook of ["afterEstimate", "afterCapabilities"]) {
     const f = fixture(t); f.state.providers.push(remote.getAddress()); f.state[hook] = () => { f.state.providers = [local.getAddress()]; };
-    await assert.rejects(f.flow.chat(null, f.input, signal()), /own computer or account/);
+    await assert.rejects(f.flow.chat(null, f.input, signal()), e => e.code === "network-model-unavailable" && e.safeToRetry === true);
     assert.equal(f.state.calls.includes("chat"), false);
+    assert.equal(f.flow.read()?.state, "cancelled", "a new undispatched journal is retained as cancelled");
+  }
+});
+
+test("expired catalog and provider reads refresh together without accepting stale availability", async t => {
+  for (const stale of ["models", "network"]) {
+    const f = fixture(t), call = f.flow.call; let count = 0;
+    f.state.providers = [remote.getAddress()];
+    f.flow.call = async (action, body) => {
+      const result = await call(action, body);
+      if (action === stale && ++count === 1) {
+        const old = Date.now() - 16000;
+        if (stale === "models") Object.assign(result.catalog, { asOf: old, validUntil: old + 15000 });
+        else result.network = snapshot(f.state.providers, old);
+      }
+      return result;
+    };
+    assert.equal((await f.flow.models(signal())).models[0].available, true);
+    assert.equal(count, 2); assert.equal(f.state.calls.includes("chat"), false);
+  }
+  const f = fixture(t), call = f.flow.call;
+  f.flow.call = async (action, body) => {
+    const result = await call(action, body);
+    if (action === "models") { const old = Date.now() - 16000; Object.assign(result.catalog, { asOf: old, validUntil: old + 15000 }); }
+    return result;
+  };
+  await assert.rejects(f.flow.estimate(f.input, signal()), e => e.code === "network-models-stale" && e.safeToRetry === true);
+  assert.equal(f.state.calls.filter(action => action === "models").length, 3);
+  assert.equal(f.state.calls.includes("estimate"), false);
+  const now = Date.now();
+  assert.throws(() => consumerCatalog({ asOf: now - 16000, validUntil: now - 1000, models: [{ model }] }, snapshot([remote.getAddress()], now), [], now), { code: "network-models-stale" });
+});
+
+test("availability retry never abandons an earlier pending request or delivered answer", async t => {
+  const f = fixture(t); f.state.providers = [remote.getAddress()];
+  await f.flow.chat(null, f.input, signal());
+  const answer = f.flow.read(); f.state.providers = [];
+  await assert.rejects(f.flow.estimate(f.input, signal()), e => e.code === "network-model-unavailable" && e.safeToRetry === false);
+  assert.deepEqual(f.flow.read(), answer);
+  f.flow.save({ ...answer, state: "pending" }); f.state.result = null;
+  await assert.rejects(f.flow.chat(null, f.input, signal()), e => e.code === "network-model-unavailable" && e.safeToRetry === false);
+  assert.equal(f.flow.read().id, answer.id); assert.equal(f.flow.read().state, "pending");
+  assert.equal(f.state.calls.filter(action => action === "chat").length, 1);
+});
+
+test("transport or post-dispatch availability errors cannot authorize another generation", async t => {
+  for (const failure of [Error("This network model is unavailable"), Object.assign(Error("Unavailable after admission"), { code: "network-model-unavailable", safeToRetry: true })]) {
+    const f = fixture(t), call = f.flow.call; f.state.providers = [remote.getAddress()];
+    f.flow.call = async (action, body) => { if (action === "chat") throw failure; return call(action, body); };
+    await assert.rejects(f.flow.chat(null, f.input, signal()), e => e === failure && e.safeToRetry !== true);
+    assert.equal(f.flow.read().state, "pending");
   }
 });
 

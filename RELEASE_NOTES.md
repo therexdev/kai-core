@@ -1,4 +1,14 @@
-# KAI Core Beta 0.7.23
+# KAI Core Beta 0.7.24
+
+Fixes model availability expiring while Core checks network eligibility. Pricing and provider observations are fetched together, validated when both arrive, and refreshed up to twice if they expire in transit. Provider identity, signed prices and freshness checks remain enforced.
+
+Adds a public native SDK signal for availability failures confirmed to occur before generation starts. Automatic-model plugins can refresh and select another eligible model while preserving normal credit approval. Interrupted requests and saved answers retain their recovery records; uncertain outcomes are never marked safe to retry.
+
+Install Workflows 0.3.8 from the in-app catalog for automatic research, outline and writing fallback. Existing imported article workflows continue to work without reimporting.
+
+Update through **Settings → Application updates**, then restart Core before updating Workflows.
+
+## Previous release: 0.7.23
 
 Adds reusable credit permissions for plugins. Network approval can now offer **Allow once**, **Allow for Workflow**, and **Allow Always**.
 
