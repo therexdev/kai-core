@@ -251,13 +251,15 @@ class CreditService {
         runBudgets: c.auth?.sessionOnly ? false : runBudgets, creditPriority: c.auth?.sessionOnly ? false : creditPriority, freeOnlySession: c.auth?.sessionOnly === true, deviceFree: c.auth?.deviceFree === true, maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", ...setupFailure(error), recoveryAvailable: false }; }
   }
-  async run(action, input, signal, window) {
+  async run(action, input, signal, window, expectedCreditBinding) {
     if (action === "purchase-estimate") {
       const c = this.purchaseDisplayContext(signal), result = await this.purchases.estimate(c, input, signal);
       if (this.purchaseDisplayContext(signal).config !== c.config) throw Error("The pricing configuration changed; refresh the estimate");
       return result;
     }
     let c = await this.context(signal);
+    signal?.throwIfAborted();
+    if (expectedCreditBinding !== undefined && require("./plugin-credit-access").creditBinding(c) !== expectedCreditBinding) throw Error("Credit account changed. Review the request again for this account.");
     if (c.auth?.sessionOnly && (action.startsWith("run-") || ["purchase-preview", "purchase-approve", "purchase-retry"].includes(action))) throw Object.assign(Error("Choose Buy credits to use your KOIN wallet for purchases. Free-credit access does not require a wallet."), { code: "wallet-connection-required" });
     if (action === "run-open") return this.runs.open(c, input, signal);
     if (action === "run-chat") return this.runs.chat(c, input, signal);

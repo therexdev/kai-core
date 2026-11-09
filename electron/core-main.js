@@ -142,7 +142,7 @@ async function start() {
   async function openCoreView(view, section) {
     if (shuttingDown) throw Error("Application is closing");
     if (!require("./foundation-api").CORE_VIEWS.has(view)) throw Error("Unknown Core page");
-    if (section !== undefined && (view !== "settings" || !["website-account", "credit-account"].includes(section))) throw Error("Unknown Core section");
+    if (section !== undefined && (view !== "settings" || !["website-account", "credit-account", "access"].includes(section))) throw Error("Unknown Core section");
     pluginHost.hide(); desktopTray.show(); win.webContents.send("kai-core:open-view", section ? {page:view,section} : view); return { opened: true };
   }
   const openPlugin = async (id, section) => { await pluginHost.open(id); if (typeof section === "string") pluginHost.renderer(id)?.send("kai-plugin:navigate", { section }); return {opened:true}; };
@@ -171,6 +171,8 @@ async function start() {
     switch (method) {
       case "locale.get": return core.locale.get();
       case "locale.set": return core.locale.set(input?.language);
+      case "access.list": return payments.listCreditAccess();
+      case "access.revoke": return payments.revokeCreditAccess(input?.id);
       case "dialog.confirm": case "dialog.alert": {
         const frame = event.senderFrame;
         return require("./core-renderer-dialogs").showRendererDialog({ dialog, parent: win, name: release.productName, kind: method.slice(7), input,

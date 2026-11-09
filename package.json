@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.22",
+  "version": "0.7.23",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
@@ -186,6 +186,7 @@
       "electron/koin-test-config.js",
       "electron/koin-test-ipc.js",
       "electron/koin-test-payments.js",
+      "electron/plugin-credit-access.js",
       "electron/provider-device.js",
       "electron/session-free-chat.js",
       "electron/wallet-session-secret.js",

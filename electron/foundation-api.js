@@ -14,6 +14,7 @@ function createFoundationApi(ctx, record) {
   const combined = extra => AbortSignal.any([signal, ...(extra ? [extra] : []), AbortSignal.timeout(180000)]);
   const window = () => ctx.getWindow();
   const contents = () => ctx.getWebContents(id);
+  let nativeCreditCaller;
   const settingsFile = path.join(record.dataDir, "preferences.json");
   let preferences = {};
   if (fs.existsSync(settingsFile)) {
@@ -23,7 +24,7 @@ function createFoundationApi(ctx, record) {
     if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw Error("Unreadable plugin preferences; file preserved");
   }
   const settingKey = key => { if (typeof key !== "string" || !key || key.length > 180 || key.split(".").some(p => ["__proto__", "constructor", "prototype", ""].includes(p))) throw Error("Invalid preference key"); return key.split("."); };
-  async function confirm(title, detail, extraSignal) {
+  async function reviewAction(title, detail, extraSignal, buttons = ["Cancel", "Allow once"]) {
     extraSignal?.throwIfAborted();
     active(); const initiator = record.invocation?.();
     const requester = initiator || null;
@@ -31,14 +32,15 @@ function createFoundationApi(ctx, record) {
     const entry = requester?.entry || `kai-plugin://${id}/${record.manifest.entry}`;
     const reviewable = () => (!requester || !requester.signal.aborted) && w && w === window() && !w.isDestroyed() && w.isVisible() && !w.isMinimized() && ctx.isVisible(ownerId) &&
       wc && wc === ctx.getWebContents(ownerId) && !wc.isDestroyed() && wc.mainFrame === frame && frame.url === entry;
-    if (!reviewable()) return false;
+    if (!reviewable()) return 0;
     const message = String(title), text = typeof detail === "string" ? detail : JSON.stringify(detail, null, 2);
     if (!message || message.length > 180 || typeof text !== "string" || text.length > 16000) throw Error("Action details are too long to review");
     const dialogSignal = AbortSignal.any([signal, ...(extraSignal ? [extraSignal] : []), ...(requester?.signal ? [requester.signal] : []), ...(ctx.getDialogSignal?.(ownerId) ? [ctx.getDialogSignal(ownerId)] : [])]);
     const result = await electron.dialog.showMessageBox(w, { type: "question", title: "KAI · Review action", message,
-      detail: `${record.manifest.name}${requester && requester.id !== id ? ` · Requested by ${requester.name}` : ""}\n\n${text}`, buttons: ["Cancel", "Allow once"], defaultId: 0, cancelId: 0, noLink: true, signal: dialogSignal });
-    active(); return result.response === 1 && !dialogSignal.aborted && reviewable();
+      detail: `${record.manifest.name}${requester && requester.id !== id ? ` · Requested by ${requester.name}` : ""}\n\n${text}`, buttons, defaultId: 0, cancelId: 0, noLink: true, signal: dialogSignal });
+    active(); return !dialogSignal.aborted && reviewable() ? result.response : 0;
   }
+  const confirm = async (title, detail, extraSignal) => await reviewAction(title, detail, extraSignal) === 1;
 
   const settings = Object.freeze({
     get(key, fallback) { requireGrant("storage.read"); let value = preferences; for (const p of settingKey(key)) value = value && Object.hasOwn(value,p) ? value[p] : undefined; return structuredClone(value === undefined ? fallback : value); },
@@ -70,18 +72,38 @@ function createFoundationApi(ctx, record) {
       body:JSON.stringify({...input,kai_private_desktop:true}) });
     active(); return response;
   }
-  function paymentCaller(permission, extraSignal) {
+  function paymentCaller(permission, extraSignal, background = false) {
     const origin = record.invocation?.();
-    const owner = origin || { id, fingerprint: record.fingerprint, permissions: record.manifest.permissions, webContents: contents(), frame: contents()?.mainFrame, entry: `kai-plugin://${id}/${record.manifest.entry}`, signal };
+    const owner = origin || { id, name: record.manifest.name, fingerprint: record.fingerprint, permissions: record.manifest.permissions, webContents: contents(), frame: contents()?.mainFrame, entry: `kai-plugin://${id}/${record.manifest.entry}`, signal };
     if (!owner.permissions.includes(permission)) throw Error(`Initiating plugin requires ${permission}`);
     owner.signal.throwIfAborted();
     const wc = owner.webContents;
-    if (!wc || wc.isDestroyed() || wc !== ctx.getWebContents(owner.id) || wc.mainFrame !== owner.frame || wc.mainFrame.url !== owner.entry) throw Error("Open the originating plugin to use network credits");
-    return { pluginId: owner.id, fingerprint: owner.fingerprint, entry: owner.entry, window: window(), webContents: wc, isVisible: () => ctx.isVisible(owner.id), signal: AbortSignal.any([combined(extraSignal), owner.signal]) };
+    if (wc ? wc.isDestroyed() || wc !== ctx.getWebContents(owner.id) || wc.mainFrame !== owner.frame || wc.mainFrame.url !== owner.entry : !background || origin) throw Error("Open the originating plugin to use network credits");
+    // Only Core can issue this opaque identity for a loaded signed service.
+    // It permits background reads and already-approved completions, never UI review.
+    if (!wc && !nativeCreditCaller) nativeCreditCaller = ctx.payments().registerNativeCreditCaller(record);
+    return { pluginId: owner.id, name: owner.name, fingerprint: owner.fingerprint, entry: owner.entry, window: window(), webContents: wc || null, nativeCreditCaller: !wc ? nativeCreditCaller : undefined, isVisible: () => ctx.isVisible(owner.id), lifetimeSignal: owner.signal, signal: AbortSignal.any([combined(extraSignal), owner.signal]) };
   }
   async function authorize(action,input,extraSignal) {
     requireGrant("wallet.authorize");
-    return ctx.payments().runForPlugin(action,input,paymentCaller("wallet.authorize",extraSignal));
+    return ctx.payments().runForPlugin(action,input,paymentCaller("wallet.authorize",extraSignal,["credit-status","chat-info","chat-estimate","chat-ack"].includes(action)));
+  }
+  async function complete(input, options = {}, extraSignal) {
+    requireGrant("wallet.authorize"); requireGrant("inference.network");
+    if (!options || Object.keys(options).some(key => key !== "workflow")) throw Error("Unsupported credit request options");
+    const scope = require("./plugin-credit-access").workflow(options.workflow);
+    const caller = paymentCaller("wallet.authorize", extraSignal, true);
+    // The originating plugin needs both grants, including through service RPC.
+    paymentCaller("inference.network", extraSignal, true);
+    return ctx.payments().completeForPlugin(input, scope || undefined, caller, async estimate => {
+      const language = core.locale?.get().language || "en", table = require("../ui-core/locales/core.json")[language] || {};
+      const t = (source, ...values) => (table[source] || source).replace(/\{(\d+)\}/g, (_, n) => String(values[Number(n)] ?? ""));
+      const credits = value => { const n = BigInt(value); return `${n / 100000n}.${String(n % 100000n).padStart(5, "0")}`.replace(/\.?0+$/, ""); };
+      const detail = `${scope ? t("Workflow: {0}", scope.name) + "\n" : ""}${estimate.model}\n${t("Estimated maximum for this request: {0} credits ({1} free, {2} purchased).", credits(estimate.maxCharge), credits(estimate.maxFree), credits(estimate.maxPaid))}\n\n${t("This sends input and selected tool results to a KAI network provider.")}\n\n${scope ? t("Allow for Workflow covers all network requests in this run, until it finishes or is cancelled. Later steps may use additional credits.") + "\n\n" : ""}${t("Allow Always lets this plugin use available free and purchased credits in future runs, including in the background. Revoke it in Core Settings → Access. Credit purchases and wallet transfers still need separate approval.")}\n\n${t("Input preview:")}\n${input.messages.map(m => typeof m.content === "string" ? m.content : "").join("\n").slice(0, 8000)}`;
+      const choices = scope ? ["Cancel", "Allow once", "Allow for Workflow", "Allow Always"] : ["Cancel", "Allow once", "Allow Always"];
+      const response = await reviewAction(t("Use KAI network for this step?"), detail, caller.signal, choices);
+      return ({ "Allow once": "once", "Allow for Workflow": "workflow", "Allow Always": "always" })[choices[response]] || "cancel";
+    });
   }
   async function publicFetch(raw, options={}) {
     requireGrant("network.fetch");
@@ -140,7 +162,7 @@ function createFoundationApi(ctx, record) {
     network:Object.freeze({
       status(){requireGrant("network.status");return structuredClone(core.gateway.network.status());},
       async configure({privacyMode}){requireGrant("network.configure");if(!["local-only","local-first","network"].includes(privacyMode))throw Error("Invalid privacy mode");if(!await confirm("Change AI privacy?",privacyMode))throw Error("Privacy change cancelled");return ctx.setPrivacyMode(privacyMode);},
-      async models(){requireGrant("inference.network");const r=await ctx.payments().runForPlugin("chat-info",undefined,paymentCaller("inference.network"));return r?.models||[];},
+      async models(){requireGrant("inference.network");const r=await ctx.payments().runForPlugin("chat-info",undefined,paymentCaller("inference.network",undefined,true));return r?.models||[];},
       fetch:publicFetch,
     }),
     secrets:Object.freeze({
@@ -155,7 +177,7 @@ function createFoundationApi(ctx, record) {
       isVisible(){active();return ctx.isVisible(id);},
       send(channel,value){requireGrant("desktop.windows");if(typeof channel!=="string"||channel.length>180)throw Error("Invalid event channel");contents()?.send(channel,value);},
       async openPlugin(pluginId,section){requireGrant("desktop.navigate");return ctx.openPlugin(pluginId,section);},
-      async openCore(view,section){requireGrant("desktop.navigate");if(!CORE_VIEWS.has(view))throw Error("Unknown Core page");if(section!==undefined&&(view!=="settings"||!["website-account","credit-account"].includes(section)))throw Error("Unknown Core section");return ctx.openCoreView(view,section);},
+      async openCore(view,section){requireGrant("desktop.navigate");if(!CORE_VIEWS.has(view))throw Error("Unknown Core page");if(section!==undefined&&(view!=="settings"||!["website-account","credit-account","access"].includes(section)))throw Error("Unknown Core section");return ctx.openCoreView(view,section);},
       async openExternal(raw){requireGrant("desktop.external");const u=new URL(raw);if(u.protocol!=="https:"||u.username||u.password)throw Error("Use HTTPS without credentials");if(!await confirm("Open website?",u.href))return{cancelled:true};await electron.shell.openExternal(u.href);return{opened:true};},
       confirm,
       preferences(){requireGrant("desktop.preferences");return {language:core.locale?.get().language||core.settings.get("interface.language","en"),theme:core.settings.get("interface.theme","light")};},
@@ -183,7 +205,10 @@ function createFoundationApi(ctx, record) {
 
       },
     }),
-    wallet:Object.freeze({summary(){requireGrant("wallet.read");return ctx.wallet().call("wallet.summary",{});},authorize}),
+    wallet:Object.freeze({summary(){requireGrant("wallet.read");return ctx.wallet().call("wallet.summary",{});},authorize,complete,
+      creditAccess(scope){requireGrant("wallet.authorize");requireGrant("inference.network");return ctx.payments().accessForPlugin(scope,paymentCaller("wallet.authorize",undefined,true));},
+      endCreditScope(runId){requireGrant("wallet.authorize");if(typeof runId!=="string"||!/^[a-zA-Z0-9:._-]{1,180}$/.test(runId))throw Error("Invalid workflow run ID");const origin=record.invocation?.();return ctx.payments().endCreditScope({pluginId:origin?.id||id,fingerprint:origin?.fingerprint||record.fingerprint},runId);},
+    }),
     log(level,message){active();if(!["info","warn","error"].includes(level))throw Error("Invalid log level");console[level](`[plugin:${id}] ${String(message).slice(0,4000)}`);},
   };
   return api;

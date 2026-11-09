@@ -192,7 +192,23 @@ Use an explicit installed local alias with `api.models.chat({model, messages, ma
 
 Local model metadata includes its catalog `blurb` and expected weights `sizeBytes`. Core 0.7.5 adds `downloadSizeBytes` for the full expected weights/projector bundle and `diskBytes` for current local files, including partial downloads. `diskBytes: 0` means no files are present; `null` means the size is unknown. Imported models are measured at their existing referenced file, without copying it. These sizes are file lengths, displayed as decimal GB in Core, and do not establish model verification or readiness.
 
-Network aliases use the `koinos-network` prefix. Native `models.request/chat` routes them through the shared reviewed credit service and currently returns a completed JSON response, even if `stream: true` was supplied. This requires both `inference.network` and `wallet.authorize`. A plugin must have its trusted UI available for an attended credit operation; do not start paid work invisibly from a startup timer.
+Network aliases use the `koinos-network` prefix. Native `models.request/chat` routes them through the shared reviewed credit service and currently returns a completed JSON response, even if `stream: true` was supplied. This requires both `inference.network` and `wallet.authorize`. A plugin must have its trusted UI available for an attended credit operation. Core 0.7.23 adds the consent API below for explicitly approved background credit use.
+
+Core 0.7.23 provides these additive, publisher-neutral native SDK methods (both `wallet.authorize` and `inference.network` permissions are required):
+
+```js
+const workflow = { id: run.id, name: run.name }; // unique per execution, not the saved workflow ID
+const completion = await api.wallet.complete(request, { workflow }, signal);
+// Persist the complete answer before acknowledging completion.id with chat-ack.
+// On completion, failure or cancellation (including a paused run):
+api.wallet.endCreditScope(run.id);
+```
+
+`wallet.complete` obtains and validates an authenticated estimate, asks through Core's trusted review when needed, and dispatches one credit request. Options only accept an optional `workflow: {id, name}`. Without a workflow it offers Cancel, Allow once and Allow Always; with a workflow it also offers Allow for Workflow. A continuation calls the method again using the same run ID. Never reuse a completed execution's ID. Keep the workflow scope during a pause, and end it when the execution is terminal. Each request retains normal credit availability and privacy checks; permission does not reserve credits or promise an article's total cost.
+
+`await api.wallet.creditAccess(workflow)` returns `{allowed, duration}` with `duration` equal to `workflow`, `always`, or `null`. This is a hint for pausing an unattended run, not authority to dispatch through the legacy API. `wallet.complete` rechecks authority itself. No SDK method can silently grant ongoing access. A loaded signed native service can use an existing Always grant before opening its UI; requesting new consent still requires the exact visible originating document. Invocations through another plugin retain that initiating plugin's identity and permissions.
+
+Workflow grants stay in memory and expire with their run or plugin lifetime. Always grants persist per plugin ID, signing publisher, credit account, deployment and access kind; token refresh does not revoke them. Core Settings → Access owns revocation, including cancellation of active SDK calls and invalidation of queued reviews. These grants only cover credit completions, never purchases, wallet transfers or remote job authority. Plugins may navigate to this page with `api.desktop.openCore("settings", "access")`.
 
 The supported `wallet.authorize` actions are `credit-status`, `chat-info`, `chat-estimate`, `chat-completion`, `chat-ack`, `chat-recover`, `stop`, `run-open`, `run-chat`, `run-list`, `run-status` and `run-stop`. Preserve each service response and error rather than substituting a successful placeholder. `authorize` is not an arbitrary transaction signer, token-transfer API or key-export API. Opening a plugin UI does not authorize payment.
 

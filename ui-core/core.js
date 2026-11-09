@@ -80,7 +80,7 @@ function showPage(next, app) {
   if (next === "network") window.KaiCoreNetwork?.enter();
   if (next === "wallet") window.KaiCoreWallet?.enter();
   if (next === "plugins") void checkPluginCatalog();
-  if (next === "settings") { window.KaiCoreAccount?.enter(); void window.KaiCoreUpdates?.enter(); window.KaiModelStorage?.enter(); }
+  if (next === "settings") { window.KaiCoreAccount?.enter(); void window.KaiCoreUpdates?.enter(); window.KaiModelStorage?.enter(); void window.KaiCoreAccess?.enter(); }
   if (next === "credits") { renderCredits(); void refreshCreditActivity(); void window.KaiCreditConnection?.enter(); }
   if (next === "buy-credits") void price();
 }
@@ -91,6 +91,7 @@ bridge?.onOpenView?.(target => {
   if (target?.error) notify(target.error, true);
   if (target?.section === "website-account") window.KaiCoreAccount?.openWebsite();
   if (target?.section === "credit-account") window.KaiCoreAccount?.openCredit();
+  if (target?.section === "access") window.KaiCoreAccess?.open();
 });
 function html(id, value) { if ($(id).innerHTML !== value) $(id).innerHTML = value; }
 function modelDisplayName(value) {
