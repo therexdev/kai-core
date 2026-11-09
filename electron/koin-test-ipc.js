@@ -34,6 +34,9 @@ function save(file, value) {
   fs.renameSync(temp, file);
 }
 function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, dataDir, isTest, powerMonitor }) {
+  const { PluginCreditAccess, creditBinding, workflow } = require("./plugin-credit-access");
+  const creditAccess = new PluginCreditAccess({ dataDir });
+  const nativeCreditCallers = new WeakMap();
   const prepaidRoot = path.join(dataDir, "koin-prepaid-v1"), usdRoot = path.join(dataDir, "koin-prepaid-usd-v1");
   const productRoot = d => isUsd(d) ? usdRoot : prepaidRoot;
   let root = fs.existsSync(path.join(usdRoot, "deployment.json")) ? usdRoot : fs.existsSync(path.join(prepaidRoot, "deployment.json")) ? prepaidRoot : path.join(dataDir, "koin-foundation-test");
@@ -123,10 +126,11 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   const handlePayment = async (event, action, input) => {
     if (disposed) throw Error("Credit service is closing");
     const pluginCaller = pluginPaymentContext.getStore();
+    if (pluginCaller?.creditLease && !creditAccess.valid(pluginCaller.creditLease)) throw Error("Credit access was revoked");
     const callerCreditService = pluginCaller ? pluginCreditService(pluginCaller.pluginId, pluginCaller.fingerprint) : creditService;
     const window = pluginCaller?.window || getMainWindow();
     const contents = pluginCaller?.webContents || window?.webContents;
-    if (pluginCaller ? !window || window.isDestroyed() || !contents || contents.isDestroyed?.() || event.sender !== contents || event.senderFrame !== contents.mainFrame || event.senderFrame.url !== pluginCaller.entry : !trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
+    if (pluginCaller ? !window || window.isDestroyed() || !pluginCaller.backgroundNative && (!contents || contents.isDestroyed?.() || event.sender !== contents || event.senderFrame !== contents.mainFrame || event.senderFrame.url !== pluginCaller.entry) : !trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (action === "network-overview") {
       if (input !== undefined || disposed) throw Error("Network overview takes no arguments and requires an open app");
       // An activated credit network owns its model/qualification/receipt view.
@@ -228,10 +232,10 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (["credit-status", "chat-estimate"].includes(action)) return callerCreditService.run(action, input, AbortSignal.timeout(10000));
       if (["chat-completion", "chat-recover", "chat-ack", "run-open", "run-chat"].includes(action)) {
         if (disposed || creditBusy) throw Error("Finish or stop the current chat first");
-        const continuation = pluginCaller && ["run-chat", "chat-ack"].includes(action);
+        const continuation = pluginCaller && (["run-chat", "chat-ack"].includes(action) || action === "chat-completion" && creditAccess.valid(pluginCaller.creditLease));
         if (!continuation && (!window.isVisible() || window.isMinimized() || pluginCaller?.isVisible && !pluginCaller.isVisible())) throw Error("Return to this app to start a network chat or credit run");
         creditBusy = true;
-        try { return await withChatSignal(window, signal => callerCreditService.run(action, input, signal)); }
+        try { return await withChatSignal(window, signal => callerCreditService.run(action, input, signal, undefined, pluginCaller?.creditBinding)); }
         finally { creditBusy = false; }
       }
     }
@@ -516,20 +520,60 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     }).catch(() => { /* Periodic recovery retries if the network is still unavailable. */ }).finally(() => { providerWake = null; });
   };
   powerMonitor?.on("resume", wakeProvider);
-  return {
+  function validatePluginCaller({ pluginId, fingerprint, entry: expectedEntry, window, webContents = window?.webContents, signal, nativeCreditCaller } = {}, action) {
+    const entry = window && !window.isDestroyed() && webContents && !webContents.isDestroyed?.() ? webContents.mainFrame.url : "";
+    const native = nativeCreditCallers.get(nativeCreditCaller);
+    const background = !webContents && native && !native.signal.aborted && native.pluginId === pluginId && native.fingerprint === fingerprint && native.entry === expectedEntry && ["credit-status", "chat-info", "chat-estimate", "chat-completion", "chat-ack"].includes(action);
+    const allowed = new Set(["credit-status", "chat-info", "chat-estimate", "chat-completion", "chat-ack", "chat-recover", "stop", "run-open", "run-chat", "run-list", "run-status", "run-stop"]);
+    if (disposed || !window || window.isDestroyed() || !require("../core/lib/plugins/package").safeId(pluginId) || !/^[a-f0-9]{64}$/.test(fingerprint || "") || !expectedEntry?.startsWith(`kai-plugin://${pluginId}/`) || !background && entry !== expectedEntry || !allowed.has(action)) throw Error("Plugin payment action denied");
+    signal?.throwIfAborted();
+    return background ? { sender: null, senderFrame: null, backgroundNative: true } : { sender: webContents, senderFrame: webContents.mainFrame };
+  }
+  const adapter = {
+    registerNativeCreditCaller(record) {
+      record.controller.signal.throwIfAborted();
+      const token = Object.freeze({});
+      nativeCreditCallers.set(token, { pluginId: record.manifest.id, fingerprint: record.fingerprint, entry: `kai-plugin://${record.manifest.id}/${record.manifest.entry}`, signal: record.controller.signal });
+      return token;
+    },
+    listCreditAccess: () => creditAccess.list(),
+    revokeCreditAccess: id => creditAccess.revoke(id),
+    endCreditScope: (owner, runId) => creditAccess.end(owner, runId),
+    async accessForPlugin(scope, caller) {
+      workflow(scope); validatePluginCaller(caller, "chat-completion");
+      const context = await pluginCreditService(caller.pluginId, caller.fingerprint).context(caller.signal);
+      validatePluginCaller(caller, "chat-completion");
+      return creditAccess.status({ ...caller, accountBinding: creditBinding(context) }, scope);
+    },
+    async completeForPlugin(input, scope, caller, review) {
+      workflow(scope); validatePluginCaller(caller, "chat-completion");
+      if (!input || !Array.isArray(input.messages) || typeof input.model !== "string" || Buffer.byteLength(JSON.stringify(input)) > 28000) throw Error("Invalid network credit request");
+      const request = structuredClone(input);
+      const context = await pluginCreditService(caller.pluginId, caller.fingerprint).context(caller.signal);
+      const binding = creditBinding(context);
+      // The estimate is authenticated by the same account used for approval.
+      if (core.gateway.network.status?.().privacyMode === "local-only" || core.settings?.get?.("network.privacyMode") === "local-only") throw Error("Local-Only is on. Choose Network to use network credits.");
+      const raw = await context.flow.estimate(request, caller.signal), estimate = raw?.estimate || raw;
+      if (estimate?.unit !== "USD-1e-8" || estimate.model !== request.model.replace(/^koinos-network:/, "") ||
+          ![estimate.maxCharge, estimate.maxFree, estimate.maxPaid].every(n => typeof n === "string" && /^(0|[1-9]\d{0,19})$/.test(n)) || BigInt(estimate.maxFree) + BigInt(estimate.maxPaid) !== BigInt(estimate.maxCharge)) throw Error("The network credit estimate could not be verified");
+      if (estimate.allowed !== true) throw Error("Not enough eligible credits for this network request");
+      validatePluginCaller(caller, "chat-completion");
+      const lease = await creditAccess.acquire({ ...caller, accountBinding: binding }, scope, () => review(estimate), caller.signal);
+      try { return await adapter.runForPlugin("chat-completion", request, { ...caller, signal: lease.signal }, { lease, binding }); }
+      finally { lease.release(); }
+    },
     // Public native SDK adapter: identical credit authority for any granted
     // publisher, with the actual installed renderer bound by the caller.
-    runForPlugin(action, input, { pluginId, fingerprint, entry: expectedEntry, window, webContents = window?.webContents, isVisible, signal } = {}) {
-      const entry = window && !window.isDestroyed() && webContents && !webContents.isDestroyed?.() ? webContents.mainFrame.url : "";
-      const allowed = new Set(["credit-status", "chat-info", "chat-estimate", "chat-completion", "chat-ack", "chat-recover", "stop", "run-open", "run-chat", "run-list", "run-status", "run-stop"]);
-      if (!require("../core/lib/plugins/package").safeId(pluginId) || !/^[a-f0-9]{64}$/.test(fingerprint || "") || !expectedEntry?.startsWith(`kai-plugin://${pluginId}/`) || entry !== expectedEntry || !allowed.has(action)) return Promise.reject(Error("Plugin payment action denied"));
-      signal?.throwIfAborted();
+    runForPlugin(action, input, { pluginId, fingerprint, entry: expectedEntry, window, webContents = window?.webContents, isVisible, signal, nativeCreditCaller } = {}, authorization) {
+      let event;
+      try { event = validatePluginCaller({ pluginId, fingerprint, entry: expectedEntry, window, webContents, signal, nativeCreditCaller }, action); }
+      catch (error) { return Promise.reject(error); }
+      if (authorization && (action !== "chat-completion" || !creditAccess.valid(authorization.lease))) return Promise.reject(Error("Credit access was revoked"));
       if (action === "stop") {
         for (const [controller, owner] of requestOwners) if (owner === webContents) controller.abort();
         return Promise.resolve({ state: "stopped" });
       }
-      const event = { sender: webContents, senderFrame: webContents.mainFrame };
-      const pending = pluginPaymentContext.run({ pluginId, fingerprint, window, webContents, isVisible, signal, entry: event.senderFrame.url }, () => handlePayment(event, action, input));
+      const pending = pluginPaymentContext.run({ pluginId, fingerprint, window, webContents, isVisible, signal, entry: expectedEntry, backgroundNative: event.backgroundNative, creditLease: authorization?.lease, creditBinding: authorization?.binding }, () => handlePayment(event, action, input));
       inFlight.add(pending);
       return pending.finally(() => inFlight.delete(pending));
     },
@@ -547,7 +591,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     },
     isProviding: () => !!worker?.running || !!creditProvider.worker?.running, dispose() {
     if (disposal) return disposal;
-    disposed = true; clearInterval(purchaseTimer); clearInterval(providerTimer); powerMonitor?.removeListener("resume", wakeProvider);
+    disposed = true; creditAccess.dispose(); clearInterval(purchaseTimer); clearInterval(providerTimer); powerMonitor?.removeListener("resume", wakeProvider);
     purchaseSync?.abort.abort(); for (const service of pluginCreditServices.values()) service.dispose(); pluginCreditServices.clear(); creditService.dispose(); payments?.stop(); creditService.purchases.stop();
     for (const controller of activeRequests) controller.abort();
     chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.();
@@ -556,5 +600,6 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     disposal = Promise.allSettled([...inFlight, purchaseSync?.promise, providerPending, providerWake, creditProvider.dispose(), worker?.stop()]).then(() => {});
     return disposal;
   } };
+  return adapter;
 }
 module.exports = { registerTestPaymentIPC, readConfig };

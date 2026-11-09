@@ -22,6 +22,23 @@ function fixture(t, { id="community.test", fingerprint="a".repeat(64), permissio
 }
 function mockFetch(t, implementation){const previous=global.fetch;global.fetch=implementation;t.after(()=>{global.fetch=previous;});}
 
+test("credit review offers explicit durations and retains exact-document review checks", async t => {
+  const f = fixture(t), scope = { id: "run-1", name: "Article" }, request = { model: "koinos-network:test", messages: [{ role: "user", content: "private input" }] };
+  let details, response = 2;
+  f.context.electron.dialog.showMessageBox = async (_window, options) => { details = options; return { response }; };
+  f.context.payments = () => ({ completeForPlugin: async (input, run, caller, review) => {
+    assert.deepEqual(input, request); assert.deepEqual(run, scope); assert.equal(caller.pluginId, "community.test");
+    return review({ model: "test", maxCharge: "100000", maxFree: "100000", maxPaid: "0" });
+  } });
+  assert.equal(await f.api.wallet.complete(request, { workflow: scope }), "workflow");
+  assert.deepEqual(details.buttons, ["Cancel", "Allow once", "Allow for Workflow", "Allow Always"]);
+  assert.equal(details.defaultId, 0); assert.match(details.detail, /current|this run/);
+  response = 3; assert.equal(await f.api.wallet.complete(request, { workflow: scope }), "always");
+  f.context.electron.dialog.showMessageBox = async () => { f.setVisible(false); return { response: 3 }; };
+  assert.equal(await f.api.wallet.complete(request, { workflow: scope }), "cancel");
+  await assert.rejects(f.api.wallet.complete(request, { allowAlways: true }), /Unsupported/);
+});
+
 test("public native API has no raw Core object and checks each capability",t=>{
   const {api}=fixture(t,{permissions:[]});assert.equal(api.core,undefined);assert.equal(api.gateway,undefined);assert.equal(api.accountToken,undefined);
   assert.throws(()=>api.models.list(),/models.read/);assert.throws(()=>api.settings.get("key"),/storage.read/);assert.throws(()=>api.desktop.hostWindowId(),/desktop.windows/);assert.throws(()=>api.wallet.summary(),/wallet.read/);assert.throws(()=>api.secrets.encryptString("secret"),/secrets.use/);

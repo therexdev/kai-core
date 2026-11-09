@@ -47,6 +47,12 @@ jobs:
       - name: Native public plugin SDK (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:foundation-native
+      - name: Credit access and trusted dialogs (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:dialogs
+      - name: Credit access and trusted dialogs (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:dialogs
       - name: Application update desktop check (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:updates

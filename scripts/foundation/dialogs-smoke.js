@@ -11,13 +11,20 @@ async function main() {
   require(path.join(appRoot, "electron/foundation-profile")).prepareFoundationProfile(profile);
   fs.writeFileSync(path.join(profile, "settings.json"), JSON.stringify({ interface: { language: "en" }, network: { privacyMode: "local-only" }, earn: { autoStart: false } }));
   const { signingPayload } = require(path.join(appRoot, "core/lib/plugins/package")), keys = crypto.generateKeyPairSync("ed25519");
-  const manifest = { schema: 2, apiVersion: 3, id: "example.dialogs", name: "Dialog Test Plugin", version: "1.0.0", runtime: "native", entry: "index.html", service: "service.js", permissions: ["native.execute", "desktop.windows"], provides: [], consumes: [] };
+  const manifest = { schema: 2, apiVersion: 3, id: "example.dialogs", name: "Dialog Test Plugin", version: "1.0.0", runtime: "native", entry: "index.html", service: "service.js", permissions: ["native.execute", "desktop.windows", "wallet.authorize", "inference.network"], provides: [], consumes: [] };
   const files = { "index.html": '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\'"><title>Dialog test</title></head><body><h1>Dialog test fixture</h1></body></html>',
-    "service.js": 'exports.create=api=>({call(method){if(method==="review")return api.desktop.confirm("Review Node action","Synthetic review only. No node operation will run.");if(method==="native"){const e=require("electron");return e.dialog.showMessageBox(e.BrowserWindow.fromId(api.desktop.hostWindowId()),{type:"warning",title:"Private key review",message:"Keep this private key offline.",detail:"SYNTHETIC TEST VALUE — not a key",buttons:["Close","Copy private key"],cancelId:0,defaultId:0});}throw Error("Unknown fixture method");},dispose(){}});' };
+    "service.js": 'exports.create=api=>({call(method,input){if(method==="credit")return api.wallet.complete({model:"koinos-network:synthetic",messages:[{role:"user",content:"Synthetic article input"}],max_tokens:100},{workflow:{id:input.id,name:"Research article"}});if(method==="end-credit")return api.wallet.endCreditScope(input.id);if(method==="review")return api.desktop.confirm("Review Node action","Synthetic review only. No node operation will run.");if(method==="native"){const e=require("electron");return e.dialog.showMessageBox(e.BrowserWindow.fromId(api.desktop.hostWindowId()),{type:"warning",title:"Private key review",message:"Keep this private key offline.",detail:"SYNTHETIC TEST VALUE — not a key",buttons:["Close","Copy private key"],cancelId:0,defaultId:0});}throw Error("Unknown fixture method");},dispose(){}});' };
   const pkg = { manifest, files, publicKey: keys.publicKey.export({ type: "spki", format: "der" }).toString("base64"), signature: crypto.sign(null, Buffer.from(signingPayload(manifest, files)), keys.privateKey).toString("base64") };
   new (require(path.join(appRoot, "core/lib/plugins/manager")).PluginManager)(profile).install(pkg, { trustNative: true });
   fs.writeFileSync(path.join(temp, "package.json"), JSON.stringify({ name: "kai-dialog-smoke", version: "1.0.0", main: "desktop.js" }));
   fs.writeFileSync(path.join(temp, "desktop.js"), `require(${JSON.stringify(path.join(__dirname, "apps-fixture.js"))}).install(${JSON.stringify({ appRoot: runtimeRoot, appData: path.join(temp, "app-data"), reportFile: exitReport, syntheticKeychain: true, realDialogs: true })});\nrequire(${JSON.stringify(path.join(runtimeRoot, "electron/core-main.js"))});\n`);
+  // Authenticated network and account fixture; the real consent store, SDK,
+  // payment dispatcher, trusted dialogs and Settings UI are exercised below.
+  const creditFixture = `const CreditService=require(${JSON.stringify(path.join(runtimeRoot,"electron/credit-service.js"))}).CreditService;
+CreditService.prototype.context=async function(){return {auth:{accountId:"synthetic-account",owner:"synthetic-owner",sessionOnly:true},config:{model:"synthetic",schedulerUrl:"https://synthetic.invalid",limits:{perJob:"1000000"}},recoverable:[],flow:{estimate:async()=>({unit:"USD-1e-8",model:"synthetic",allowed:true,maxCharge:"100000",maxFree:"100000",maxPaid:"0"}),chat:async()=>({choices:[{message:{content:"Synthetic answer"}}]}),models:async()=>({models:[]}),call:async()=>({})}};};
+`;
+  const desktopFile=path.join(temp,"desktop.js");
+  fs.writeFileSync(desktopFile,creditFixture+fs.readFileSync(desktopFile,"utf8"));
   const args = []; if (process.platform === "linux" && process.getuid?.() === 0) args.push("--no-sandbox"); if (process.platform === "linux" && !process.env.DISPLAY) args.push("--ozone-platform=headless"); args.push(temp);
   const env = { ...process.env, KAI_CORE_DATA: profile, KAI_CORE_PORT: "0", KAI_CHANNEL: "core" }; delete env.ELECTRON_RUN_AS_NODE; delete env.KAI_SESSION_SECRET; delete env.KAI_CORE_TOKEN;
   let app, page, logs = ""; const pageErrors = [];
@@ -64,6 +71,25 @@ async function main() {
     await pluginCall("sdk-review", 'window.kai.call("review",{})'); popup = await dialog(); assert.match(await popup.locator("body").innerText(), /Dialog Test Plugin/); await capture(popup, "plugin-action-review"); await closeDialog(popup, () => popup.locator("#dialog-close").click(), pluginResult, false);
     await pluginCall("native-review", 'window.kai.call("native",{})'); popup = await dialog(); assert.match(await popup.locator("body").innerText(), /SYNTHETIC TEST VALUE/); await capture(popup, "plugin-private-key-warning"); await closeDialog(popup, () => popup.locator("#dialog-close").click(), async () => (await pluginResult()).response, 0);
     report.checks.push("Native SDK reviews and direct Electron plugin warnings share the same styled trusted surface");
+    await page.evaluate(() => window.kaiCore.call("privacy", {mode:"network"}));
+    await pluginCall("credit-workflow", 'window.kai.call("credit",{id:"article-1"})'); popup = await dialog();
+    for (const label of ["Cancel", "Allow once", "Allow for Workflow", "Allow Always"]) assert.equal(await popup.getByRole("button", {name:label,exact:true}).count(), 1);
+    await capture(popup, "workflow-credit-access");
+    await closeDialog(popup, () => popup.getByRole("button", {name:"Allow for Workflow",exact:true}).click(), async () => (await pluginResult()).choices[0].message.content, "Synthetic answer");
+    await pluginCall("credit-next-step", 'window.kai.call("credit",{id:"article-1"})'); assert.equal((await pluginResult()).choices[0].message.content, "Synthetic answer");
+    await pluginCall("credit-end", 'window.kai.call("end-credit",{id:"article-1"})'); await pluginResult();
+    await pluginCall("credit-always", 'window.kai.call("credit",{id:"article-2"})'); popup = await dialog();
+    await closeDialog(popup, () => popup.getByRole("button", {name:"Allow Always",exact:true}).click(), async () => (await pluginResult()).choices[0].message.content, "Synthetic answer");
+    await page.locator('#settings-nav').click(); await page.locator('#access-list .access-grant').waitFor();
+    await page.locator('#access-settings').scrollIntoViewIfNeeded();
+    const accessScreenshot=path.join(output,"core-access-settings.png");await page.screenshot({path:accessScreenshot});report.screenshots.push(accessScreenshot);
+    await page.getByRole("button", {name:"Revoke access: Dialog Test Plugin",exact:true}).click();
+    await page.locator('#access-empty').waitFor({state:"visible"}); assert.equal(await page.locator('#access-list .access-grant').count(),0);
+    await page.locator('[data-app="example.dialogs"]').click();
+    await pluginCall("credit-revoked", 'window.kai.call("credit",{id:"article-3"}).catch(error=>({cancelled:error.message}))'); popup = await dialog();
+    await closeDialog(popup, () => popup.getByRole("button", {name:"Cancel",exact:true}).click(), async () => /cancelled/.test((await pluginResult()).cancelled), true);
+    await page.evaluate(() => window.kaiCore.call("privacy", {mode:"local-only"}));
+    report.checks.push("Credit duration buttons reuse only their scope; Settings Access revokes always permission and the next request prompts again");
     const literal = '<img src="https://invalid.example/pixel" onerror="window.injected=true">';
     await pluginCall("literal-alert", `window.kai.dialogs.alert(${JSON.stringify(literal)}, {detail:${JSON.stringify("Long readable detail\n".repeat(250))}})`); popup = await dialog();
     assert.match(await popup.locator("body").innerText(), /<img src=/); assert.equal(await popup.locator('img[src^="https:"]').count(), 0); await capture(popup, "long-alert"); await closeDialog(popup, () => popup.locator("#dialog-close").click(), pluginResult, null);

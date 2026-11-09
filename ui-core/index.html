@@ -121,6 +121,14 @@
         <div class="page-head"><div><h1>Settings</h1><p>Make this workspace your own.</p></div></div>
         <article id="language-settings"><h2>Language</h2><p>Choose the language for KAI Core and your plugins.</p><label for="interface-language">Interface language</label><div class="language-setting-row"><select id="interface-language"></select><button id="language-save" class="primary" type="button" disabled>Save language</button></div><p id="language-setting-status" class="muted language-setting-status" role="status" aria-live="polite"></p></article>
         <article><h2>AI privacy</h2><label for="privacy">Where AI can run</label><select id="privacy"><option value="local-only">Local only</option><option value="local-first">Local first</option><option value="network">Network</option></select><p class="muted">Choose Local only to keep chat on this computer. Choose an online mode to use network models and credits.</p></article>
+        <article id="access-settings">
+          <div class="access-heading"><h2 id="access-heading" tabindex="-1">Access</h2><button id="access-refresh" type="button">Refresh</button></div>
+          <p>Manage plugins you have allowed to use network credits without asking each time. Revoking access requires approval before further credit use.</p>
+          <p class="muted">Workflow approvals last for the current run. Always Allowed access stays with the same plugin publisher and credit account until you revoke it.</p>
+          <p id="access-empty" class="muted" hidden>No plugins have ongoing credit access.</p>
+          <ul id="access-list" aria-label="Always Allowed"></ul>
+          <p id="access-status" class="muted" role="status" aria-live="polite"></p>
+        </article>
         <article id="account-settings" class="account-settings">
           <h2 id="account-heading">Koinos AI account</h2>
           <button id="btn-account-scope" class="small" hidden>Website account and Connections</button>
@@ -230,6 +238,6 @@
     <p id="language-error" class="language-error" role="alert"></p><button id="language-continue" class="primary" type="button">Continue</button>
   </dialog>
   <script src="locales/catalogs.js"></script><script src="locales/core.js"></script><script src="i18n.js"></script><script src="language.js"></script>
-  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="apps.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="sidebar-wallet.js"></script><script src="account.js"></script><script src="models.js"></script><script src="updates.js"></script><script src="model-storage.js"></script><script src="core.js"></script><script src="credit-connection.js"></script><script src="alpha-migration.js"></script>
+  <script src="notices.js"></script><script src="credit-account.js"></script><script src="presentation.js"></script><script src="apps.js"></script><script src="chat.js"></script><script src="reward-summary.js"></script><script src="earning.js"></script><script src="network.js"></script><script src="wallet.js"></script><script src="sidebar-wallet.js"></script><script src="account.js"></script><script src="models.js"></script><script src="updates.js"></script><script src="model-storage.js"></script><script src="access.js"></script><script src="core.js"></script><script src="credit-connection.js"></script><script src="alpha-migration.js"></script>
 </body>
 </html>

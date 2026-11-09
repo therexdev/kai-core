@@ -11,24 +11,27 @@ const { registerTestPaymentIPC } = require("../../electron/koin-test-ipc");
 function fixture(t, powerMonitor) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-foundation-finance-"));
   const scopes = new Set();
+  let accountId = "same-account", privacy = "network", onChat;
   t.mock.method(global, "setInterval", () => ({ unref() {} }));
   t.mock.method(CreditProvider.prototype, "dispose", async () => {});
+  t.mock.method(CreditService.prototype, "purchaseState", async () => ({}));
   t.mock.method(CreditService.prototype, "context", async function () {
     scopes.add(this.dataDir);
     const directory = path.join(this.dataDir, "synthetic-account");
     fs.mkdirSync(directory, { recursive: true });
     const recovery = path.join(directory, "recovery.json");
-    const config = { model: "network-test", owner: "same-user-account", schedulerUrl: "https://network.example.test" };
+    const config = { model: "network-test", owner: "same-user-account", schedulerUrl: "https://network.example.test", limits: { perJob: "100000000" } };
     const flow = {
+      estimate: async input => ({ unit: "USD-1e-8", model: input.model.replace(/^koinos-network:/, ""), maxCharge: "100", maxFree: "100", maxPaid: "0", allowed: true }),
       models: async () => ({ models: [{ model: "network-test", available: true, maxOutput: 512 }] }),
       async call(action, value) {
         if (action === "run-open") return { run: { id: value.runId, model: value.model, maxTotal: value.maxTotal, freeOnly: value.freeOnly } };
         return { run: { id: value.runId, status: "open" } };
       },
-      async chat(_owner, input) { const value = { state: "answered", text: input.messages[0].content }; fs.writeFileSync(recovery, JSON.stringify(value)); return value; },
+      async chat(_owner, input, signal) { if (onChat) await onChat(signal); const value = { state: "answered", text: input.messages[0].content }; fs.writeFileSync(recovery, JSON.stringify(value)); return value; },
     };
     return {
-      config, directory, contexts: [{ config, directory }], auth: { accountId: "same-account", owner: config.owner, sessionOnly: false }, flow,
+      config, directory, contexts: [{ config, directory }], auth: { accountId, owner: config.owner, sessionOnly: false }, flow,
       recoverable: fs.existsSync(recovery) ? [{ record: { id: "a".repeat(64) }, flow: { recover: async () => JSON.parse(fs.readFileSync(recovery)), acknowledge: () => fs.rmSync(recovery) } }] : [],
     };
   });
@@ -36,16 +39,69 @@ function fixture(t, powerMonitor) {
   const window = new EventEmitter(); window.isDestroyed = () => false; window.isVisible = () => true; window.isMinimized = () => false;
   window.webContents = contents("http://127.0.0.1:9000/");
   let handler;
-  const registration = registerTestPaymentIPC({ dataDir, core: { gateway: { network: { status: () => ({ privacyMode: "network" }), trackShadowRequest: () => () => {} } } }, isTest: false,
+  const registration = registerTestPaymentIPC({ dataDir, core: { gateway: { network: { status: () => ({ privacyMode: privacy }), trackShadowRequest: () => () => {} } } }, isTest: false,
     dialog: {}, powerMonitor, origin: "http://127.0.0.1:9000", getMainWindow: () => window, ipcMain: { handle(_channel, fn) { handler = fn; } } });
-  const plugin = (pluginId, fingerprint) => {
+  const caller = (pluginId, fingerprint) => {
     const entry = `kai-plugin://${pluginId}/index.html`, webContents = contents(entry);
-    return (action, input) => registration.runForPlugin(action, input, { pluginId, fingerprint, entry, window, webContents, isVisible: () => true });
+    return { pluginId, name: pluginId, fingerprint, entry, window, webContents, isVisible: () => true, lifetimeSignal: new AbortController().signal };
   };
+  const plugin = (pluginId, fingerprint) => { const owner = caller(pluginId, fingerprint); return (action, input) => registration.runForPlugin(action, input, owner); };
   const core = (action, input) => handler({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, action, input);
   t.after(async () => { await registration.dispose(); fs.rmSync(dataDir, { recursive: true, force: true }); });
-  return { dataDir, scopes, plugin, core, registration };
+  return { dataDir, scopes, plugin, caller, core, registration, setAccount: id => accountId = id, setPrivacy: mode => privacy = mode, onChat: fn => onChat = fn };
 }
+
+test("Core reviewed credit completion reuses workflow consent in background and ends it per run", async t => {
+  const f = fixture(t), caller = f.caller("community.writer", "1".repeat(64)), scope = { id: "run-1", name: "Article" };
+  const input = { model: "koinos-network:network-test", messages: [{ role: "user", content: "write" }] }; let reviews = 0;
+  const review = async () => { reviews++; return "workflow"; };
+  await f.registration.completeForPlugin(input, scope, caller, review);
+  caller.isVisible = () => false; caller.window.isVisible = () => false;
+  await f.registration.completeForPlugin(input, scope, caller, review); assert.equal(reviews, 1);
+  assert.equal((await f.registration.accessForPlugin(scope, caller)).duration, "workflow");
+  assert.equal((await f.registration.accessForPlugin({ ...scope, id: "run-2" }, caller)).allowed, false);
+  await assert.rejects(f.registration.runForPlugin("chat-completion", input, caller), /visible|Return/);
+  f.registration.endCreditScope(caller, scope.id);
+  assert.equal((await f.registration.accessForPlugin(scope, caller)).allowed, false);
+});
+
+test("credit approval does not follow an account switch or bypass Local-Only", async t => {
+  const f = fixture(t), caller = f.caller("community.writer", "1".repeat(64));
+  const input = { model: "koinos-network:network-test", messages: [{ role: "user", content: "write" }] };
+  await assert.rejects(f.registration.completeForPlugin(input, undefined, caller, async () => { f.setAccount("different"); return "always"; }), /account changed/);
+  assert.equal((await f.registration.accessForPlugin(undefined, caller)).allowed, false);
+  f.setPrivacy("local-only");
+  await assert.rejects(f.registration.completeForPlugin(input, undefined, caller, () => assert.fail("must not review")), /Local-Only/);
+  await assert.rejects(f.registration.runForPlugin("purchase-approve", {}, caller), /denied/);
+});
+
+test("Core revocation aborts active credit dispatch and removes future access", async t => {
+  const f = fixture(t), caller = f.caller("community.writer", "1".repeat(64));
+  const input = { model: "koinos-network:network-test", messages: [{ role: "user", content: "write" }] };
+  await f.registration.completeForPlugin(input, undefined, caller, async () => "always");
+  let started; const ready = new Promise(resolve => { started = resolve; });
+  f.onChat(signal => new Promise((_resolve, reject) => { signal.addEventListener("abort", () => reject(signal.reason), { once: true }); started(); }));
+  const pending = f.registration.completeForPlugin(input, undefined, caller, () => assert.fail("already allowed"));
+  await ready; f.registration.revokeCreditAccess(f.registration.listCreditAccess()[0].id);
+  await assert.rejects(pending, /stopped|revoked/);
+  assert.equal((await f.registration.accessForPlugin(undefined, caller)).allowed, false);
+});
+
+test("always access can run a loaded signed service before its UI opens, without trusting a forged identity", async t => {
+  const f = fixture(t), caller = f.caller("community.writer", "1".repeat(64));
+  const input = { model: "koinos-network:network-test", messages: [{ role: "user", content: "write" }] };
+  await f.registration.completeForPlugin(input, undefined, caller, async () => "always");
+  const controller = new AbortController();
+  const token = f.registration.registerNativeCreditCaller({ manifest: { id: caller.pluginId, entry: "index.html" }, fingerprint: caller.fingerprint, controller });
+  const background = { ...caller, nativeCreditCaller: token, webContents: null, isVisible: () => false, lifetimeSignal: controller.signal };
+  assert.equal((await f.registration.accessForPlugin(undefined, background)).allowed, true);
+  assert.equal((await f.registration.runForPlugin("chat-info", undefined, background)).models[0].model, "network-test");
+  assert.equal((await f.registration.completeForPlugin(input, undefined, background, () => assert.fail("must reuse"))).text, "write");
+  await assert.rejects(f.registration.runForPlugin("chat-completion", input, background), /Return/);
+  await assert.rejects(f.registration.accessForPlugin(undefined, { ...background, nativeCreditCaller: {} }), /denied/);
+  await assert.rejects(f.registration.accessForPlugin(undefined, { ...background, pluginId: "another.writer" }), /denied/);
+  controller.abort(); await assert.rejects(f.registration.accessForPlugin(undefined, background), /denied/);
+});
 
 test("OS resume recovers earning once and releases its listener on shutdown", async t => {
   const powerMonitor = new EventEmitter(); let wakes = 0, release;

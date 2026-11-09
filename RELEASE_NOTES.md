@@ -1,4 +1,17 @@
-# KAI Core Beta 0.7.22
+# KAI Core Beta 0.7.23
+
+Adds reusable credit permissions for plugins. Network approval can now offer **Allow once**, **Allow for Workflow**, and **Allow Always**.
+
+- **Allow for Workflow** covers the current run, including later steps and continuations. It ends when the run finishes, fails, is cancelled, or Core exits.
+- **Allow Always** lets the same plugin publisher use the approved credit account across future runs and restarts, including background runs. Core still verifies each request and available credits.
+- **Settings → Access** lists ongoing credit access and lets you revoke it. Revocation blocks queued uses and cancels active requests where possible. Already consumed credits cannot be undone.
+- Credit purchases and KOIN transfers retain their separate approvals. Local-Only continues to block network work.
+
+Install Workflows 0.3.7 from the in-app catalog to use these controls with workflow runs.
+
+Update through **Settings → Application updates**, or download the appropriate installer below.
+
+## Previous release: 0.7.22
 
 Moves the compact KOIN/USD balance box to the top of the sidebar, directly above **Chat with KAI**. Click the box to open Wallet; it replaces the separate Wallet menu item and highlights when Wallet is open.
 

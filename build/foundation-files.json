@@ -140,6 +140,7 @@
     "electron/koin-test-config.js",
     "electron/koin-test-ipc.js",
     "electron/koin-test-payments.js",
+    "electron/plugin-credit-access.js",
     "electron/provider-device.js",
     "electron/session-free-chat.js",
     "electron/wallet-session-secret.js",
