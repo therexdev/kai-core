@@ -5,6 +5,21 @@ const { ChatFlow, request } = require("./koin-chat-flow"), { fundedResultHash } 
 const { testDomain } = require("../core/lib/koin-network/payment-mode"), { protocol } = require("../core/lib/koin-network/payment-network");
 const Models = require("./credit-models");
 const price = (t, input, output) => String((BigInt(input) * BigInt(t.inputAtomsPerMillion) + BigInt(output) * BigInt(t.outputAtomsPerMillion) + 999999n) / 1000000n);
+function responseError(response, action) {
+  const status = response.status, timedOut = [408, 504, 524].includes(status);
+  return Object.assign(Error(`The network ${timedOut ? "gateway timed out" : "returned an invalid response"} (HTTP ${status}). ${action === "chat" ? "Your request record was kept for recovery." : "Try again shortly."}`),
+    { code: "credit-response-invalid", status, safeToRetry: false });
+}
+function responseJson(text, response, action) {
+  try { const value = JSON.parse(text); if (!value || typeof value !== "object" || Array.isArray(value)) throw Error(); return value; }
+  catch { throw responseError(response, action); }
+}
+const incomplete = answer => answer.koin.state === "streaming" || answer.koin.receipt.sequence !== undefined;
+function requireComplete(answer, value) {
+  if (value.stream === false && incomplete(answer)) throw Object.assign(Error("The network response ended before the provider finished. The verified partial reply is saved for recovery."),
+    { code: "credit-response-incomplete", requestId: answer.id, safeToRetry: false });
+  return answer;
+}
 // Only the private main-process IPC owns credentials and these requests.
 class PrepaidChat extends ChatFlow {
   constructor(options) {
@@ -42,7 +57,7 @@ class PrepaidChat extends ChatFlow {
           if (!frame.startsWith("data: ")) throw Error("Invalid credit stream frame");
           const data = frame.slice(6); if (data === "[DONE]") { done = true; continue; }
           if (done || ++frames > 4098) throw Error("Invalid credit stream sequence");
-          const value = JSON.parse(data);
+          const value = responseJson(data, response, action);
           if (!value.ok) throw Error(value.error || "Network stream interrupted");
           if (value.product !== this.product || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled) throw Error("Credit stream identity changed");
           await onCompletion?.(value.completion); last = value;
@@ -53,7 +68,7 @@ class PrepaidChat extends ChatFlow {
     }
     let size = 0; const parts = [];
     for await (const part of response.body) { signal.throwIfAborted(); size += part.length; if (size > 1600000) throw Error("Credit response too large"); parts.push(part); }
-    const value = JSON.parse(Buffer.concat(parts).toString("utf8")), wire = protocol(this.target);
+    const value = responseJson(Buffer.concat(parts).toString("utf8"), response, action), wire = protocol(this.target);
     this.access.authorize(this.config.schedulerUrl, signal);
     if (value.product !== this.product || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled || value.owner && value.owner !== this.config.owner) throw Error("Credit account identity changed");
     if (!response.ok || value.ok !== true) throw Error(value.error || "The network is unavailable. Please try again.");
@@ -216,7 +231,20 @@ class PrepaidChat extends ChatFlow {
       await this.call("cancel", { requestId: record.id }, signal); record = null;
     }
     if (record?.requestHash === requestHash && record.state === "answered") {
-      const answer = this.verify(JSON.parse(this.storage.decryptString(Buffer.from(record.answer, "base64"))), input, record.id, this.recoveryProviders(record));
+      let answer = this.verify(JSON.parse(this.storage.decryptString(Buffer.from(record.answer, "base64"))), input, record.id, this.recoveryProviders(record));
+      if (value.stream === false && incomplete(answer)) {
+        // A durable stream prefix is not a complete answer. Read the existing
+        // job only; never submit another generation to repair a lost frame.
+        const old = await this.call("result", { requestId: record.id }, signal);
+        if (old.completion) {
+          const recovered = this.verify(old.completion, input, record.id, this.recoveryProviders(record));
+          if (!recovered.choices[0].message.content.startsWith(answer.choices[0].message.content) ||
+              BigInt(recovered.koin.receipt.usage.amount) < BigInt(answer.koin.receipt.usage.amount)) throw Error("Network recovery prefix changed");
+          answer = recovered;
+          this.save({ ...record, answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
+        }
+      }
+      requireComplete(answer, value);
       // Locally saved delivery survives an acknowledgement response loss.
       await this.call("acknowledge", { requestId: record.id, receiptHash: answer.koin.receiptHash }, signal).catch(() => {});
       return answer;
@@ -226,6 +254,7 @@ class PrepaidChat extends ChatFlow {
       if (old.completion) {
         const answer = this.verify(old.completion, input, record.id, this.recoveryProviders(record));
         this.save({ ...record, state: "answered", answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
+        requireComplete(answer, value);
         await this.call("acknowledge", { requestId: record.id, receiptHash: answer.koin.receiptHash }, signal).catch(() => {});
         return answer;
       }
@@ -254,7 +283,7 @@ class PrepaidChat extends ChatFlow {
         if (!next.startsWith(prefix) || BigInt(receipt.usage.amount) < amount || (receipt.sequence !== undefined && receipt.sequence < sequence)) throw Error("Network stream prefix changed");
         const delta = next.slice(prefix.length); prefix = next; sequence = receipt.sequence ?? sequence; amount = BigInt(receipt.usage.amount);
         this.save({ ...record, state: "answered", answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
-        if (delta) this.progress({ requestId: record.id, delta, servedModel: input.model, creditsAtoms: receipt.usage.amount });
+        if (delta && value.stream !== false) this.progress({ requestId: record.id, delta, servedModel: input.model, creditsAtoms: receipt.usage.amount });
       };
       // Older credit services reject unknown request fields. Advertise delegated
       // receipt support only after this exact service announces the protocol.
@@ -268,12 +297,16 @@ class PrepaidChat extends ChatFlow {
       // above remain recoverable independently of live provider availability.
       if (isUsd(this.product) && this.providerWallets) { await this.models(signal); this.available(input.model); }
       attempt.dispatched = true;
+      // Buffering is a caller delivery preference, not a wire preference.
+      // Stream signed network receipts even for complete-response callers so
+      // long replies do not wait silently behind an HTTP gateway.
       const response = await this.call("chat", { ...(providerDeviceProof ? { providerDeviceProof: 1 } : {}), billing: "koin-" + this.product, requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput,
-        stream: value.stream !== false, ...(record.maxPaid !== undefined ? { maxPaid: record.maxPaid } : {}), ...(input.freeOnly !== undefined ? { freeOnly: input.freeOnly } : {}), ...(input.paidFirst ? { paidFirst: true } : {}), ...(input.runId ? { runId: input.runId } : {}) }, signal, delivered);
+        stream: true, ...(record.maxPaid !== undefined ? { maxPaid: record.maxPaid } : {}), ...(input.freeOnly !== undefined ? { freeOnly: input.freeOnly } : {}), ...(input.paidFirst ? { paidFirst: true } : {}), ...(input.runId ? { runId: input.runId } : {}) }, signal, delivered);
       const answer = this.verify(response.completion, input, record.id, [...this.recoveryProviders(record), ...this.excludedProviders()]);
       // Persist the verified answer before displaying it. The service has already
       // recorded this one usage charge and retains an encrypted recovery copy.
       this.save({ ...record, state: "answered", answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
+      requireComplete(answer, value);
       signal.throwIfAborted();
       await this.call("acknowledge", { requestId: record.id, receiptHash: answer.koin.receiptHash }, signal).catch(() => {});
       return answer;
