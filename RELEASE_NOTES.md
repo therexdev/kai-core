@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.24
+# KAI Core Beta 0.7.25
+
+Fixes the network transport used by Workflows and other plugins requesting a complete model response. Core now receives signed replies incrementally instead of leaving long requests silent behind a gateway. Plugins still receive one completed answer, with the same credit approval and token limits.
+
+HTML gateway responses now report a clear network error and HTTP status instead of “Unexpected token '<'”. Request records and verified partial replies remain available for recovery. Buffered callers require the provider's final signature, and recovery reads the saved job without starting another generation.
+
+Update through **Settings → Application updates**, then restart Core. Keep **Workflows 0.3.9** from the in-app catalog; existing article imports need no changes. Finish or cancel active work before restarting.
+
+## Previous release: 0.7.24
 
 Fixes model availability expiring while Core checks network eligibility. Pricing and provider observations are fetched together, validated when both arrive, and refreshed up to twice if they expire in transit. Provider identity, signed prices and freshness checks remain enforced.
 

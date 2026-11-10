@@ -1,0 +1,135 @@
+"use strict";
+const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+const { Signer } = require("koilib"), P = require("../lib/koin-network/job-protocol"), F = require("../lib/koin-network/funded-protocol");
+const { PrepaidChat } = require("../../electron/koin-prepaid-chat"), { protocol, MAINNET_CHAIN } = require("../lib/koin-network/payment-network");
+function fixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-credit-transport-")); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const provider = Signer.fromSeed("credit-transport-fixture-provider"), model = "transport-fixture";
+  const tariff = Object.fromEntries(Object.entries({ model, version: 1, modelHash: P.hash("model"), tokenizerHash: P.hash("tokens"), templateHash: P.hash("template"),
+    inputAtomsPerMillion: "1000000", outputAtomsPerMillion: "1000000", maxOutputTokens: 64, contextTokens: 4096, maxLatencyMs: 30000 }).sort(([a], [b]) => a.localeCompare(b)));
+  const config = { owner: "account-" + P.hash("transport-buyer"), version: 1, model, maxOutput: 64, schedulerUrl: "https://network.invalid/scheduler",
+    policyHash: P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", tariff])), deployment: { product: "prepaid-usd-v1",
+      chainId: MAINNET_CHAIN, credits: Signer.fromSeed("transport-contract").getAddress(), creditsHash: "0x1220" + P.hash("wasm") } };
+  const storage = { isEncryptionAvailable: () => true, encryptString: s => Buffer.from(s).map(n => n ^ 19), decryptString: b => b.map(n => n ^ 19).toString() };
+  const state = { calls: [], progress: [], result: null };
+  const flow = new PrepaidChat({ config, file: path.join(dir, "chat.json"), storage, access: { authorize: () => ({ owner: config.owner, sessionToken: "fixture-only" }) },
+    progress: value => state.progress.push(value), fetchImpl: async (url, init) => {
+      const action = url.endsWith("/consume/chat/completions") ? "chat" : url.split("/").at(-1), body = JSON.parse(init.body);
+      state.calls.push({ action, body });
+      if (state.respond) { const result = await state.respond(action, body); if (result) return result; }
+      const now = Date.now();
+      const value = action === "models" ? { catalog: { schema: 1, policyHash: config.policyHash, tariffs: [tariff], asOf: now, validUntil: now + 15000, models: [{ model, providers: 1, available: true }] } }
+        : action === "estimate" ? { estimate: { model, unit: "USD-1e-8", maxCharge: "69", maxFree: "69", maxPaid: "0", allowed: true } }
+        : action === "capabilities" ? { capabilities: {} } : action === "result" ? { completion: state.result } : {};
+      return new Response(JSON.stringify(envelope(value)), { headers: { "content-type": "application/json" } });
+    } });
+  const wire = protocol(flow.target), envelope = value => ({ ok: true, product: config.deployment.product, mode: wire.mode, paymentsEnabled: wire.paymentsEnabled, ...value });
+  async function completion(body, output, { partial = false, charged = false, tokens = output.length } = {}) {
+    const at = Date.now(), q = { schema: 2, mode: "shadow", domain: flow.target.domain, policyHash: config.policyHash, tariff,
+      requestHash: P.hash(JSON.stringify(body.messages)), promptHash: P.hash("prompt"), inputIdsHash: P.hash("ids"), inputTokens: 5, maxOutput: body.max_tokens, maxCharge: "69", at, expires: at + 300000 };
+    q.hash = P.hash(JSON.stringify(q));
+    const id = body.requestId, session = P.hash("prepaid-account:" + config.owner), attempt = P.hash("attempt"), job = { id, session, attempt, quote: q };
+    const receipt = { product: config.deployment.product, job: id, owner: config.owner, provider: provider.getAddress(), attempt, quoteHash: q.hash, outputHash: P.hash(output),
+      dispatchedAt: at, completedAt: at + 1, usage: { inputTokens: 5, outputTokens: tokens, amount: String(5 + tokens) },
+      ...(partial ? { sequence: 1 } : {}), signature: Buffer.from(await provider.signHash(partial ? F.fundedChunkHash(flow.target, job, output, 1) : F.fundedResultHash(flow.target, job, output))).toString("base64") };
+    return { id, choices: [{ message: { content: output } }], koin: { product: config.deployment.product, state: partial && !charged ? "streaming" : "charged",
+      target: flow.target, session, quote: q, receipt, receiptHash: P.hash(JSON.stringify(receipt)) } };
+  }
+  const frame = value => "data: " + JSON.stringify(envelope({ completion: value })) + "\n\n";
+  const stream = text => new Response(text, { headers: { "content-type": "text/event-stream" } });
+  const input = { model: "koinos-network:" + model, messages: [{ role: "user", content: "Research this topic" }], max_tokens: 64, stream: false };
+  return { flow, state, input, completion, frame, stream, envelope, signal: () => AbortSignal.timeout(10000) };
+}
+
+test("a buffered caller streams verified receipts through the gateway but receives only the final answer", async t => {
+  const f = fixture(t); let release, prefixSaved;
+  const prefix = new Promise(resolve => prefixSaved = resolve);
+  f.state.respond = async (action, body) => {
+    if (action !== "chat") return;
+    if (!body.stream) return new Response("<!DOCTYPE html><title>Gateway timeout</title>", { status: 524 });
+    const first = await f.completion(body, "Research ", { partial: true }), last = await f.completion(body, "Research complete");
+    return new Response(new ReadableStream({ async start(c) {
+      c.enqueue(Buffer.from(f.frame(first))); prefixSaved();
+      await new Promise(resolve => release = resolve);
+      c.enqueue(Buffer.from(f.frame(last) + "data: [DONE]\n\n")); c.close();
+    } }), { headers: { "content-type": "text/event-stream" } });
+  };
+  let settled = false;
+  const pending = f.flow.chat(null, f.input, f.signal()).finally(() => settled = true);
+  await prefix; for (let i = 0; i < 5; i++) await new Promise(setImmediate);
+  assert.equal(settled, false); assert.equal(f.flow.read().state, "answered", "verified prefix is durable before final delivery");
+  assert.equal(f.state.progress.some(p => typeof p === "object"), false, "buffered callers do not receive deltas");
+  release(); const answer = await pending;
+  assert.equal(answer.choices[0].message.content, "Research complete"); assert.equal(answer.choices[0].finish_reason, "stop");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+  assert.equal(f.state.calls.find(c => c.action === "chat").body.stream, true); assert.equal(f.input.stream, false);
+});
+
+test("a lost final frame recovers the same completed job without a second generation", async t => {
+  const f = fixture(t);
+  f.state.respond = async (action, body) => {
+    if (action !== "chat") return;
+    f.state.result = await f.completion(body, "Recovered answer");
+    return f.stream(f.frame(await f.completion(body, "Recovered ", { partial: true })));
+  };
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), /stream interrupted/);
+  const id = f.flow.read().id;
+  const result = await f.flow.recover(null, f.signal());
+  assert.equal(result.completion.id, id); assert.equal(result.completion.choices[0].message.content, "Recovered answer");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+  assert.equal(f.state.calls.filter(c => c.action === "result").length, 1);
+});
+
+test("a charged signed prefix is retained but cannot masquerade as a completed buffered answer", async t => {
+  const f = fixture(t);
+  f.state.respond = async (action, body) => {
+    if (action !== "chat") return;
+    f.state.result = await f.completion(body, "Unfinished", { partial: true, charged: true });
+    return f.stream(f.frame(f.state.result) + "data: [DONE]\n\n");
+  };
+  const incomplete = e => e.code === "credit-response-incomplete" && e.safeToRetry === false;
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), incomplete);
+  const saved = f.flow.read();
+  await assert.rejects(f.flow.recover(null, f.signal()), incomplete);
+  assert.equal(f.flow.read().id, saved.id); assert.equal(f.flow.read().state, "answered");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+  assert.equal(f.state.calls.some(c => c.action === "acknowledge"), false);
+});
+
+test("HTML gateway failures expose HTTP status, preserve recovery and never authorize a retry", async t => {
+  for (const status of [502, 503, 504, 524]) {
+    const f = fixture(t);
+    f.state.respond = async (action, body) => {
+      if (action !== "chat") return;
+      f.state.result = await f.completion(body, "Saved before disconnect");
+      return new Response("<!DOCTYPE html><title>Private gateway details</title>", { status, headers: { "content-type": "text/html" } });
+    };
+    await assert.rejects(f.flow.chat(null, f.input, f.signal()), e => e.code === "credit-response-invalid" && e.status === status &&
+      e.safeToRetry === false && e.message.includes("HTTP " + status) && !/DOCTYPE|Private gateway|Unexpected token/.test(e.message));
+    const id = f.flow.read().id;
+    assert.equal(f.flow.read().state, "pending");
+    assert.equal((await f.flow.recover(null, f.signal())).completion.id, id);
+    assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+  }
+});
+
+test("invalid JSON and primitive responses fail clearly before credit generation", async t => {
+  for (const body of ["<!DOCTYPE html>", "{broken", "null", "[]"]) {
+    const f = fixture(t); f.state.respond = async action => action === "models" ? new Response(body) : undefined;
+    await assert.rejects(f.flow.chat(null, f.input, f.signal()), e => e.code === "credit-response-invalid" && e.safeToRetry === false);
+    assert.equal(f.flow.read(), null); assert.equal(f.state.calls.some(c => c.action === "chat"), false);
+  }
+});
+
+test("invalid signed stream content cannot be saved or delivered", async t => {
+  const f = fixture(t);
+  f.state.respond = async (action, body) => {
+    if (action !== "chat") return;
+    const bad = await f.completion(body, "Signed");
+    bad.choices[0].message.content = "Tampered";
+    return f.stream(f.frame(bad) + "data: [DONE]\n\n");
+  };
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), /could not be verified/);
+  assert.equal(f.flow.read().state, "pending"); assert.equal(f.flow.read().answer, undefined);
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+});

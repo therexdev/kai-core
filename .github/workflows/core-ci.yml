@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
       - run: npm ci --ignore-scripts --prefix .network-integration
       - name: Verify catalog qualification, signed replies and provider recovery
-        run: node --test --test-name-pattern="additive catalog|delegated worker recovers" core/test/wallet-first-integration.test.js
+        run: node --test --test-name-pattern="additive catalog|delegated worker recovers|buffered network" core/test/wallet-first-integration.test.js
         env:
           KAI_WALLET_BACKEND: ${{ github.workspace }}/.network-integration
       - name: Configure Electron sandbox helper on Linux
