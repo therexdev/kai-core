@@ -5,10 +5,24 @@ const { ChatFlow, request } = require("./koin-chat-flow"), { fundedResultHash } 
 const { testDomain } = require("../core/lib/koin-network/payment-mode"), { protocol } = require("../core/lib/koin-network/payment-network");
 const Models = require("./credit-models");
 const price = (t, input, output) => String((BigInt(input) * BigInt(t.inputAtomsPerMillion) + BigInt(output) * BigInt(t.outputAtomsPerMillion) + 999999n) / 1000000n);
+const readActions = new Set(["models", "network", "capabilities", "estimate", "status", "result"]);
+const transientStatuses = new Set([408, 502, 503, 504, 520, 522, 524]);
+const transportCodes = new Set(["ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"]);
+const operation = action => ({ models: "refreshing model availability", network: "checking network providers", capabilities: "checking network capabilities",
+  estimate: "estimating request credits", status: "checking your credit balance", result: "recovering the saved reply", chat: "requesting the model reply" })[action] || "contacting the credit service";
+const retryableRead = error => error.code === "credit-read-timeout" || error.code === "credit-request-unavailable" || error.code === "credit-response-interrupted" ||
+  error.code === "credit-response-invalid" && transientStatuses.has(error.status);
+function retryDelay(response) {
+  const value = response.headers?.get?.("retry-after");
+  if (!value) return 0;
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  const milliseconds = Date.parse(value) - Date.now();
+  return Number.isFinite(milliseconds) ? Math.max(0, milliseconds) : 0;
+}
 function responseError(response, action) {
   const status = response.status, timedOut = [408, 504, 524].includes(status);
-  return Object.assign(Error(`The network ${timedOut ? "gateway timed out" : "returned an invalid response"} (HTTP ${status}). ${action === "chat" ? "Your request record was kept for recovery." : "Try again shortly."}`),
-    { code: "credit-response-invalid", status, safeToRetry: false });
+  return Object.assign(Error(`The network ${timedOut ? "gateway timed out" : "returned an invalid response"} (HTTP ${status}) while ${operation(action)}. ${action === "chat" ? "Your request record was kept for recovery." : "Try again shortly."}`),
+    { code: "credit-response-invalid", status, action, retryAfterMs: retryDelay(response), safeToRetry: false });
 }
 function responseJson(text, response, action) {
   try { const value = JSON.parse(text); if (!value || typeof value !== "object" || Array.isArray(value)) throw Error(); return value; }
@@ -17,8 +31,8 @@ function responseJson(text, response, action) {
 function interrupted(response, action, body, cause) {
   return Object.assign(Error(action === "chat"
     ? "The network connection closed before the reply finished. The request record was kept for recovery."
-    : "The network connection closed while reading a response. Try again shortly.", { cause }),
-    { code: "credit-response-interrupted", status: response.status, safeToRetry: false, ...(body.requestId ? { requestId: body.requestId } : {}) });
+    : `The network connection closed while ${operation(action)}. Try again shortly.`, { cause }),
+    { code: "credit-response-interrupted", status: response.status, action, safeToRetry: false, ...(body.requestId ? { requestId: body.requestId } : {}) });
 }
 async function* responseParts(response, action, body, signal) {
   try { for await (const part of response.body) { signal.throwIfAborted(); yield part; } }
@@ -34,6 +48,7 @@ function requireComplete(answer, value) {
 class PrepaidChat extends ChatFlow {
   constructor(options) {
     super(options); this.clock = options.clock || Date.now; this.access = options.access; this.fetch = options.fetchImpl || fetch;
+    this.readTimeoutMs = options.readTimeoutMs ?? 10000;
     this.providerWallets = options.providerWallets; this.enforcedProviderWallets = options.enforcedProviderWallets;
     const d = this.config.deployment;
     if (!isPrepaid(d)) throw Error("Prepaid account required");
@@ -41,12 +56,44 @@ class PrepaidChat extends ChatFlow {
     this.target = { chainId: d.chainId, credits: d.credits, creditsHash: d.creditsHash, domain: testDomain(d, this.config.schedulerUrl), policyHash: this.config.policyHash };
   }
   async call(action, body = {}, signal = AbortSignal.timeout(10000), onCompletion) {
+    // Only repeat reads of the same inputs. In particular, never replay chat,
+    // purchases, reservations, cancellation or acknowledgements on a 5xx.
+    // A result lookup refers to one existing job; it cannot create another.
+    const read = readActions.has(action) && (action !== "result" || /^[a-f0-9]{64}$/.test(body.requestId || ""));
+    if (!read) return this.callOnce(action, body, signal, onCompletion);
+    const input = structuredClone(body);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      signal.throwIfAborted();
+      const timeout = AbortSignal.timeout(this.readTimeoutMs), current = AbortSignal.any([signal, timeout]);
+      try { return await this.callOnce(action, input, current, onCompletion); }
+      catch (cause) {
+        signal.throwIfAborted();
+        const error = timeout.aborted ? Object.assign(Error(`The network check timed out while ${operation(action)}. Try again shortly.`, { cause }),
+          { code: "credit-read-timeout", action, safeToRetry: false }) : cause;
+        error.attempts = attempt + 1;
+        const wait = Math.max(attempt === 0 ? 500 : 1500, error.retryAfterMs || 0);
+        if (attempt === 2 || !retryableRead(error) || wait > 10000) throw error;
+        try { await this.wait(wait, signal); }
+        catch (error) { signal.throwIfAborted(); throw error; }
+      }
+    }
+  }
+  async callOnce(action, body, signal, onCompletion) {
+    signal.throwIfAborted();
     const a = this.access.authorize(this.config.schedulerUrl, signal);
     const selectedOwner = a.owner || this.config.owner;
     const route = action === "chat" ? "/consume/chat/completions" : "/koin/prepaid/" + action;
-    const response = await this.fetch(this.config.schedulerUrl + route, { method: "POST", redirect: "error", signal,
+    const request = { method: "POST", redirect: "error", signal,
       headers: { "content-type": "application/json", ...(action === "chat" ? { "x-kai-credit-stream": "keepalive-v1" } : {}), ...(action === "models" ? require("../core/lib/koin-network/catalog-extension").headers(this.config) : {}) }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken,
-        ...(isUsd(this.product) ? { creditWallet: /^account-[a-f0-9]{64}$/.test(selectedOwner) ? null : selectedOwner } : {}) }) });
+        ...(isUsd(this.product) ? { creditWallet: /^account-[a-f0-9]{64}$/.test(selectedOwner) ? null : selectedOwner } : {}) }) };
+    let response;
+    try { response = await this.fetch(this.config.schedulerUrl + route, request); }
+    catch (cause) {
+      signal.throwIfAborted();
+      if (!transportCodes.has(cause.code) && !transportCodes.has(cause.cause?.code)) throw cause;
+      throw Object.assign(Error(`The network connection failed while ${operation(action)}. ${action === "chat" ? "Your request record was kept for recovery." : "Try again shortly."}`, { cause }),
+        { code: "credit-request-unavailable", action, safeToRetry: false });
+    }
     if (response.status === 401 || response.status === 403) {
       // Retire only this rejected free-session bearer. The stable installation
       // identity, its allowance and saved request ID remain unchanged. A caller
@@ -54,6 +101,10 @@ class PrepaidChat extends ChatFlow {
       this.access.invalidate?.(a);
       await response.body?.cancel?.().catch(() => {});
       throw Object.assign(Error("Network access expired. Reconnecting securely."), { code: "credit-access-expired", status: response.status });
+    }
+    if (transientStatuses.has(response.status)) {
+      await response.body?.cancel?.().catch(() => {});
+      throw responseError(response, action);
     }
     if (action === "chat" && response.ok && (response.headers.get("content-type") || "").includes("text/event-stream")) {
       let buffer = "", last, done = false, frames = 0; const decoder = new TextDecoder(), wire = protocol(this.target);
@@ -233,7 +284,7 @@ class PrepaidChat extends ChatFlow {
       answer = this.verify(JSON.parse(this.storage.decryptString(Buffer.from(saved.answer, "base64"))), input, record.id, this.recoveryProviders(saved));
     }
     if (!answer || incomplete(answer)) {
-      // A single lookup of the same job can recover a lost final response.
+      // A bounded lookup of the same job can recover a lost final response.
       // Do not call recover()/chat(): those allow a new explicit generation
       // when the old job has no answer. A disconnect does not authorize that.
       let result;

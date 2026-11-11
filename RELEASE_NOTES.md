@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.26
+# KAI Core Beta 0.7.27
+
+Temporary network failures during model availability, price, balance and saved-reply checks now get up to two retries within the request deadline. This lets a workflow continue when a brief gateway failure clears. Persistent failures identify which check failed.
+
+Retries keep the same request inputs and respect cancellation and revoked access. Generation and payment requests are never automatically resent. Saved replies still require their original request ID and verified provider signature.
+
+Update through **Settings → Application updates**, then restart Core. Keep **Workflows 0.3.11** from the in-app catalog; existing article imports need no changes. Finish or cancel active work before restarting.
+
+## Previous release: 0.7.26
 
 Keeps network replies connected while a model loads or processes a prompt. Core opts in to server keep-alive messages and treats them only as connection activity, never generated text or billable usage. This requires the matching [credit-server update](https://github.com/therexdev/kai/blob/fix/credit-stream-keepalive/deploy/koin-mainnet/CREDIT_STREAM.md).
 
