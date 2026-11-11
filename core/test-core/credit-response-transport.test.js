@@ -11,12 +11,13 @@ function fixture(t) {
     policyHash: P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", tariff])), deployment: { product: "prepaid-usd-v1",
       chainId: MAINNET_CHAIN, credits: Signer.fromSeed("transport-contract").getAddress(), creditsHash: "0x1220" + P.hash("wasm") } };
   const storage = { isEncryptionAvailable: () => true, encryptString: s => Buffer.from(s).map(n => n ^ 19), decryptString: b => b.map(n => n ^ 19).toString() };
-  const state = { calls: [], progress: [], result: null };
+  const state = { calls: [], progress: [], result: null, waits: [] };
   const flow = new PrepaidChat({ config, file: path.join(dir, "chat.json"), storage, access: { authorize: () => ({ owner: config.owner, sessionToken: "fixture-only" }) },
+    wait: async (ms, signal) => { signal.throwIfAborted(); state.waits.push(ms); await state.onWait?.(ms, signal); },
     progress: value => state.progress.push(value), fetchImpl: async (url, init) => {
       const action = url.endsWith("/consume/chat/completions") ? "chat" : url.split("/").at(-1), body = JSON.parse(init.body);
       state.calls.push({ action, body, headers: init.headers });
-      if (state.respond) { const result = await state.respond(action, body); if (result) return result; }
+      if (state.respond) { const result = await state.respond(action, body, init.signal); if (result) return result; }
       const now = Date.now();
       const value = action === "models" ? { catalog: { schema: 1, policyHash: config.policyHash, tariffs: [tariff], asOf: now, validUntil: now + 15000, models: [{ model, providers: 1, available: true }] } }
         : action === "estimate" ? { estimate: { model, unit: "USD-1e-8", maxCharge: "69", maxFree: "69", maxPaid: "0", allowed: true } }
@@ -258,7 +259,144 @@ test("comments do not permit malformed data frames or bypass signed response val
 test("a dropped catalog body fails clearly without submitting or recovering a chat", async t => {
   const f = fixture(t);
   f.state.respond = async action => action === "models" ? new Response(new ReadableStream({ start(c) { c.error(new TypeError("terminated")); } })) : undefined;
-  await assert.rejects(f.flow.chat(null, f.input, f.signal()), e => e.code === "credit-response-interrupted" && /reading a response/.test(e.message));
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), e => e.code === "credit-response-interrupted" && /refreshing model availability/.test(e.message));
   assert.equal(f.flow.read(), null);
   assert.equal(f.state.calls.some(c => ["chat", "result"].includes(c.action)), false);
+});
+
+test("transient model checks retry the same read and then dispatch one generation", async t => {
+  const f = fixture(t); let failures = 0;
+  f.state.respond = async (action, body) => {
+    if (action === "models" && failures++ < 2) return new Response("Bad gateway", { status: 502 });
+    if (action === "chat") return f.stream(f.frame(await f.completion(body, "Success")) + "data: [DONE]\n\n");
+  };
+  const answer = await f.flow.chat(null, f.input, f.signal());
+  assert.equal(answer.choices[0].message.content, "Success");
+  assert.deepEqual(f.state.waits, [500, 1500]);
+  assert.equal(f.state.calls.filter(c => c.action === "models").length, 3);
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+});
+
+test("an outline price check can recover from a 502 without repeating the completed research", async t => {
+  const f = fixture(t); let failOutline = true;
+  f.state.respond = async (action, body) => {
+    const outlining = body.messages?.[0]?.content === "Plan headings";
+    if (action === "estimate" && outlining && failOutline) { failOutline = false; return new Response("Bad gateway", { status: 502 }); }
+    if (action === "chat") return f.stream(f.frame(await f.completion(body, outlining ? "Outline" : "Research")) + "data: [DONE]\n\n");
+  };
+  assert.equal((await f.flow.chat(null, f.input, f.signal())).choices[0].message.content, "Research");
+  const outline = await f.flow.chat(null, { ...f.input, messages: [{ role: "user", content: "Plan headings" }] }, f.signal());
+  assert.equal(outline.choices[0].message.content, "Outline");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 2);
+  assert.equal(f.state.calls.filter(c => c.action === "estimate" && c.body.messages[0].content === "Plan headings").length, 2);
+  assert.deepEqual(f.state.waits, [500]);
+});
+
+test("persistent gateway failures stop after three reads and identify the failed operation", async t => {
+  for (const action of ["models", "network", "estimate", "capabilities", "status", "result"]) {
+    const f = fixture(t), body = action === "result" ? { requestId: P.hash("saved-request") } : {};
+    f.state.respond = async () => new Response("Private upstream failure", { status: 502 });
+    await assert.rejects(f.flow.call(action, body, f.signal()), e => e.code === "credit-response-invalid" && e.status === 502 && e.action === action &&
+      e.attempts === 3 && e.safeToRetry === false && /while /.test(e.message) && !e.message.includes("Private upstream"));
+    assert.equal(f.state.calls.length, 3); assert.deepEqual(f.state.waits, [500, 1500]); assert.equal(f.flow.read(), null);
+    assert.ok(f.state.calls.every(c => c.action === action && (!body.requestId || c.body.requestId === body.requestId)));
+  }
+});
+
+test("no write operation is replayed when the gateway fails, including an uncertain generation", async t => {
+  for (const action of ["chat", "purchase", "quote", "quote-usd", "run-open", "run-stop", "cancel", "acknowledge"]) {
+    const f = fixture(t);
+    f.state.respond = async () => new Response("Bad gateway", { status: 502 });
+    await assert.rejects(f.flow.call(action, { requestId: P.hash("write") }, f.signal()), e => e.status === 502 && e.safeToRetry === false);
+    assert.equal(f.state.calls.length, 1); assert.deepEqual(f.state.waits, []);
+  }
+});
+
+test("network transport failures and truncated read bodies can retry but do not authorize model fallback", async t => {
+  for (const kind of ["socket", "body", "json-502"]) {
+    const f = fixture(t); let count = 0;
+    f.state.respond = async action => {
+      if (action !== "status" || count++ > 0) return;
+      if (kind === "socket") throw new TypeError("fetch failed", { cause: Object.assign(Error("closed"), { code: "ECONNRESET" }) });
+      if (kind === "body") return new Response(new ReadableStream({ start(c) { c.error(new TypeError("terminated")); } }));
+      return Response.json(f.envelope({ ok: false, error: "Upstream unavailable" }), { status: 502 });
+    };
+    assert.equal((await f.flow.call("status", {}, f.signal())).ok, true);
+    assert.equal(f.state.calls.length, 2); assert.deepEqual(f.state.waits, [500]);
+    assert.equal(f.state.calls.some(c => c.action === "chat"), false);
+  }
+});
+
+test("authorization, invalid identity, malformed 200 responses and application errors are not retried", async t => {
+  for (const kind of ["unauthorized", "identity", "malformed", "application", "invalid-url"]) {
+    const f = fixture(t);
+    f.state.respond = async () => {
+      if (kind === "invalid-url") throw Object.assign(new TypeError("Invalid URL"), { code: "ERR_INVALID_URL" });
+      if (kind === "unauthorized") return Response.json({ error: "Expired" }, { status: 401 });
+      if (kind === "identity") return Response.json({ ...f.envelope({}), owner: "another-owner" });
+      if (kind === "malformed") return new Response("{broken");
+      return Response.json(f.envelope({ ok: false, error: "Not enough credits" }), { status: 400 });
+    };
+    await assert.rejects(f.flow.call("status", {}, f.signal()));
+    assert.equal(f.state.calls.length, 1); assert.deepEqual(f.state.waits, []);
+  }
+});
+
+test("cancellation and revoked access during retry delay prevent any further read or generation", async t => {
+  for (const revoke of [false, true]) {
+    const f = fixture(t), controller = new AbortController(), reason = Error("Credit access revoked");
+    f.state.respond = async () => new Response("Unavailable", { status: 503 });
+    f.state.onWait = async () => { if (revoke) f.flow.access.authorize = () => { throw reason; }; else controller.abort(reason); };
+    await assert.rejects(f.flow.call("models", {}, controller.signal), e => e === reason);
+    assert.equal(f.state.calls.length, 1); assert.equal(f.flow.read(), null);
+  }
+});
+
+test("each read attempt has a short deadline while generation retains its caller's deadline", async t => {
+  const f = fixture(t); f.flow.readTimeoutMs = 10;
+  f.state.respond = async (action, body, signal) => {
+    if (action === "status") return new Promise((resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      if (signal.aborted) reject(signal.reason);
+    });
+    if (action === "chat") {
+      await new Promise(resolve => setTimeout(resolve, 30)); signal.throwIfAborted();
+      return f.stream(f.frame(await f.completion(body, "Done")) + "data: [DONE]\n\n");
+    }
+  };
+  // The abort timeout itself is unref'ed; keep the fixture alive for the probe.
+  const alive = setInterval(() => {}, 1000); t.after(() => clearInterval(alive));
+  await assert.rejects(f.flow.call("status", {}, f.signal()), e => e.code === "credit-read-timeout" && e.attempts === 3 && e.action === "status");
+  assert.equal(f.state.calls.filter(c => c.action === "status").length, 3);
+  assert.equal((await f.flow.chat(null, f.input, f.signal())).choices[0].message.content, "Done");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+});
+
+test("retry delays respect Retry-After and do not retry early when the requested wait exceeds the bound", async t => {
+  for (const seconds of [2, 60]) {
+    const f = fixture(t); let count = 0;
+    f.state.respond = async () => count++ === 0 ? new Response("Unavailable", { status: 503, headers: { "retry-after": String(seconds) } }) : undefined;
+    if (seconds === 60) {
+      await assert.rejects(f.flow.call("status", {}, f.signal()), e => e.status === 503 && e.attempts === 1 && e.retryAfterMs === 60000);
+      assert.equal(f.state.calls.length, 1); assert.deepEqual(f.state.waits, []);
+    } else {
+      assert.equal((await f.flow.call("status", {}, f.signal())).ok, true);
+      assert.equal(f.state.calls.length, 2); assert.deepEqual(f.state.waits, [2000]);
+    }
+  }
+});
+
+test("a retried saved-result lookup keeps the original request and verifies the final signed answer", async t => {
+  const f = fixture(t); let reads = 0;
+  f.state.respond = async (action, body) => {
+    if (action === "result" && reads++ === 0) return new Response("Gateway unavailable", { status: 502 });
+    if (action !== "chat") return;
+    f.state.result = await f.completion(body, "Recovered");
+    return f.stream(": kai-keepalive\n\n");
+  };
+  const answer = await f.flow.chat(null, f.input, f.signal());
+  assert.equal(answer.choices[0].message.content, "Recovered");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+  assert.equal(f.state.calls.filter(c => c.action === "result").length, 2);
+  assert.ok(f.state.calls.filter(c => c.action === "result").every(c => c.body.requestId === answer.id));
 });
