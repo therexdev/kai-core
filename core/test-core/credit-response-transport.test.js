@@ -15,7 +15,7 @@ function fixture(t) {
   const flow = new PrepaidChat({ config, file: path.join(dir, "chat.json"), storage, access: { authorize: () => ({ owner: config.owner, sessionToken: "fixture-only" }) },
     progress: value => state.progress.push(value), fetchImpl: async (url, init) => {
       const action = url.endsWith("/consume/chat/completions") ? "chat" : url.split("/").at(-1), body = JSON.parse(init.body);
-      state.calls.push({ action, body });
+      state.calls.push({ action, body, headers: init.headers });
       if (state.respond) { const result = await state.respond(action, body); if (result) return result; }
       const now = Date.now();
       const value = action === "models" ? { catalog: { schema: 1, policyHash: config.policyHash, tariffs: [tariff], asOf: now, validUntil: now + 15000, models: [{ model, providers: 1, available: true }] } }
@@ -63,6 +63,7 @@ test("a buffered caller streams verified receipts through the gateway but receiv
   assert.equal(answer.choices[0].message.content, "Research complete"); assert.equal(answer.choices[0].finish_reason, "stop");
   assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
   assert.equal(f.state.calls.find(c => c.action === "chat").body.stream, true); assert.equal(f.input.stream, false);
+  assert.equal(f.state.calls.find(c => c.action === "chat").headers["x-kai-credit-stream"], "keepalive-v1");
 });
 
 test("a lost final frame recovers the same completed job without a second generation", async t => {
@@ -72,12 +73,12 @@ test("a lost final frame recovers the same completed job without a second genera
     f.state.result = await f.completion(body, "Recovered answer");
     return f.stream(f.frame(await f.completion(body, "Recovered ", { partial: true })));
   };
-  await assert.rejects(f.flow.chat(null, f.input, f.signal()), /stream interrupted/);
+  const answer = await f.flow.chat(null, f.input, f.signal());
   const id = f.flow.read().id;
-  const result = await f.flow.recover(null, f.signal());
-  assert.equal(result.completion.id, id); assert.equal(result.completion.choices[0].message.content, "Recovered answer");
+  assert.equal(answer.id, id); assert.equal(answer.choices[0].message.content, "Recovered answer");
   assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
   assert.equal(f.state.calls.filter(c => c.action === "result").length, 1);
+  assert.equal(f.state.calls.find(c => c.action === "result").body.requestId, id);
 });
 
 test("a charged signed prefix is retained but cannot masquerade as a completed buffered answer", async t => {
@@ -132,4 +133,132 @@ test("invalid signed stream content cannot be saved or delivered", async t => {
   await assert.rejects(f.flow.chat(null, f.input, f.signal()), /could not be verified/);
   assert.equal(f.flow.read().state, "pending"); assert.equal(f.flow.read().answer, undefined);
   assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+});
+
+test("fragmented keep-alive comments never become output, receipts or completion", async t => {
+  const f = fixture(t);
+  f.state.respond = async (action, body) => {
+    if (action !== "chat") return;
+    const final = await f.completion(body, "Ready");
+    const text = ": kai-keepalive\n\n".repeat(4100) + f.frame(final) + ": still-here\n: comment\n\ndata: [DONE]\n\n";
+    return new Response(new ReadableStream({ start(c) {
+      const bytes = Buffer.from(text);
+      for (let i = 0; i < bytes.length; i += 37) c.enqueue(bytes.subarray(i, i + 37));
+      c.close();
+    } }), { headers: { "content-type": "text/event-stream" } });
+  };
+  const answer = await f.flow.chat(null, f.input, f.signal());
+  assert.equal(answer.choices[0].message.content, "Ready");
+  assert.equal(f.state.progress.some(p => typeof p === "object"), false);
+  assert.equal(f.state.calls.some(c => c.action === "result"), false);
+});
+
+test("a real socket cutoff gives a recoverable connection error without starting a second generation", async t => {
+  const f = fixture(t), http = require("node:http"); let socketResponse;
+  const server = http.createServer((req, res) => {
+    req.resume(); res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(": kai-keepalive\n\n"); socketResponse = res;
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  f.state.respond = async action => {
+    if (action !== "chat") return;
+    const response = await fetch(`http://127.0.0.1:${server.address().port}`); socketResponse.destroy(); return response;
+  };
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), e => e.code === "credit-response-interrupted" && e.safeToRetry === false &&
+    e.requestId === f.flow.read().id && /network connection closed/.test(e.message) && e.cause?.message === "terminated");
+  assert.equal(f.flow.read().state, "pending");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+  assert.equal(f.state.calls.filter(c => c.action === "result").length, 1);
+  assert.equal(f.state.calls.filter(c => c.action === "cancel").length, 1);
+});
+
+test("a dropped body can recover a completed signed result with its original request ID", async t => {
+  const f = fixture(t);
+  f.state.respond = async (action, body) => {
+    if (action !== "chat") return;
+    f.state.result = await f.completion(body, "Recovered");
+    return new Response(new ReadableStream({ start(c) { c.error(new TypeError("terminated")); } }), { headers: { "content-type": "text/event-stream" } });
+  };
+  const answer = await f.flow.chat(null, f.input, f.signal());
+  assert.equal(answer.choices[0].message.content, "Recovered");
+  assert.equal(f.state.calls.find(c => c.action === "result").body.requestId, answer.id);
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+  assert.equal(f.state.calls.some(c => c.action === "cancel"), false);
+});
+
+test("a saved final receipt survives a missing DONE marker without another remote result lookup", async t => {
+  const f = fixture(t);
+  f.state.respond = async (action, body) => action === "chat" ? f.stream(f.frame(await f.completion(body, "Finished"))) : undefined;
+  assert.equal((await f.flow.chat(null, f.input, f.signal())).choices[0].message.content, "Finished");
+  assert.equal(f.state.calls.some(c => c.action === "result"), false);
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+});
+
+test("a disconnected signed prefix stays saved and cannot complete a workflow or authorize a fallback", async t => {
+  const f = fixture(t);
+  f.state.respond = async (action, body) => {
+    if (action !== "chat") return;
+    f.state.result = await f.completion(body, "Partial", { partial: true, charged: true });
+    return f.stream(f.frame(await f.completion(body, "Partial", { partial: true })));
+  };
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), e => e.code === "credit-response-interrupted" && e.safeToRetry === false);
+  const saved = f.flow.read(); assert.equal(saved.state, "answered");
+  assert.equal(JSON.parse(f.flow.storage.decryptString(Buffer.from(saved.answer, "base64"))).choices[0].message.content, "Partial");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+  assert.equal(f.state.calls.filter(c => c.action === "result").length, 1);
+  assert.equal(f.state.calls.some(c => c.action === "acknowledge"), false);
+});
+
+test("keep-alives alone and a failed recovery lookup preserve the interrupted request", async t => {
+  const f = fixture(t);
+  f.state.respond = async action => {
+    if (action === "chat") return f.stream(": kai-keepalive\n\n");
+    if (action === "result") throw Error("Read unavailable");
+  };
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), e => e.code === "credit-response-interrupted" && e.safeToRetry === false);
+  assert.equal(f.flow.read().state, "pending");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+  assert.equal(f.state.calls.filter(c => c.action === "result").length, 1);
+});
+
+test("a forged recovery answer cannot replace a verified prefix", async t => {
+  const f = fixture(t);
+  f.state.respond = async (action, body) => {
+    if (action !== "chat") return;
+    f.state.result = await f.completion(body, "Original final");
+    f.state.result.choices[0].message.content = "Forged";
+    return f.stream(f.frame(await f.completion(body, "Original", { partial: true })));
+  };
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), /could not be verified/);
+  assert.equal(JSON.parse(f.flow.storage.decryptString(Buffer.from(f.flow.read().answer, "base64"))).choices[0].message.content, "Original");
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+});
+
+test("cancellation retains its original reason and does not perform automatic recovery", async t => {
+  const f = fixture(t), controller = new AbortController(), reason = Error("User stopped the workflow");
+  f.state.respond = async action => {
+    if (action !== "chat") return;
+    controller.abort(reason);
+    return new Response(new ReadableStream({ start(c) { c.error(new TypeError("terminated")); } }), { headers: { "content-type": "text/event-stream" } });
+  };
+  await assert.rejects(f.flow.chat(null, f.input, controller.signal), e => e === reason);
+  assert.equal(f.state.calls.some(c => c.action === "result"), false);
+  assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+});
+
+test("comments do not permit malformed data frames or bypass signed response validation", async t => {
+  const f = fixture(t);
+  f.state.respond = async action => action === "chat" ? f.stream(": heartbeat\ninvalid-field\n\n") : undefined;
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), /Invalid credit stream frame/);
+  assert.equal(f.flow.read().answer, undefined);
+  assert.equal(f.state.calls.some(c => c.action === "result"), false);
+});
+
+test("a dropped catalog body fails clearly without submitting or recovering a chat", async t => {
+  const f = fixture(t);
+  f.state.respond = async action => action === "models" ? new Response(new ReadableStream({ start(c) { c.error(new TypeError("terminated")); } })) : undefined;
+  await assert.rejects(f.flow.chat(null, f.input, f.signal()), e => e.code === "credit-response-interrupted" && /reading a response/.test(e.message));
+  assert.equal(f.flow.read(), null);
+  assert.equal(f.state.calls.some(c => ["chat", "result"].includes(c.action)), false);
 });
