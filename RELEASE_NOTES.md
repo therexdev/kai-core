@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.25
+# KAI Core Beta 0.7.26
+
+Keeps network replies connected while a model loads or processes a prompt. Core opts in to server keep-alive messages and treats them only as connection activity, never generated text or billable usage. This requires the matching [credit-server update](https://github.com/therexdev/kai/blob/fix/credit-stream-keepalive/deploy/koin-mainnet/CREDIT_STREAM.md).
+
+If a reply connection breaks, Core checks the same request for an already completed, signed answer without submitting another generation. Verified partial replies and request records remain saved. Unrecoverable disconnects show a clear network error instead of `terminated`. Cancellation, output limits and credit approvals still apply.
+
+Update through **Settings → Application updates**, then restart Core. Keep **Workflows 0.3.11** from the in-app catalog; existing article imports need no changes. Finish or cancel active work before restarting.
+
+## Previous release: 0.7.25
 
 Fixes the network transport used by Workflows and other plugins requesting a complete model response. Core now receives signed replies incrementally instead of leaving long requests silent behind a gateway. Plugins still receive one completed answer, with the same credit approval and token limits.
 

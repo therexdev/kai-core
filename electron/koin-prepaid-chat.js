@@ -14,6 +14,16 @@ function responseJson(text, response, action) {
   try { const value = JSON.parse(text); if (!value || typeof value !== "object" || Array.isArray(value)) throw Error(); return value; }
   catch { throw responseError(response, action); }
 }
+function interrupted(response, action, body, cause) {
+  return Object.assign(Error(action === "chat"
+    ? "The network connection closed before the reply finished. The request record was kept for recovery."
+    : "The network connection closed while reading a response. Try again shortly.", { cause }),
+    { code: "credit-response-interrupted", status: response.status, safeToRetry: false, ...(body.requestId ? { requestId: body.requestId } : {}) });
+}
+async function* responseParts(response, action, body, signal) {
+  try { for await (const part of response.body) { signal.throwIfAborted(); yield part; } }
+  catch (cause) { signal.throwIfAborted(); throw interrupted(response, action, body, cause); }
+}
 const incomplete = answer => answer.koin.state === "streaming" || answer.koin.receipt.sequence !== undefined;
 function requireComplete(answer, value) {
   if (value.stream === false && incomplete(answer)) throw Object.assign(Error("The network response ended before the provider finished. The verified partial reply is saved for recovery."),
@@ -35,7 +45,7 @@ class PrepaidChat extends ChatFlow {
     const selectedOwner = a.owner || this.config.owner;
     const route = action === "chat" ? "/consume/chat/completions" : "/koin/prepaid/" + action;
     const response = await this.fetch(this.config.schedulerUrl + route, { method: "POST", redirect: "error", signal,
-      headers: { "content-type": "application/json", ...(action === "models" ? require("../core/lib/koin-network/catalog-extension").headers(this.config) : {}) }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken,
+      headers: { "content-type": "application/json", ...(action === "chat" ? { "x-kai-credit-stream": "keepalive-v1" } : {}), ...(action === "models" ? require("../core/lib/koin-network/catalog-extension").headers(this.config) : {}) }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken,
         ...(isUsd(this.product) ? { creditWallet: /^account-[a-f0-9]{64}$/.test(selectedOwner) ? null : selectedOwner } : {}) }) });
     if (response.status === 401 || response.status === 403) {
       // Retire only this rejected free-session bearer. The stable installation
@@ -47,13 +57,16 @@ class PrepaidChat extends ChatFlow {
     }
     if (action === "chat" && response.ok && (response.headers.get("content-type") || "").includes("text/event-stream")) {
       let buffer = "", last, done = false, frames = 0; const decoder = new TextDecoder(), wire = protocol(this.target);
-      for await (const part of response.body) {
+      for await (const part of responseParts(response, action, body, signal)) {
         signal.throwIfAborted(); this.access.authorize(this.config.schedulerUrl, signal);
         buffer += decoder.decode(part, { stream: true });
         if (Buffer.byteLength(buffer) > 1600000) throw Error("Credit stream frame too large");
         let end;
         while ((end = buffer.indexOf("\n\n")) >= 0) {
           const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+          // Standard SSE comments keep an idle gateway connection open. They
+          // are never model output and cannot satisfy completion or billing.
+          if (frame.split("\n").every(line => line.startsWith(":"))) continue;
           if (!frame.startsWith("data: ")) throw Error("Invalid credit stream frame");
           const data = frame.slice(6); if (data === "[DONE]") { done = true; continue; }
           if (done || ++frames > 4098) throw Error("Invalid credit stream sequence");
@@ -63,11 +76,11 @@ class PrepaidChat extends ChatFlow {
           await onCompletion?.(value.completion); last = value;
         }
       }
-      if (!done || !last || buffer.trim()) throw Error("Network stream interrupted. Your saved reply can be recovered without another charge.");
+      if (!done || !last || buffer.trim()) throw interrupted(response, action, body);
       return last;
     }
     let size = 0; const parts = [];
-    for await (const part of response.body) { signal.throwIfAborted(); size += part.length; if (size > 1600000) throw Error("Credit response too large"); parts.push(part); }
+    for await (const part of responseParts(response, action, body, signal)) { signal.throwIfAborted(); size += part.length; if (size > 1600000) throw Error("Credit response too large"); parts.push(part); }
     const value = responseJson(Buffer.concat(parts).toString("utf8"), response, action), wire = protocol(this.target);
     this.access.authorize(this.config.schedulerUrl, signal);
     if (value.product !== this.product || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled || value.owner && value.owner !== this.config.owner) throw Error("Credit account identity changed");
@@ -212,6 +225,28 @@ class PrepaidChat extends ChatFlow {
   async chat(window, value, signal) {
     return this.trackAvailability(attempt => this.chatRequest(window, value, signal, attempt), signal);
   }
+  async interruptedAnswer(record, input, signal, delivered) {
+    const saved = this.read();
+    if (saved?.id !== record.id || !["pending", "answered"].includes(saved.state)) return null;
+    let answer;
+    if (saved.answer) {
+      answer = this.verify(JSON.parse(this.storage.decryptString(Buffer.from(saved.answer, "base64"))), input, record.id, this.recoveryProviders(saved));
+    }
+    if (!answer || incomplete(answer)) {
+      // A single lookup of the same job can recover a lost final response.
+      // Do not call recover()/chat(): those allow a new explicit generation
+      // when the old job has no answer. A disconnect does not authorize that.
+      let result;
+      try { result = await this.call("result", { requestId: record.id }, AbortSignal.any([signal, AbortSignal.timeout(10000)])); }
+      catch { signal.throwIfAborted(); return null; }
+      if (result.completion) answer = delivered(result.completion);
+    }
+    if (!answer || incomplete(answer)) return null;
+    signal.throwIfAborted();
+    await this.call("acknowledge", { requestId: record.id, receiptHash: answer.koin.receiptHash }, AbortSignal.any([signal, AbortSignal.timeout(10000)])).catch(() => {});
+    signal.throwIfAborted();
+    return answer;
+  }
   async chatRequest(window, value, signal, attempt) {
     signal.throwIfAborted();
     if (!this.storage?.isEncryptionAvailable?.()) throw Error("Unlock secure storage to chat");
@@ -276,15 +311,16 @@ class PrepaidChat extends ChatFlow {
       attempt.created = record;
     }
     this.progress(record.costEstimate ? `Generating your answer · maximum ${require("../core/lib/koin-network/purchase-quote").credits(record.costEstimate.maxCharge)} credits · up to ${require("../core/lib/koin-network/purchase-quote").credits(record.maxPaid)} purchased credits ${input.paidFirst ? "before" : "after"} free credits` : "Generating your answer…");
+    let prefix = "", sequence = 0, amount = 0n;
+    const delivered = completion => {
+      const answer = this.verify(completion, input, record.id, [...this.recoveryProviders(record), ...this.excludedProviders()]), next = answer.choices[0].message.content, receipt = answer.koin.receipt;
+      if (!next.startsWith(prefix) || BigInt(receipt.usage.amount) < amount || (receipt.sequence !== undefined && receipt.sequence < sequence)) throw Error("Network stream prefix changed");
+      const delta = next.slice(prefix.length); prefix = next; sequence = receipt.sequence ?? sequence; amount = BigInt(receipt.usage.amount);
+      this.save({ ...record, state: "answered", answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
+      if (delta && value.stream !== false) this.progress({ requestId: record.id, delta, servedModel: input.model, creditsAtoms: receipt.usage.amount });
+      return answer;
+    };
     try {
-      let prefix = "", sequence = 0, amount = 0n;
-      const delivered = completion => {
-        const answer = this.verify(completion, input, record.id, [...this.recoveryProviders(record), ...this.excludedProviders()]), next = answer.choices[0].message.content, receipt = answer.koin.receipt;
-        if (!next.startsWith(prefix) || BigInt(receipt.usage.amount) < amount || (receipt.sequence !== undefined && receipt.sequence < sequence)) throw Error("Network stream prefix changed");
-        const delta = next.slice(prefix.length); prefix = next; sequence = receipt.sequence ?? sequence; amount = BigInt(receipt.usage.amount);
-        this.save({ ...record, state: "answered", answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
-        if (delta && value.stream !== false) this.progress({ requestId: record.id, delta, servedModel: input.model, creditsAtoms: receipt.usage.amount });
-      };
       // Older credit services reject unknown request fields. Advertise delegated
       // receipt support only after this exact service announces the protocol.
       if (isUsd(this.product) && this.providerDeviceProof === undefined) {
@@ -311,8 +347,12 @@ class PrepaidChat extends ChatFlow {
       await this.call("acknowledge", { requestId: record.id, receiptHash: answer.koin.receiptHash }, signal).catch(() => {});
       return answer;
     } catch (e) {
+      if (e.code === "credit-response-interrupted" && attempt.dispatched && !signal.aborted) {
+        const answer = await this.interruptedAnswer(record, input, signal, delivered);
+        if (answer) return answer;
+      }
       if (attempt.dispatched && this.read()?.state === "pending" && !signal.aborted) {
-        await this.call("cancel", { requestId: record.id }, signal).catch(() => {});
+        await this.call("cancel", { requestId: record.id }, AbortSignal.any([signal, AbortSignal.timeout(10000)])).catch(() => {});
         // Preserve the request ID: the server may have committed an answer
         // before a lost response. Retry retrieves it without another debit.
       }
