@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.27
+# KAI Core Beta 0.7.28
+
+Native plugin model requests now have a bounded 15-minute Core ceiling, replacing the shared 180-second deadline that could terminate a network reply while its provider was loading a model, processing the prompt or generating. A plugin can still set a shorter timeout. This applies equally to local inference, network completions and explicit saved-response recovery; ordinary credit reads retain their existing limit.
+
+Stop, plugin shutdown, revoked credit access and privacy changes retain their existing cancellation behavior. No generation or payment is automatically resent by this change. Credit approvals, token budgets and verified recovery records are preserved.
+
+Update through **Settings → Application updates** and restart Core. Update **Workflows to 0.3.14** in the plugin catalog for its matching 10-minute per-reply setting and research corrections. Updating only one layer does not remove both old three-minute limits.
+
+## Previous release: 0.7.27
 
 Temporary network failures during model availability, price, balance and saved-reply checks now get up to two retries within the request deadline. This lets a workflow continue when a brief gateway failure clears. Persistent failures identify which check failed.
 

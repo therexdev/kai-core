@@ -142,3 +142,33 @@ test("embeddings use only a validated installed model and the private authentica
   await assert.rejects(f.api.models.embeddings({model:"koinos-network",input:"text"}),/local embedding model/);
   const result=await f.api.models.embeddings({model:"local-model",input:"text"});assert.deepEqual(result.data[0].embedding,[0.1,0.2]);assert.match(called.url,/\/core\/embeddings$/);assert.equal(called.options.headers.authorization,"Bearer core-only-secret");
 });
+
+test("plugin inference outlives three minutes while ordinary credit reads remain bounded", async t => {
+  t.mock.timers.enable({apis:["setTimeout"]});
+  t.mock.method(AbortSignal,"timeout",ms=>{const c=new AbortController();setTimeout(()=>c.abort(new DOMException("Timed out","TimeoutError")),ms);return c.signal;});
+  const f=fixture(t), calls=[];
+  f.context.payments=()=>({
+    completeForPlugin:async(_input,_scope,caller)=>{calls.push(caller.signal);return{};},
+    runForPlugin:async(action,_input,caller)=>{calls.push(caller.signal);return{completion:{choices:[{message:{content:"ok"}}]}};}
+  });
+  mockFetch(t,async(_url,options)=>{calls.push(options.signal);return new Response('{"choices":[]}');});
+  const request={model:"koinos-network:test",messages:[{role:"user",content:"Article"}]};
+  await f.api.wallet.complete(request,{workflow:{id:"run",name:"Article"}});
+  await f.api.wallet.authorize("chat-completion",request);
+  await f.api.wallet.authorize("chat-recover",{});
+  await f.api.models.chat({model:"local-model",messages:[]});
+  await f.api.wallet.authorize("chat-info",{});
+  t.mock.timers.tick(180001);
+  assert.deepEqual(calls.map(s=>s.aborted),[false,false,false,false,true]);
+  t.mock.timers.tick(719999);
+  assert.ok(calls.every(s=>s.aborted));
+});
+test("inference retains caller cancellation and plugin lifetime revocation inside its longer ceiling", async t => {
+  const f=fixture(t), calls=[], shorter=new AbortController();
+  f.context.payments=()=>({completeForPlugin:async(_input,_scope,caller)=>{calls.push(caller.signal);return{};}});
+  const request={model:"koinos-network:test",messages:[]};
+  await f.api.wallet.complete(request,{},shorter.signal);
+  await f.api.wallet.complete(request,{});
+  shorter.abort(Error("Stop this step"));assert.equal(calls[0].aborted,true);assert.equal(calls[1].aborted,false);
+  f.controller.abort(Error("Plugin disabled"));assert.equal(calls[1].aborted,true);
+});

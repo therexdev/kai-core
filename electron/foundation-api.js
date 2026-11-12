@@ -6,12 +6,13 @@ const fs = require("node:fs"), path = require("node:path"), crypto = require("no
 const { assertPublicTarget } = require("../core/lib/public-http");
 const { pinnedRequest, boundedResponse } = require("./foundation-network");
 const CORE_VIEWS = new Set(["chat", "models", "plugins", "wallet", "credits", "buy-credits", "earning", "network", "settings"]);
+const INFERENCE_TIMEOUT_MS = 15 * 60 * 1000;
 function createFoundationApi(ctx, record) {
   const { core, electron } = ctx, id = record.manifest.id;
   const signal = record.controller.signal, grants = new Set(record.manifest.permissions);
   const active = () => { signal.throwIfAborted(); if (ctx.isClosing?.()) throw Error("KAI is closing"); };
   const requireGrant = permission => { active(); if (!grants.has(permission)) throw Error(`Plugin requires ${permission}`); };
-  const combined = extra => AbortSignal.any([signal, ...(extra ? [extra] : []), AbortSignal.timeout(180000)]);
+  const combined = (extra, timeout = 180000) => AbortSignal.any([signal, ...(extra ? [extra] : []), AbortSignal.timeout(timeout)]);
   const window = () => ctx.getWindow();
   const contents = () => ctx.getWebContents(id);
   let nativeCreditCaller;
@@ -67,12 +68,12 @@ function createFoundationApi(ctx, record) {
       return new Response(JSON.stringify(result.completion),{status:200,headers:{"content-type":"application/json"}});
     }
     if (!core.models.aliases().some(model => model.alias === input.model && model.status === "ready")) throw Error("Choose an installed local model");
-    const response = await fetch(`http://127.0.0.1:${core.gateway.port}/core/chat/completions`, { method:"POST", signal:combined(extraSignal), redirect:"error",
+    const response = await fetch(`http://127.0.0.1:${core.gateway.port}/core/chat/completions`, { method:"POST", signal:combined(extraSignal, INFERENCE_TIMEOUT_MS), redirect:"error",
       headers:{"content-type":"application/json",...(core.gateway.coreToken ? {authorization:`Bearer ${core.gateway.coreToken}`}:{})},
       body:JSON.stringify({...input,kai_private_desktop:true}) });
     active(); return response;
   }
-  function paymentCaller(permission, extraSignal, background = false) {
+  function paymentCaller(permission, extraSignal, background = false, timeout = 180000) {
     const origin = record.invocation?.();
     const owner = origin || { id, name: record.manifest.name, fingerprint: record.fingerprint, permissions: record.manifest.permissions, webContents: contents(), frame: contents()?.mainFrame, entry: `kai-plugin://${id}/${record.manifest.entry}`, signal };
     if (!owner.permissions.includes(permission)) throw Error(`Initiating plugin requires ${permission}`);
@@ -82,19 +83,22 @@ function createFoundationApi(ctx, record) {
     // Only Core can issue this opaque identity for a loaded signed service.
     // It permits background reads and already-approved completions, never UI review.
     if (!wc && !nativeCreditCaller) nativeCreditCaller = ctx.payments().registerNativeCreditCaller(record);
-    return { pluginId: owner.id, name: owner.name, fingerprint: owner.fingerprint, entry: owner.entry, window: window(), webContents: wc || null, nativeCreditCaller: !wc ? nativeCreditCaller : undefined, isVisible: () => ctx.isVisible(owner.id), lifetimeSignal: owner.signal, signal: AbortSignal.any([combined(extraSignal), owner.signal]) };
+    return { pluginId: owner.id, name: owner.name, fingerprint: owner.fingerprint, entry: owner.entry, window: window(), webContents: wc || null, nativeCreditCaller: !wc ? nativeCreditCaller : undefined, isVisible: () => ctx.isVisible(owner.id), lifetimeSignal: owner.signal, signal: AbortSignal.any([combined(extraSignal, timeout), owner.signal]) };
   }
   async function authorize(action,input,extraSignal) {
     requireGrant("wallet.authorize");
-    return ctx.payments().runForPlugin(action,input,paymentCaller("wallet.authorize",extraSignal,["credit-status","chat-info","chat-estimate","chat-ack"].includes(action)));
+    return ctx.payments().runForPlugin(action,input,paymentCaller("wallet.authorize",extraSignal,["credit-status","chat-info","chat-estimate","chat-ack"].includes(action),["chat-completion","chat-recover"].includes(action) ? INFERENCE_TIMEOUT_MS : 180000));
   }
   async function complete(input, options = {}, extraSignal) {
     requireGrant("wallet.authorize"); requireGrant("inference.network");
     if (!options || Object.keys(options).some(key => key !== "workflow")) throw Error("Unsupported credit request options");
     const scope = require("./plugin-credit-access").workflow(options.workflow);
-    const caller = paymentCaller("wallet.authorize", extraSignal, true);
+    // Generation includes queueing, model loading and prompt processing. Keep
+    // the ordinary request ceiling for reads, but let inference callers choose
+    // a shorter deadline inside this bounded 15-minute ceiling.
+    const caller = paymentCaller("wallet.authorize", extraSignal, true, INFERENCE_TIMEOUT_MS);
     // The originating plugin needs both grants, including through service RPC.
-    paymentCaller("inference.network", extraSignal, true);
+    paymentCaller("inference.network", extraSignal, true, INFERENCE_TIMEOUT_MS);
     return ctx.payments().completeForPlugin(input, scope || undefined, caller, async estimate => {
       const language = core.locale?.get().language || "en", table = require("../ui-core/locales/core.json")[language] || {};
       const t = (source, ...values) => (table[source] || source).replace(/\{(\d+)\}/g, (_, n) => String(values[Number(n)] ?? ""));
