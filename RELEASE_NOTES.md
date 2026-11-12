@@ -1,8 +1,10 @@
-# Unreleased
+# KAI Core Beta 0.7.29
 
 Adds **Model library → Unsupported Earn Models** for downloading and testing Gemma 4 12B, Muse-Glimmer 30B, Qwen 3.8 27B, and Gemma 4 31B locally. Cards show file sizes, suggested memory, and an optional GitHub feedback report. Downloads reuse the existing queue, cancellation, and SHA-256 verification.
 
 These experimental models cannot be offered or used for Earn, including when sharing all compatible installed models. Approval requires a later reviewed Core catalog change and the matching network tariff/pins. Local testing does not qualify a model for rewards.
+
+Update through **Settings → Application updates**, then choose **Download update** and **Restart and install**. Open **Model library → Unsupported Earn Models** to try the new choices. These are experimental local models; loading speed and writing quality still need community testing.
 
 ## Previous release: KAI Core Beta 0.7.28
 
