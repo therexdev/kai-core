@@ -24,7 +24,9 @@ async function action(button, fn) { globalNotice.clear(); if (button) button.dis
 const apps = window.KaiCoreApps?.create({ document, bridge, open: plugin => { void openApp(plugin); }, manage: plugin => {
   showPage("plugins"); notify(`${window.KaiPluginPresentation.get(plugin.id, plugin).name} is disabled. Choose Enable in Your installed plugins to use it.`);
 }, notify });
-const modelCards = window.KaiCoreModels.create({ document, container: $("models"), request: api, refresh });
+const modelCards = window.KaiCoreModels.create({ document, container: $("models"),
+  unsupportedContainer: $("unsupported-models"), unsupportedSection: $("unsupported-models-section"),
+  openFeedback: url => bridge.call("desktop.openExternal", { url }), request: api, refresh });
 function appBounds() {
   const rect = $("app-content")?.getBoundingClientRect?.();
   return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;

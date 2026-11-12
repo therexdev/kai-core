@@ -85,3 +85,19 @@ test("a queued fallback switch keeps an active caller's served model until its l
   assert.equal(starts, 1);
   assert.equal(f.runtime.servedModelName(), "koinos-koinos-fast");
 });
+
+test("local test models pass their required chat templates and bounded reasoning to the managed engine", async () => {
+  for (const alias of ["gemma4-12b", "muse-glimmer-30b", "qwen38-27b", "gemma4-31b"]) {
+    const f = fixture({ alias }); await f.runtime.ensure(alias);
+    assert.ok(f.starts[0].extraArgs.includes("--jinja"));
+    const args = f.starts[0].extraArgs;
+    assert.equal(args[args.indexOf("--reasoning-budget") + 1], "0");
+    assert.equal(f.starts[0].contextSize, 8192);
+    const forced = fixture({ alias, preferFallback: true });
+    await assert.rejects(forced.runtime.ensure(alias), /forced Ollama/);
+    assert.equal(forced.downloads.length, 0);
+  }
+  const muse = fixture({ alias: "muse-glimmer-30b" }); await muse.runtime.ensure("muse-glimmer-30b");
+  const args = muse.starts[0].extraArgs;
+  assert.equal(args[args.indexOf("--top-p") + 1], "0.95");
+});

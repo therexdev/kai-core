@@ -46,7 +46,14 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
         : busy && stage === "extracting" ? "Installing the verified engine files." : "",
     };
   }
-  function create({ document, container, request, refresh }) {
+  const isLocalOnly = model => model.localOnly === true || model.custom === true;
+  function feedbackUrl(model) {
+    const url = new URL("https://github.com/therexdev/kai-core/issues/new");
+    url.searchParams.set("title", `Local model feedback: ${model.label || model.alias}`);
+    url.searchParams.set("body", `Model: ${model.label || model.alias}\nAlias: ${model.alias}\nPackage: ${model.package || "unknown"}\n\nKAI Core version:\nOperating system:\nRAM / GPU:\n\nWhat I tested:\n\nWriting quality and instruction following:\n\nSpeed or loading problems:\n\nExample (remove private information before submitting):\n`);
+    return url.href;
+  }
+  function create({ document, container, unsupportedContainer, unsupportedSection, openFeedback, request, refresh }) {
     const cards = new Map(), pending = new Map(), errors = new Map();
     let snapshot = { models: [] };
     const putText = (node, value) => KaiLocale.setText(node, value && typeof value === "object" ? value : KaiLocale.literal(value));
@@ -60,6 +67,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       const heading = element("div", "model-card-heading", article);
       const title = element("h2", "", heading), status = element("span", "pill", heading);
       const blurb = element("p", "model-description", article);
+      const localNotice = element("p", "model-local-notice", article); localNotice.hidden = true;
       const footer = element("div", "model-card-footer", article), size = element("span", "model-size", footer);
       const controls = element("div", "model-card-controls", footer);
       const button = element("button", "model-action", controls); button.type = "button"; button.dataset.model = model.alias;
@@ -68,23 +76,41 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       const close = element("span", "", cancel); close.setAttribute("aria-hidden", "true"); close.textContent = "×";
       const error = element("p", "model-card-error", article); error.setAttribute("role", "alert"); error.hidden = true;
       const detail = element("p", "model-card-progress", article); detail.hidden = true;
+      const feedback = element("button", "model-feedback", article); feedback.type = "button"; feedback.hidden = true;
+      putText(feedback, "Share feedback"); feedback.title = "Opens a GitHub report for you to review and submit. No chats are attached.";
+      feedback.onclick = async () => {
+        const current = snapshot.models?.find(item => item.alias === model.alias);
+        if (!current || current.custom || !isLocalOnly(current) || !openFeedback || feedback.disabled) return;
+        feedback.disabled = true;
+        try { await openFeedback(feedbackUrl(current)); }
+        catch (error) { errors.set(model.alias, String(error.message || error)); }
+        finally { feedback.disabled = false; paint(); }
+      };
       button.onclick = () => { if (!button.disabled) void perform(model.alias, "enqueue"); };
       cancel.onclick = () => { if (!cancel.disabled && !cancel.hidden) void perform(model.alias, "cancel"); };
-      card = { article, title, status, blurb, size, controls, button, label, cancel, error, detail };
+      card = { article, title, status, blurb, localNotice, size, controls, button, label, cancel, error, detail, feedback };
       cards.set(model.alias, card); return card;
     }
     function paint() {
       const jobs = new Map((snapshot.modelQueue || []).map(job => [job.alias, job]));
       const current = new Set();
-      for (const [index, model] of (snapshot.models || []).entries()) {
+      const counts = new Map();
+      if (unsupportedSection) unsupportedSection.hidden = !(snapshot.models || []).some(isLocalOnly);
+      for (const model of (snapshot.models || [])) {
         current.add(model.alias);
         const card = cardFor(model), job = jobs.get(model.alias);
         const view = presentation(model, job, pending.get(model.alias), errors.get(model.alias), snapshot.runtime?.activeAlias);
         // Keep the actual controls in place when percentages change, preserving
         // keyboard focus and clicks while other cards continue to be selectable.
-        if (container.children[index] !== card.article) container.insertBefore(card.article, container.children[index] || null);
+        const local = isLocalOnly(model), target = local && unsupportedContainer ? unsupportedContainer : container;
+        const index = counts.get(target) || 0; counts.set(target, index + 1);
+        if (target.children[index] !== card.article) target.insertBefore(card.article, target.children[index] || null);
         putText(card.title, model.label || model.alias); putText(card.status, view.status);
         putText(card.blurb, description(model)); card.blurb.hidden = !card.blurb.textContent;
+        card.article.dataset.localOnly = String(local);
+        putText(card.localNotice, local ? `Local use only · Not supported for Earn${Number.isFinite(model.minRamGb) ? ` · Suggested memory: ${model.minRamGb} GB+` : ""}` : "");
+        card.localNotice.hidden = !local;
+        card.feedback.hidden = !local || !!model.custom || !openFeedback;
         putText(card.size, sizeLabel(model)); putText(card.label, view.label);
         card.button.disabled = view.busy; card.button.dataset.state = view.state;
         card.button.title = view.detail;
@@ -116,7 +142,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
     }
     return { update(value) { snapshot = value || { models: [] }; paint(); }, perform };
   }
-  const api = { create, presentation, description, sizeLabel };
+  const api = { create, presentation, description, sizeLabel, isLocalOnly, feedbackUrl };
   if (typeof module === "object") module.exports = api;
   if (root) root.KaiCoreModels = api;
 })(typeof window === "object" ? window : null);

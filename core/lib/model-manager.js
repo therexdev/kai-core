@@ -158,6 +158,7 @@ class ModelManager {
         diskBytes: files.length ? modelDiskBytes(files) : null,
         license: pkg.license ?? null,
         minRamGb: a.minRamGb ?? null,
+        localOnly: a.localOnly === true,
         status: q ? "quarantined" : this.packageStatus(a.package).status,
         // Vision-capable packages (mmproj projector rides along) — the chat
         // UI gates image attachments on this flag.
@@ -179,6 +180,7 @@ class ModelManager {
         license: null,
         minRamGb: c.minRamGb,
         custom: true,
+        localOnly: true,
         status: q ? "quarantined" : fs.existsSync(c.path) ? "ready" : "missing",
         ...(q ? { quarantineReason: q.reason } : {}),
       };

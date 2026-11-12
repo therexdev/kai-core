@@ -23,8 +23,13 @@ function generationArgs(options) {
   };
   number("temperature", "--temp", 0, 2);
   number("topK", "--top-k", 0, 1000, true);
+  number("topP", "--top-p", 0, 1);
   number("repeatPenalty", "--repeat-penalty", 0, 3);
   number("reasoningBudget", "--reasoning-budget", -1, 32768, true);
+  if (options.jinja !== undefined) {
+    if (typeof options.jinja !== "boolean") throw new Error("Invalid model chat template setting");
+    if (options.jinja) args.push("--jinja");
+  }
   if (options.reasoning !== undefined) {
     if (!["on", "off", "auto"].includes(options.reasoning)) throw new Error("Invalid model reasoning setting");
     args.push("--reasoning", options.reasoning);
