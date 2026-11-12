@@ -54,6 +54,7 @@ test("only one's own qualified provider is excluded; the same model on another p
   assert.deepEqual(wallets([own, own, "account-" + P.hash("guest"), undefined]), [own]);
   const alone = consumerNetwork(snapshot([own], now), [own], now);
   assert.equal(alone.models[0].available, false); assert.equal(alone.models[0].providers, 0); assert.equal(alone.models[0].unavailableReason, "self-only");
+  assert.equal(alone.models[0].networkAvailable, true); assert.equal(alone.models[0].totalProviders, 1);
   assert.equal(alone.providers[0].self, true);
   const shared = consumerNetwork(snapshot([own, remote.getAddress()], now), [own], now);
   assert.equal(shared.models[0].available, true); assert.equal(shared.models[0].providers, 1); assert.equal(shared.models[0].totalProviders, 2);

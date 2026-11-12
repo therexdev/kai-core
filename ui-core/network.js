@@ -5,6 +5,8 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
   const label = (value, max = 256) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
   const escape = value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const localOnlyMessage = "Network status is off in Local-Only. Choose Local-First or Network in Settings to view it.";
+  const networkAvailable = model => model.networkAvailable ?? model.available;
+  const networkProviders = model => model.totalProviders ?? model.providers;
 
   function validateNetwork(network, now = Date.now()) {
     const n = network, publicStatus = n?.source === "public-scheduler";
@@ -13,6 +15,9 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
         (publicStatus ? n.readyProviders !== null || n.completedToday !== null || n.activityAvailable !== false : !count(n.completedToday)) ||
         !Array.isArray(n.models) || n.models.length > 256 || n.models.some(m => !label(m?.id, 128) || typeof m.available !== "boolean" || !count(m.providers) ||
           (m.available && m.providers === 0) || (m.name !== undefined && !label(m.name)) ||
+          (m.totalProviders !== undefined && (!count(m.totalProviders) || m.totalProviders < m.providers)) ||
+          (m.networkAvailable !== undefined && (typeof m.networkAvailable !== "boolean" || !count(m.totalProviders) ||
+            (m.networkAvailable && (m.totalProviders === 0 || n.state !== "available")) || (m.available && !m.networkAvailable))) ||
           (publicStatus ? m.freeEligible !== null || m.selectable !== false : typeof m.freeEligible !== "boolean" || (m.selectable !== undefined && typeof m.selectable !== "boolean"))) ||
         new Set(n.models.map(m => m.id)).size !== n.models.length ||
         !Array.isArray(n.providers) || n.providers.length > 256 || n.providers.some(p => !label(p?.id) || !label(p.model, 32768) || !label(p.state, 64)) ||
@@ -43,6 +48,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       <div><strong id="core-network-provider-count">—</strong><small id="core-network-provider-label">providers ready</small></div>
       <div><strong id="core-network-waiting-count">—</strong><small id="core-network-waiting-label">requests waiting</small></div>
     </section>
+    <p id="core-network-account-state" class="muted" hidden></p>
     <div class="product-two product-single" id="core-network-model-grid">
       <section class="product-panel"><h2>Models on the network</h2><div id="core-network-models"><p class="product-empty">No verified model availability yet.</p></div></section>
       <section class="product-panel" id="core-network-completed" hidden><p class="product-eyebrow">Work completed today</p><div class="product-balance"><span id="core-network-completed-count">—</span><small>requests</small></div><p>Requests with verified delivered replies, including saved partial replies.</p><div class="product-divider"></div><p>Your earnings are shown in Earn KOIN.</p></section>
@@ -57,6 +63,16 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
   const fresh = () => !!snapshot && !error && mode !== "local-only" && Date.now() < snapshot.validUntil && snapshot.observedAt <= Date.now() + 5000;
   const canUse = model => fresh() && snapshot.state === "available" && snapshot.source !== "public-scheduler" && model.available && model.providers > 0 && model.selectable !== false;
   function clearTimers() { clearTimeout(pollTimer); clearTimeout(expiryTimer); pollTimer = expiryTimer = null; }
+  function modelStatus(model, current, publicStatus) {
+    const providers = networkProviders(model);
+    const status = current && networkAvailable(model)
+      ? KaiLocale.html`<p>${providers} provider${providers === 1 ? "" : "s"} ${publicStatus ? "online" : "ready"} on the network</p>`
+      : KaiLocale.html`<p>Availability unconfirmed</p>`;
+    if (!current || publicStatus) return status;
+    if (model.unavailableReason === "self-only") return status + KaiLocale.html`<p>Only shared by your computer or account · use Local model</p>`;
+    if (model.unavailableReason === "wallet-connection-required") return status + KaiLocale.html`<p>Connect your wallet to use other providers while sharing this model</p>`;
+    return status;
+  }
   function paint() {
     const n = snapshot, current = fresh(), publicStatus = n?.source === "public-scheduler";
     text("state", (current ? (n.state === "available" ? KaiLocale.message(["AI network status"]) : KaiLocale.message(["Network paused"])) : (n ? KaiLocale.message(["Last known network status"]) : KaiLocale.message(["Network status unavailable"]))));
@@ -64,16 +80,25 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
     $("state").dataset.state = current ? n.state : "unavailable";
     text("provider-label", (publicStatus ? KaiLocale.message(["providers online"]) : KaiLocale.message(["providers ready"])));
     text("waiting-label", (publicStatus ? KaiLocale.message(["jobs waiting"]) : KaiLocale.message(["requests waiting"])));
-    text("model-count", n ? n.models.filter(m => m.available).length : "—");
+    const availableModels = n?.models.filter(networkAvailable).length;
+    text("model-count", n ? availableModels : "—");
     text("provider-count", n ? publicStatus ? n.providersOnline : n.readyProviders : "—");
     text("waiting-count", n ? n.waitingRequests : "—");
+    const usableModels = n?.models.filter(canUse).length;
+    const accountLimited = current && !publicStatus && n.state === "available" && usableModels < availableModels;
+    $("account-state").hidden = !accountLimited;
+    text("account-state", accountLimited ? (n.models.some(m => m.unavailableReason === "wallet-connection-required")
+      ? KaiLocale.message`${usableModels} of ${availableModels} network models are available to your account. Connect your wallet in Credits and Usage to use other providers for models you also share.`
+      : n.models.some(m => m.unavailableReason === "self-only")
+        ? KaiLocale.message`${usableModels} of ${availableModels} network models are available to your account. Models shared only by your computer or account can be used with Local model.`
+        : KaiLocale.message`${usableModels} of ${availableModels} network models are available to your account.`) : "");
     const reported = n && !publicStatus && n.completedToday !== null;
     $("completed").hidden = !reported;
     $("model-grid").classList.toggle("product-single", !reported);
     $("recent").hidden = !n || publicStatus || n.activityAvailable === false;
     text("completed-count", reported ? n.completedToday : "—");
     text("activity-state", (n && !current ? KaiLocale.message(["Last verified activity. Current network status is unavailable."]) : KaiLocale.message([""])));
-    html("models", n?.models.length ? n.models.map(m => KaiLocale.html`<div class="product-model-row"><div><strong>${escape(modelName(m))}</strong>${m.freeEligible === null ? "" : KaiLocale.html`<p>${m.freeEligible ? "Free credits eligible" : "Purchased credits"}</p>`}</div><div><p>${current && m.unavailableReason === "self-only" ? "Only shared by your computer or account · use Local model" : current && m.unavailableReason === "wallet-connection-required" ? "Connect your wallet to use other providers while sharing this model" : current && m.available ? `${m.providers} provider${m.providers === 1 ? "" : "s"} ${publicStatus ? "online" : "ready"}` : "Availability unconfirmed"}</p>${publicStatus ? "" : `<button type="button" data-network-model="${escape(m.id)}"${canUse(m) ? "" : " disabled"}>Use model</button>`}</div></div>`).join("") : KaiLocale.html`<p class="product-empty">${n ? "No models are currently reported." : "No verified model availability yet."}</p>`);
+    html("models", n?.models.length ? n.models.map(m => KaiLocale.html`<div class="product-model-row"><div><strong>${escape(modelName(m))}</strong>${m.freeEligible === null ? "" : KaiLocale.html`<p>${m.freeEligible ? "Free credits eligible" : "Purchased credits"}</p>`}</div><div>${modelStatus(m, current, publicStatus)}${publicStatus ? "" : `<button type="button" data-network-model="${escape(m.id)}"${canUse(m) ? "" : " disabled"}>Use model</button>`}</div></div>`).join("") : KaiLocale.html`<p class="product-empty">${n ? "No models are currently reported." : "No verified model availability yet."}</p>`);
     html("providers", n?.providers.length ? n.providers.map(p => KaiLocale.html`<div class="product-detail"><span>${p.self ? "Your computer or account" : `Provider ${escape(p.id)}`} · ${escape(modelName(p.model))}</span><span>${current ? escape(p.state.replace(/-/g, " ")) : "Last seen — status stale"}</span></div>`).join("") + (n.providersTruncated ? KaiLocale.html('<p class="muted">Showing the first 256 providers.</p>') : "") : KaiLocale.html`<p class="product-empty">${n ? "No recently observed providers." : "No verified provider status yet."}</p>`);
     html("activity", n?.activity.length ? n.activity.map(a => KaiLocale.html`<div class="product-detail"><span>Reply delivered · ${escape(modelName(a.model))}</span><time>${escape(new Date(a.at).toLocaleTimeString(KaiLocale.language))}</time></div>`).join("") : KaiLocale.html('<p class="product-empty">No verified replies recorded today.</p>'));
     clearTimeout(expiryTimer);

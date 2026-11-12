@@ -3,6 +3,18 @@ const test = require("node:test"), assert = require("node:assert/strict"), fs = 
 const { validateNetwork, modelName } = require("../../ui-core/network");
 const source = fs.readFileSync(path.join(__dirname, "../../ui-core/network.js"), "utf8");
 const startTime = 1800000000000;
+// Exercise the actual main-process account filter, not a renderer-only guess.
+function accountOverview({ sharing = false, linked = false, paused = false, noProviders = false, onlySelf = false } = {}) {
+  const { Signer } = require("koilib"), { providerId, consumerNetwork } = require("../../electron/credit-network-eligibility");
+  const own = Signer.fromSeed("network-overview-own").getAddress();
+  const aliases = Array.from({ length: 12 }, (_, i) => `fixture-model-${i}`);
+  const wallets = noProviders ? [] : onlySelf ? [own] : [...Array.from({ length: 5 }, (_, i) => Signer.fromSeed(`network-overview-remote-${i}`).getAddress()), ...(sharing ? [own] : [])];
+  const network = overview({ state: paused || noProviders ? "paused" : "available", readyProviders: wallets.length,
+    models: aliases.map(id => ({ id, available: !paused && wallets.length > 0, providers: wallets.length, freeEligible: true })),
+    providers: wallets.map(wallet => ({ id: providerId(wallet), model: aliases[0], ready: true, state: "ready",
+      models: aliases.map(model => ({ model, ready: true, state: "online", validUntil: startTime + 15000 })) })) });
+  return consumerNetwork(network, [own], startTime, linked ? [own] : []);
+}
 function overview(extra = {}) {
   return { observedAt: startTime, validUntil: startTime + 15000, state: "available", readyProviders: 2, waitingRequests: 3, completedToday: 7,
     models: [{ id: "koinos-fast", providers: 2, available: true, freeEligible: true, selectable: true }],
@@ -160,6 +172,11 @@ test("snapshot validation rejects invented freshness and malformed availability"
   }
   assert.throws(() => validateNetwork(publicOverview({ models: [{ ...publicOverview().models[0], selectable: true }] }), startTime), /verified/);
   assert.throws(() => validateNetwork(publicOverview({ activity: [{ model: "private", at: startTime }] }), startTime), /verified/);
+  for (const update of [{ networkAvailable: "yes", totalProviders: 2 }, { networkAvailable: true },
+    { networkAvailable: true, totalProviders: 0 }, { networkAvailable: true, totalProviders: 1 },
+    { networkAvailable: false, totalProviders: 2 }]) {
+    assert.throws(() => validateNetwork(overview({ models: [{ ...overview().models[0], ...update }] }), startTime), /verified/);
+  }
 });
 
 test("display names normalize known aliases while preserving names of unrelated models", () => {
@@ -190,4 +207,63 @@ test("navigation immediately paints the retained observation while a replacement
   let done;f.setResponse(()=>new Promise(resolve=>{done=resolve;}));const visit=f.api.enter();
   assert.equal(f.$("provider-count").textContent,"2");
   done(overview({readyProviders:4}));await visit;assert.equal(f.$("provider-count").textContent,"4");
+});
+
+test("network totals survive own-provider appearance and navigation while account admission stays blocked", async () => {
+  const f = fixture(accountOverview()); await f.api.enter();
+  assert.equal(f.$("model-count").textContent, "12"); assert.equal(f.$("provider-count").textContent, "5");
+  const restricted = accountOverview({ sharing: true });
+  assert.equal(restricted.models.filter(m => m.available).length, 0, "an unlinked guest still cannot dispatch to its own provider");
+  f.setResponse(restricted); f.api.leave(); await f.api.enter();
+  assert.equal(f.$("model-count").textContent, "12", "global models must not fall to zero when a sixth provider appears");
+  assert.equal(f.$("provider-count").textContent, "6");
+  assert.match(f.$("account-state").textContent, /0 of 12.*account/);
+  assert.match(f.$("account-state").textContent, /Connect your wallet/);
+  assert.match(f.$("models").innerHTML, /6 providers ready on the network/);
+  f.clickModel("fixture-model-0"); assert.ok(!f.dispatched.some(e => e.type === "kai-core-use-network-model"));
+  f.setResponse(accountOverview()); await f.api.refresh();
+  assert.equal(f.$("model-count").textContent, "12"); assert.equal(f.$("provider-count").textContent, "5");
+  f.clickModel("fixture-model-0"); assert.equal(f.dispatched.filter(e => e.type === "kai-core-use-network-model").length, 1);
+});
+
+test("linking the wallet changes account access without changing global model or provider counts", async () => {
+  const f = fixture(accountOverview({ sharing: true })); await f.api.enter();
+  f.setResponse(accountOverview({ sharing: true, linked: true })); await f.api.refresh();
+  assert.equal(f.$("model-count").textContent, "12"); assert.equal(f.$("provider-count").textContent, "6");
+  assert.equal(f.$("account-state").hidden, true);
+  assert.match(f.$("models").innerHTML, /6 providers ready on the network/);
+  f.clickModel("fixture-model-0"); assert.equal(f.dispatched.filter(e => e.type === "kai-core-use-network-model").length, 1);
+});
+
+test("self-only capacity stays in network totals with Local model guidance and no account admission", async () => {
+  const f = fixture(accountOverview({ onlySelf: true, linked: true })); await f.api.enter();
+  assert.equal(f.$("model-count").textContent, "12"); assert.equal(f.$("provider-count").textContent, "1");
+  assert.match(f.$("account-state").textContent, /0 of 12.*Local model/);
+  assert.doesNotMatch(f.$("account-state").textContent, /Connect your wallet/);
+  f.clickModel("fixture-model-0"); assert.ok(!f.dispatched.some(e => e.type === "kai-core-use-network-model"));
+  f.emit("kai-account-signed-out");
+  assert.equal(f.$("model-count").textContent, "—"); assert.equal(f.$("account-state").textContent, "");
+  await flush();
+  f.emit("kai-core-privacy-changed", { mode: "local-only" });
+  assert.equal(f.$("model-count").textContent, "—"); assert.equal(f.$("account-state").textContent, "");
+});
+
+test("a genuine pause or loss of providers still changes global counts to zero", async () => {
+  const f = fixture(accountOverview({ sharing: true, linked: true })); await f.api.enter();
+  for (const change of [{ paused: true }, { noProviders: true }]) {
+    f.setResponse(accountOverview(change)); await f.api.refresh();
+    assert.equal(f.$("model-count").textContent, "0"); assert.equal(f.$("state").textContent, "Network paused");
+    f.clickModel("fixture-model-0"); assert.ok(!f.dispatched.some(e => e.type === "kai-core-use-network-model"));
+  }
+});
+
+test("failed or expired observations retain global counts only as last known and hide account instructions", async () => {
+  for (const failure of ["error", "expiry"]) {
+    const f = fixture(accountOverview({ sharing: true })); await f.api.enter();
+    if (failure === "error") { f.setResponse(Error("Network unavailable")); await f.api.refresh(); }
+    else { f.setResponse(() => new Promise(() => {})); await f.advance(15001); }
+    assert.equal(f.$("model-count").textContent, "12"); assert.equal(f.$("state").textContent, "Last known network status");
+    assert.equal(f.$("account-state").hidden, true);
+    f.clickModel("fixture-model-0"); assert.ok(!f.dispatched.some(e => e.type === "kai-core-use-network-model"));
+  }
 });

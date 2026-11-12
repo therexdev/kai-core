@@ -42,7 +42,10 @@ function consumerNetwork(network, excludedWallets, now = Date.now(), enforcedWal
     // guest identity does not establish ownership of the local earning wallet.
     // Do not reserve credits when it could still dispatch to that same device.
     const available = m.available && remote.length > 0 && !unlinkedSelf;
-    return { ...m, providers: remote.length, totalProviders: ready.length, available, selectable: available && m.selectable !== false,
+    // Preserve the verified network observation for the overview. Account
+    // admission remains separate: an unlinked local provider may block this
+    // buyer, but it does not remove models or providers from the network.
+    return { ...m, providers: remote.length, totalProviders: ready.length, networkAvailable: m.available, available, selectable: available && m.selectable !== false,
       ...(ready.length && !remote.length ? { unavailableReason: "self-only" } : unlinkedSelf ? { unavailableReason: "wallet-connection-required" } : {}) };
   });
   if (n.validUntil <= now) throw Object.assign(Error("Network provider availability expired. Refresh models and try again."), { code: "network-models-stale" });
