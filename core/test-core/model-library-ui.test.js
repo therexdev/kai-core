@@ -112,3 +112,25 @@ test("preparation shows the actual engine stage and offers cancellation without 
   assert.equal(f.button("small").disabled, false); assert.equal(f.button("small").textContent, "Download & load");
   assert.equal(presentation(models[0], { state: "done", stage: "engine-download", pct: 42 }).pct, null);
 });
+
+test("local-only cards use a separate section, retain queue controls, and move in place after approval", async () => {
+  const document = { createElement(tag) { return new Element(this, tag); }, activeElement: null };
+  const container = document.createElement("div"), unsupportedContainer = document.createElement("div"), unsupportedSection = document.createElement("section");
+  const calls = [], links = [];
+  let state = { models: [{ ...models[0] }, { ...models[1], localOnly: true, minRamGb: 32, package: "medium@1" }] };
+  const controller = create({ document, container, unsupportedContainer, unsupportedSection, openFeedback: async url => links.push(url),
+    request: async (route, body) => { calls.push({ route, body }); }, refresh: async () => controller.update(state) });
+  controller.update(state);
+  assert.equal(container.children.length, 1); assert.equal(unsupportedContainer.children.length, 1); assert.equal(unsupportedSection.hidden, false);
+  const card = unsupportedContainer.children[0], button = walk(card).find(n => n.dataset.model === "medium");
+  assert.match(card.textContent, /Not supported for Earn.*32 GB/);
+  await controller.perform("medium", "enqueue"); assert.deepEqual(calls, [{ route: "/core/models/ensure", body: { alias: "medium" } }]);
+  state.modelQueue = [{ alias: "medium", state: "downloading", pct: 34, cancellable: true }]; controller.update(state);
+  assert.equal(button.textContent, "Downloading 34%");
+  const feedback = walk(card).find(n => n.className === "model-feedback"); await feedback.onclick();
+  const link = new URL(links[0]); assert.equal(link.origin, "https://github.com");
+  assert.match(link.searchParams.get("body"), /Package: medium@1/); assert.match(link.searchParams.get("body"), /remove private information/);
+  state.models[1].localOnly = false; controller.update(state);
+  assert.equal(unsupportedSection.hidden, true); assert.equal(container.children[1], card); assert.equal(feedback.hidden, true);
+  assert.equal(walk(card).find(n => n.dataset.model === "medium"), button);
+});

@@ -94,7 +94,7 @@ class CreditProvider {
     const capacityGb = Math.max(Number.isFinite(ramGb) ? ramGb : 0, vramGb), candidates = [];
     for (const tariff of tariffs) {
       const alias = this.core.models.catalog.aliases[tariff.model], pkg = alias && this.core.models.catalog.packages[alias.package];
-      if (!alias || alias.custom || alias.dev || tariff.model.startsWith("dev-") || !pkg || pkg.custom || !/^[a-f0-9]{64}$/.test(pkg.sha256 || "") || pkg.sha256 !== tariff.modelHash || this.core.models.quarantineOf(alias.package)) continue;
+      if (!alias || alias.localOnly || alias.custom || alias.dev || tariff.model.startsWith("dev-") || !pkg || pkg.custom || !/^[a-f0-9]{64}$/.test(pkg.sha256 || "") || pkg.sha256 !== tariff.modelHash || this.core.models.quarantineOf(alias.package)) continue;
       if (!Number.isFinite(alias.minRamGb) || Math.round(capacityGb) < alias.minRamGb) continue;
       candidates.push({ id: tariff.model, package: alias.package, label: alias.label || tariff.model, bytes: pkg.sizeBytes, requiredRamGb: alias.minRamGb,
         installed: this.core.models.packageStatus(alias.package).status === "ready" });
@@ -107,7 +107,8 @@ class CreditProvider {
     c.modelAvailability = Object.entries(this.core.models.catalog.aliases).filter(([id, a]) => modelId(id) && !a.custom && !a.dev && !id.startsWith("dev-") &&
       this.core.models.packageStatus(a.package).status === "ready").slice(0, 64).map(([id, a]) => {
       const compatible = candidates.some(m => m.id === id), pkg = this.core.models.catalog.packages[a.package], tariff = tariffs.find(t => t.model === id);
-      const reason = compatible ? "" : this.core.models.quarantineOf(a.package) ? "This installed model needs an update before sharing."
+      const reason = compatible ? "" : a.localOnly ? "Local testing only — not supported for Earn."
+        : this.core.models.quarantineOf(a.package) ? "This installed model needs an update before sharing."
         : !tariff || !pkg || pkg.custom || pkg.sha256 !== tariff.modelHash ? "This installed model is not in the approved network catalog."
         : "This model needs more available RAM or GPU memory.";
       return { id, label: a.label || id, installed: true, compatible, reason };

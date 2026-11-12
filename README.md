@@ -10,6 +10,12 @@ The Beta name is display branding. Core keeps the `io.koinosai.core` application
 
 Follow the [illustrated transfer guide](docs/TRANSFER_GUIDE.md) to migrate models, your Core wallet and the regular Koinos Node. It includes snapshots, a PDF download and guidance for creating a separate Node wallet.
 
+## Local model testing
+
+**Model library → Unsupported Earn Models** lists experimental downloads for local chat and plugins that support local inference. Gemma 4 12B, Muse-Glimmer 30B, Qwen 3.8 27B, and Gemma 4 31B are initial text-only candidates. They are excluded from Earn, including **Share all compatible installed models**. Importing a custom GGUF also keeps it local.
+
+Each card shows its download size and suggested memory. **Share feedback** opens a GitHub report template for you to review and submit; it does not upload conversations. Compatibility and quality remain experimental. See [local model testing and Earn approval](docs/foundation/LOCAL_MODEL_TESTING.md) for the catalog policy and promotion procedure.
+
 ## Model storage folders
 
 **Settings → Model storage** lets you choose separate folders for downloaded models and custom GGUF imports, including folders on another drive. Downloaded models default to `models` inside the Foundation profile. Custom imports stay at their original locations until you choose a custom folder. New catalog downloads and GGUF imports use the selected folders immediately, and the choices survive restart. New imports always keep their source files.

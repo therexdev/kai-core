@@ -53,7 +53,13 @@
       <section data-panel="app" id="app-content" class="app-page" aria-label="App workspace" hidden><p id="app-loading" role="status">Opening app…</p></section>
       <section data-panel="models" class="page" hidden>
         <div class="page-head"><div><h1>Your model library</h1><p>Choose the models you want to use on this computer.</p></div><button id="import-model">Import GGUF</button></div>
-        <div id="model-notice" class="dismissible-notice inline-notice" hidden><p id="model-message" role="status" aria-atomic="true"></p><button id="model-message-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div><div id="models" class="cards"></div>
+        <div id="model-notice" class="dismissible-notice inline-notice" hidden><p id="model-message" role="status" aria-atomic="true"></p><button id="model-message-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div><div id="models" class="cards model-library-grid"></div>
+        <section id="unsupported-models-section" aria-labelledby="unsupported-models-title" hidden>
+          <h2 id="unsupported-models-title">Unsupported Earn Models</h2>
+          <p>Download and try these models locally. They are not supported for Earn and are never shared with the network. Compatibility, speed, and writing quality are still being tested.</p>
+          <p class="product-fine">After loading, choose the model in local chat or a plugin that supports local models. Share feedback to help us decide which models to approve for Earn.</p>
+          <div id="unsupported-models" class="cards model-library-grid"></div>
+        </section>
       </section>
       <section data-panel="plugins" class="page" hidden>
         <div class="page-head"><div><h1>Plugins</h1><p>Add the capabilities you want in your workspace.</p></div></div>
