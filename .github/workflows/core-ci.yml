@@ -83,6 +83,12 @@ jobs:
       - name: Model storage desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:model-storage
+      - name: Local-only model library desktop check (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/foundation/local-models-smoke.js
+      - name: Local-only model library desktop check (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: node scripts/foundation/local-models-smoke.js
       - name: Native AppImage replacement and relaunch check
         if: runner.os == 'Linux'
         run: node scripts/foundation/linux-updates-smoke.js
