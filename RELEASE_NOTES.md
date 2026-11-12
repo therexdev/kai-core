@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.29
+# KAI Core Beta 0.7.30
+
+Fixes Network overview showing **0 models available** when other providers still have models ready. The model and provider counts now both describe the whole network. Account restrictions appear separately, including guidance to connect your wallet under **Credits and Usage** when sharing models through an unlinked free-access account.
+
+The overview still reports genuine changes in provider readiness. Interrupted status checks show **Last known network status**, and model-use buttons continue to enforce account eligibility.
+
+Update through **Settings → Application updates**, then choose **Download update** and **Restart and install**. This is a Core update; no plugin update is needed for the overview correction.
+
+## Previous release: KAI Core Beta 0.7.29
 
 Adds **Model library → Unsupported Earn Models** for downloading and testing Gemma 4 12B, Muse-Glimmer 30B, Qwen 3.8 27B, and Gemma 4 31B locally. Cards show file sizes, suggested memory, and an optional GitHub feedback report. Downloads reuse the existing queue, cancellation, and SHA-256 verification.
 
