@@ -318,9 +318,9 @@ class PrepaidChat extends ChatFlow {
     }
     if (record?.requestHash === requestHash && record.state === "answered") {
       let answer = this.verify(JSON.parse(this.storage.decryptString(Buffer.from(record.answer, "base64"))), input, record.id, this.recoveryProviders(record));
-      if (value.stream === false && incomplete(answer)) {
-        // A durable stream prefix is not a complete answer. Read the existing
-        // job only; never submit another generation to repair a lost frame.
+      if (incomplete(answer)) {
+        // Streaming callers also need the current state of a saved prefix.
+        // Read the existing job only; never start another generation here.
         const old = await this.call("result", { requestId: record.id }, signal);
         if (old.completion) {
           const recovered = this.verify(old.completion, input, record.id, this.recoveryProviders(record));
