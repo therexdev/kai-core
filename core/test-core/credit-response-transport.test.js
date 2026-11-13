@@ -98,6 +98,50 @@ test("a charged signed prefix is retained but cannot masquerade as a completed b
   assert.equal(f.state.calls.some(c => c.action === "acknowledge"), false);
 });
 
+test("a streaming retry refreshes a saved prefix from the same job without another generation", async t => {
+  for (const terminalPrefix of [false, true]) {
+    const f = fixture(t), input = { ...f.input, stream: true }; let original;
+    f.state.respond = async (action, body) => {
+      if (action !== "chat") return;
+      original = body;
+      return f.stream(f.frame(await f.completion(body, "Saved", { partial: true })));
+    };
+    await assert.rejects(f.flow.chat(null, input, f.signal()), e => e.code === "credit-response-interrupted");
+    const before = f.flow.read();
+    f.state.result = await f.completion(original, terminalPrefix ? "Saved" : "Saved complete", { partial: terminalPrefix, charged: true });
+    const answer = await f.flow.chat(null, input, f.signal());
+    assert.equal(answer.id, before.id); assert.equal(answer.koin.state, "charged");
+    assert.equal(answer.choices[0].message.content, terminalPrefix ? "Saved" : "Saved complete");
+    assert.equal(answer.koin.receipt.sequence !== undefined, terminalPrefix, "terminal prefixes remain identifiable as incomplete");
+    assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+    assert.equal(f.state.calls.filter(c => c.action === "result").length, 2);
+    assert.ok(f.state.calls.filter(c => c.action === "result").every(c => c.body.requestId === before.id));
+    assert.equal(f.state.calls.some(c => c.action === "cancel"), false);
+    assert.equal(JSON.parse(f.flow.storage.decryptString(Buffer.from(f.flow.read().answer, "base64"))).koin.state, "charged");
+  }
+});
+
+test("streaming recovery preserves a verified prefix on lookup failure or a changed answer", async t => {
+  for (const failure of ["lookup", "changed", "active"]) {
+    const f = fixture(t), input = { ...f.input, stream: true }; let original;
+    f.state.respond = async (action, body) => {
+      if (action !== "chat") return;
+      original = body;
+      return f.stream(f.frame(await f.completion(body, "Saved", { partial: true })));
+    };
+    await assert.rejects(f.flow.chat(null, input, f.signal()), e => e.code === "credit-response-interrupted");
+    const before = f.flow.read();
+    f.state.result = await f.completion(original, failure === "changed" ? "Different" : "Saved", { partial: failure === "active" });
+    if (failure === "lookup") f.state.respond = async action => { if (action === "result") throw Error("Read unavailable"); };
+    if (failure === "active") assert.equal((await f.flow.chat(null, input, f.signal())).koin.state, "streaming");
+    else await assert.rejects(f.flow.chat(null, input, f.signal()), failure === "lookup" ? /Read unavailable/ : /recovery prefix changed/);
+    assert.equal(f.flow.read().id, before.id);
+    assert.equal(JSON.parse(f.flow.storage.decryptString(Buffer.from(f.flow.read().answer, "base64"))).choices[0].message.content, "Saved");
+    assert.equal(f.state.calls.filter(c => c.action === "chat").length, 1);
+    assert.equal(f.state.calls.some(c => c.action === "cancel"), false);
+  }
+});
+
 test("HTML gateway failures expose HTTP status, preserve recovery and never authorize a retry", async t => {
   for (const status of [502, 503, 504, 524]) {
     const f = fixture(t);
