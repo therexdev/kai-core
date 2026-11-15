@@ -112,7 +112,30 @@ async function main(){
   });
   await check("No feature service startup failures or uncaught Core UI exceptions",async()=>{const result=await application.evaluate(()=>({errors:[...global.__foundationServices.backgroundErrors],native:global.__foundationSmoke}));report.runtime=result;assert.deepEqual(result.errors,[]);assert.deepEqual(pageErrors,[]);assert.deepEqual(result.native.errors,[]);assert.ok(!/No handler registered for/.test(logs),"Missing native IPC handler in application logs");});
   await check("Reordering apps persists through the native Core API",async()=>{const target=report.plugins.at(-1).id;await page.locator(`[data-reorder-app="${target}"]`).focus();await page.keyboard.press("Home");await until(async()=>{const status=await page.evaluate(()=>window.kaiCore.call("status"));return status.pluginsOrder[0]===target;},"App order was not saved");});
-  await check("Removing installed apps revokes services and hides the Apps section",async()=>{for(const plugin of report.plugins)await page.evaluate(id=>window.kaiCore.call("plugins.change",{id,action:"remove"}),plugin.id);await page.evaluate(()=>refresh());assert.equal(await page.locator("#apps-section").isVisible(),false);const state=await application.evaluate(()=>({services:global.__foundationServices.services.size,views:global.__foundationHost.windows.size}));assert.deepEqual(state,{services:0,views:0});});
+  await check("Confirmed removal deletes installed apps and revokes services",async()=>{
+   // This all-app fixture normally cancels every native review. Approve only
+   // the exact removal prompt for this disposable profile's current plugin.
+   // Real clicks, Cancel and Disable instead are covered by dialogs-smoke.
+   for(const plugin of report.plugins){
+    const name=manager.state.installed[plugin.id].name;
+    await application.evaluate(({dialog},name)=>{
+     const previous=dialog.showMessageBox;global.__foundationRemovalReview={previous,count:0};
+     dialog.showMessageBox=async(...args)=>{
+      const options=args.at(-1);
+      if(options.title!=="Remove plugin and data"||options.message!==name)return previous(...args);
+      if(JSON.stringify(options.buttons)!==JSON.stringify(["Cancel","Disable instead","Remove plugin and data"])||options.defaultId!==0||options.cancelId!==0||!/Permanently delete/.test(options.detail))throw Error("Unexpected plugin-removal review");
+      global.__foundationRemovalReview.count++;return{response:2};
+     };
+    },name);
+    try{
+     await page.evaluate(id=>window.kaiCore.call("plugins.change",{id,action:"remove"}),plugin.id);
+     assert.equal(await application.evaluate(()=>global.__foundationRemovalReview.count),1);
+     assert.equal(fs.existsSync(path.join(profile,"plugins-v3",plugin.id)),false);
+    }finally{await application.evaluate(({dialog})=>{dialog.showMessageBox=global.__foundationRemovalReview.previous;delete global.__foundationRemovalReview;});}
+   }
+   await page.evaluate(()=>refresh());assert.equal(await page.locator("#apps-section").isVisible(),false);
+   const state=await application.evaluate(()=>({services:global.__foundationServices.services.size,views:global.__foundationHost.windows.size}));assert.deepEqual(state,{services:0,views:0});
+  });
   const child=application.process(),ended=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error("Core did not quit after 30 seconds")),30000);child.once("exit",code=>{clearTimeout(timer);code===0?resolve():reject(Error("Core exited "+code));});});
   await application.evaluate(()=>setTimeout(()=>global.__foundationTrayMenu.find(i=>i.label==="Quit KAI Core Beta").click(),0));await ended;application=null;
   assert.equal(fs.existsSync(exitReport),true,"Core did not record a clean quit");
