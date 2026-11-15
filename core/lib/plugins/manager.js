@@ -42,19 +42,20 @@ class PluginManager {
     this.state = fs.existsSync(this.stateFile) ? read(this.stateFile) : { schema: 3, installed: {}, publishers: {} };
     if (this.state.schema !== 3 || !this.state.installed || typeof this.state.installed !== "object" || Array.isArray(this.state.installed) || !this.state.publishers || typeof this.state.publishers !== "object" || Array.isArray(this.state.publishers)) throw Error("Plugin state is unreadable; it was not reset");
     for (const [id, row] of Object.entries(this.state.installed)) {
-      if (!safeId(id) || !row || typeof row !== "object" || !/^[a-f0-9]{64}$/.test(row.fingerprint || "") || !/^[a-f0-9]{64}$/.test(row.digest || "") || typeof row.enabled !== "boolean") throw Error("Invalid installed plugin state");
+      if (!safeId(id) || !row || typeof row !== "object" || !/^[a-f0-9]{64}$/.test(row.fingerprint || "") || !/^[a-f0-9]{64}$/.test(row.digest || "") || typeof row.enabled !== "boolean" || row.removing !== undefined && (row.removing !== true || row.enabled)) throw Error("Invalid installed plugin state");
       if (this.state.publishers[id] !== row.fingerprint) throw Error("Plugin publisher identity changed");
     }
     for (const [id, fingerprint] of Object.entries(this.state.publishers)) if (!safeId(id) || !/^[a-f0-9]{64}$/.test(fingerprint)) throw Error("Invalid plugin publisher binding");
   }
   pluginDir(id) { if (!safeId(id)) throw Error("Invalid plugin ID"); directory(this.root); const dir = path.join(this.root, id); directory(dir); return dir; }
   dataDir(id) { const dir = path.join(this.pluginDir(id), "data"); directory(dir); return dir; }
-  list() { return Object.entries(this.state.installed).map(([id, row]) => ({ id, name: row.name, version: row.version, enabled: row.enabled, runtime: row.runtime, provides: row.provides || [], consumes: row.consumes || [], permissions: row.permissions, fingerprint: row.fingerprint, rollbackAvailable: !!row.previous })); }
+  list() { return Object.entries(this.state.installed).map(([id, row]) => ({ id, name: row.name, version: row.version, enabled: row.enabled, removing: !!row.removing, runtime: row.runtime, provides: row.provides || [], consumes: row.consumes || [], permissions: row.permissions, fingerprint: row.fingerprint, rollbackAvailable: !!row.previous && !row.removing })); }
   install(input, { trustNative = false } = {}) {
     const snapshot = require("./package-file-verifier").getVerifiedPackage(input);
     const verified = snapshot || verifyPackage(input), { manifest: m, fingerprint } = verified;
     if (m.runtime === "native" && trustNative !== true) throw Error("Native plugin installation requires explicit full-computer-access approval");
     const old = this.state.installed[m.id];
+    if (old?.removing) throw Error("Finish removing this plugin before reinstalling it");
     if (Object.hasOwn(this.state.publishers, m.id) && this.state.publishers[m.id] !== fingerprint) throw Error("Publisher changed. This plugin ID remains reserved to protect its saved data");
     const dir = this.pluginDir(m.id), file = `${m.version}-${crypto.randomUUID()}.json`;
     if (snapshot) require("./package-file-verifier").copyApprovedPackage(verified.package, path.join(dir, file));
@@ -71,6 +72,7 @@ class PluginManager {
     const { manifest: m, fingerprint } = verified;
     if (m.runtime === "native" && trustNative !== true) throw Error("Native plugin installation requires explicit full-computer-access approval");
     const old = this.state.installed[m.id], publisher = this.state.publishers[m.id], marker = JSON.stringify(old);
+    if (old?.removing) throw Error("Finish removing this plugin before reinstalling it");
     if (publisher !== undefined && publisher !== fingerprint) throw Error("Publisher changed. This plugin ID remains reserved to protect its saved data");
     const dir = this.pluginDir(m.id), file = `${m.version}-${crypto.randomUUID()}.json`, target = path.join(dir, file);
     await verifier.copyApprovedPackageAsync(verified.package, target, { signal });
@@ -138,16 +140,37 @@ class PluginManager {
   }
   change(id, action) {
     const row = this.state.installed[id]; if (!safeId(id) || !row) throw Error("Unknown plugin");
+    if (row.removing) throw Error("Removal is incomplete. Retry Remove to finish deleting this plugin");
     const previousState = structuredClone(this.state);
     if (action === "enable") row.enabled = true;
     else if (action === "disable") row.enabled = false;
-    else if (action === "remove") delete this.state.installed[id];
     else if (action === "rollback" && row.previous) this.state.installed[id] = { ...row.previous, previous: null };
     else throw Error("Invalid plugin action");
     try { write(this.stateFile, this.state); } catch (error) { this.state = previousState; throw error; }
     return this.list();
   }
+  async remove(id, stopAndCleanup) {
+    if (!safeId(id) || !this.state.installed[id]) throw Error("Unknown plugin");
+    if (typeof stopAndCleanup !== "function") throw Error("Plugin removal requires service cleanup");
+    const row = this.state.installed[id];
+    // Persist the revoked state before any await or destructive operation.
+    // Interrupted/partial removal stays visible and retryable after restart.
+    const previousState = structuredClone(this.state);
+    row.enabled = false; row.removing = true;
+    try { write(this.stateFile, this.state); } catch (error) { this.state = previousState; throw error; }
+    try {
+      await stopAndCleanup();
+      await require("./remove-directory").removeOwnedDirectory(this.root, id);
+      const pendingState = structuredClone(this.state);
+      delete this.state.installed[id]; delete this.state.publishers[id];
+      try { write(this.stateFile, this.state); } catch (error) { this.state = pendingState; throw error; }
+      return this.list();
+    } catch (error) {
+      throw new Error(`Plugin removal is incomplete. The plugin is disabled. Retry Remove to finish deleting its files. ${error.message}`, { cause: error });
+    }
+  }
   storage(id, action, key, value) {
+    if (!safeId(id) || !this.state.installed[id]?.enabled) throw Error("Plugin is disabled or not installed");
     if (typeof key !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(key) || ["__proto__", "constructor", "prototype"].includes(key)) throw Error("Invalid storage key");
     const file = path.join(this.dataDir(id), "storage.json"), data = fs.existsSync(file) ? read(file) : {};
     if (!data || typeof data !== "object" || Array.isArray(data)) throw Error("Plugin storage is unreadable; it was not reset");

@@ -53,7 +53,9 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     },
     progress: value => { const caller = pluginPaymentContext.getStore(), window = caller?.window || getMainWindow(), contents = caller?.webContents || window?.webContents; if (window && !window.isDestroyed() && contents && !contents.isDestroyed?.()) contents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   const pluginCreditServices = new Map();
+  const pluginTasks = new Map(), removingPlugins = new Set();
   function pluginCreditService(pluginId, fingerprint) {
+    if (removingPlugins.has(pluginId)) throw Error("Plugin is being removed");
     const scope = crypto.createHash("sha256").update(pluginId + "|" + fingerprint).digest("hex");
     if (!pluginCreditServices.has(scope)) pluginCreditServices.set(scope, new (require("./credit-service").CreditService)({
       dataDir: path.join(dataDir, "plugin-finance", scope), account: core.creditAccount || core.account,
@@ -530,6 +532,20 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     return background ? { sender: null, senderFrame: null, backgroundNative: true } : { sender: webContents, senderFrame: webContents.mainFrame };
   }
   const adapter = {
+    async removePluginData(pluginId, fingerprint) {
+      if (!require("../core/lib/plugins/package").safeId(pluginId) || !/^[a-f0-9]{64}$/.test(fingerprint || "")) throw Error("Invalid plugin identity");
+      removingPlugins.add(pluginId);
+      try {
+        creditAccess.removePlugin(pluginId);
+        // The host has already aborted the plugin lifetime. Wait for its
+        // last journal writes, including requests that were awaiting consent.
+        await Promise.allSettled([...(pluginTasks.get(pluginId) || [])]);
+        const scope = crypto.createHash("sha256").update(pluginId + "|" + fingerprint).digest("hex");
+        await pluginCreditServices.get(scope)?.dispose();
+        pluginCreditServices.delete(scope);
+        await require("../core/lib/plugins/remove-directory").removeOwnedDirectory(path.join(dataDir, "plugin-finance"), scope);
+      } finally { removingPlugins.delete(pluginId); }
+    },
     registerNativeCreditCaller(record) {
       record.controller.signal.throwIfAborted();
       const token = Object.freeze({});
@@ -600,6 +616,17 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     disposal = Promise.allSettled([...inFlight, purchaseSync?.promise, providerPending, providerWake, creditProvider.dispose(), worker?.stop()]).then(() => {});
     return disposal;
   } };
+  for (const [method, callerIndex] of [["runForPlugin", 2], ["completeForPlugin", 2], ["accessForPlugin", 1]]) {
+    const invoke = adapter[method];
+    adapter[method] = function (...args) {
+      const id = args[callerIndex]?.pluginId;
+      if (removingPlugins.has(id)) return Promise.reject(Error("Plugin is being removed"));
+      const tasks = pluginTasks.get(id) || new Set(); pluginTasks.set(id, tasks);
+      const task = Promise.resolve().then(() => invoke.apply(adapter, args));
+      tasks.add(task);
+      return task.finally(() => { tasks.delete(task); if (!tasks.size && pluginTasks.get(id) === tasks) pluginTasks.delete(id); });
+    };
+  }
   return adapter;
 }
 module.exports = { registerTestPaymentIPC, readConfig };

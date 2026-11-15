@@ -51,6 +51,32 @@ function fixture(t, powerMonitor) {
   return { dataDir, scopes, plugin, caller, core, registration, setAccount: id => accountId = id, setPrivacy: mode => privacy = mode, onChat: fn => onChat = fn };
 }
 
+test("plugin removal deletes only its credit history and consent and reinstall starts fresh", async t => {
+  const f = fixture(t), owner = f.caller("community.writer", "1".repeat(64)), other = f.caller("community.other", "2".repeat(64));
+  const input = { model: "koinos-network:network-test", messages: [{ role: "user", content: "private draft" }] };
+  await f.registration.completeForPlugin(input, undefined, owner, async () => "always");
+  await f.registration.completeForPlugin(input, undefined, other, async () => "always");
+  const dir = caller => path.join(f.dataDir, "plugin-finance", crypto.createHash("sha256").update(caller.pluginId + "|" + caller.fingerprint).digest("hex"));
+  const theirs = fs.readFileSync(path.join(dir(other), "synthetic-account", "recovery.json"), "utf8");
+  await f.registration.removePluginData(owner.pluginId, owner.fingerprint);
+  assert.equal(fs.existsSync(dir(owner)), false);
+  assert.equal(fs.readFileSync(path.join(dir(other), "synthetic-account", "recovery.json"), "utf8"), theirs);
+  assert.deepEqual(f.registration.listCreditAccess().map(row => row.pluginId), [other.pluginId]);
+  assert.equal((await f.registration.accessForPlugin(undefined, owner)).allowed, false);
+  assert.equal(fs.existsSync(path.join(dir(owner), "synthetic-account", "recovery.json")), false);
+});
+
+test("plugin removal waits for in-flight journal writes before deleting them", async t => {
+  const f = fixture(t), owner = f.caller("community.writer", "1".repeat(64)); let finish, started;
+  const ready = new Promise(resolve => { started = resolve; });
+  f.onChat(() => new Promise(resolve => { finish = resolve; started(); }));
+  const pending = f.registration.completeForPlugin({ model: "koinos-network:network-test", messages: [{ role: "user", content: "late write" }] }, undefined, owner, async () => "always");
+  await ready; const removal = f.registration.removePluginData(owner.pluginId, owner.fingerprint);
+  await assert.rejects(f.registration.accessForPlugin(undefined, owner), /being removed/);
+  finish(); await pending.catch(() => {}); await removal;
+  for (const scope of f.scopes) assert.equal(fs.existsSync(scope), false);
+});
+
 test("Core reviewed credit completion reuses workflow consent in background and ends it per run", async t => {
   const f = fixture(t), caller = f.caller("community.writer", "1".repeat(64)), scope = { id: "run-1", name: "Article" };
   const input = { model: "koinos-network:network-test", messages: [{ role: "user", content: "write" }] }; let reviews = 0;

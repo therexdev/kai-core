@@ -125,7 +125,9 @@ class PluginHost {
       if (this.windows.get(id) === record) this.windows.delete(id);
       if (view && !window.isDestroyed()) window.contentView.removeChildView(view);
       if (!record.closingReason) void (this.features?.detachWindow?.(id) || this.features?.close(id))?.catch(error => console.warn("[plugin]", error.message));
-      session.protocol.unhandle("kai-plugin"); if (manifest.runtime === "sandboxed") void Promise.resolve(releasePackage?.()).catch(error => console.warn("[plugin-cleanup]", error.message)); void session.clearStorageData().catch(() => {});
+      session.protocol.unhandle("kai-plugin");
+      record.cleanupTask = Promise.all([manifest.runtime === "sandboxed" ? Promise.resolve().then(() => releasePackage?.()) : null, session.clearStorageData()]);
+      void record.cleanupTask.catch(error => console.warn("[plugin-cleanup]", error.message));
     };
     record.cleanup = cleanup;
     if (view) webContents.once("destroyed", cleanup); else window.once("closed", cleanup);
@@ -146,7 +148,8 @@ class PluginHost {
     this.generations.set(id, (this.generations.get(id) || 0) + 1);
     if (this.selected === id) { this.hide(); this.onActivate?.({ page: "plugins" }); }
     const record = this.windows.get(id); if (record) record.closingReason = reason;
-    this.destroyRecord(record); return this.features?.close(id, { reason }) || Promise.resolve();
+    this.destroyRecord(record);
+    return Promise.all([this.features?.close(id, { reason }), record?.cleanupTask]);
   }
   closeAll() { this.hide(); return Promise.allSettled([...this.windows.keys()].map(id => this.close(id, "quit"))); }
   localeChanged(value) {

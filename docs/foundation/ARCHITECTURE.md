@@ -10,7 +10,7 @@ The plugin host presents persistent sandboxed `WebContentsView` instances in the
 
 Package schema 2 declares API 3, runtime, HTML entry, optional native service entry, capabilities and consumed/provided service names. The publisher signature authenticates the manifest and every packaged file. The installed approval binds its exact signed content and publisher. Dependencies and platform assets are built by the publisher; installation executes no dependency installation scripts.
 
-`plugins-v3` contains installation metadata, immutable verified code versions and separate per-plugin writable data. New packages cannot silently substitute another publisher, even after a plugin is removed and its data retained. Updates stop/revoke the previous instance before activating the next. A failed cleanup blocks a new instance until cleanup can be retried.
+`plugins-v3` contains installation metadata, immutable verified code versions and separate per-plugin writable data. Updates and disabled installations retain their publisher binding. Confirmed removal deletes the plugin folder and scoped Core data before releasing the installed entry and publisher binding. Failed or interrupted removal remains disabled and retryable; a fresh installation cannot reuse partially removed data. Updates stop/revoke the previous instance before activating the next. A failed cleanup blocks a new instance until cleanup can be retried.
 
 Normal application and plugin updates keep the same profile and writable-data paths. `foundation-v1` and `plugins-v3` identify storage formats; they are not app release numbers and do not increment on ordinary updates.
 
