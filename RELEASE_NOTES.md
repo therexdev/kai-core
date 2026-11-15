@@ -1,4 +1,14 @@
-# KAI Core Beta 0.7.30
+# KAI Core Beta 0.7.31
+
+**Remove** now warns before permanently deleting a plugin's installation folder, all installed versions, saved files, settings and local credit history. The warning includes plugin-specific wallets, keys and backups stored in that folder. Back up anything you need before confirming removal.
+
+Choose **Disable instead** to keep the plugin's files and settings while stopping it and hiding it from the Apps menu. You can enable it again on the Plugins page. Failed or interrupted removal stays disabled with **Retry removal**, including after restarting Core.
+
+Shared Core wallets and models are kept. Custom folders outside Core, such as a separate node-data drive, still require plugin-specific cleanup and are not deleted by this update. Installing the update itself does not remove any plugins or saved data.
+
+Update through **Settings → Application updates**, then choose **Download update** and **Restart and install**. This is a Core update; plugin updates are not required for cleanup of Core-managed files.
+
+## Previous release: KAI Core Beta 0.7.30
 
 Fixes Network overview showing **0 models available** when other providers still have models ready. The model and provider counts now both describe the whole network. Account restrictions appear separately, including guidance to connect your wallet under **Credits and Usage** when sharing models through an unlinked free-access account.
 
