@@ -59,10 +59,10 @@ test("extraction verifies every byte and rejects extra files or symlinks", t => 
   fs.chmodSync(source, 0o600); fs.writeFileSync(source, "changed"); assert.throws(() => manager.materialize("example.test"), /modified/);
   fs.writeFileSync(source, installed.package.files["service/index.js"]); fs.writeFileSync(path.join(installed.root, "extra.js"), "x"); assert.throws(() => manager.materialize("example.test"), /unverified/);
 });
-test("plugin state is scoped and retained on remove without publisher takeover", t => {
+test("disable retains scoped data and publisher identity", t => {
   const manager = new PluginManager(workspace(t)), first = pkg(), second = pkg({ id: "example.other" });
   manager.install(first, { trustNative: true }); manager.install(second, { trustNative: true }); manager.storage("example.test", "set", "item", "private");
-  assert.equal(manager.storage("example.other", "get", "item"), null); manager.change("example.test", "remove");
+  assert.equal(manager.storage("example.other", "get", "item"), null); manager.change("example.test", "disable");
   assert.throws(() => manager.install(pkg(), { trustNative: true }), /Publisher changed/); manager.install(first, { trustNative: true }); assert.equal(manager.storage("example.test", "get", "item"), "private");
 });
 test("native dependencies resolve inside the signed package, plus platform builtins", t => {

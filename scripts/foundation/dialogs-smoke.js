@@ -96,6 +96,28 @@ CreditService.prototype.context=async function(){return {auth:{accountId:"synthe
     report.checks.push("Alerts render literal text safely and long details scroll without losing close controls");
     await pluginCall("hidden-review", 'window.kai.dialogs.confirm("This review must cancel when its app is hidden.")'); await dialog(); await evaluate(() => { global.__foundationHost.hide(); return true; }); assert.equal(await pluginResult(), false);
     report.checks.push("Leaving the originating plugin cancels its pending review");
+    await page.locator('#plugin-nav').click();
+    const pluginDirectory = path.join(profile, "plugins-v3", "example.dialogs"), savedFile = path.join(pluginDirectory, "data", "saved-notes.txt");
+    fs.writeFileSync(savedFile, "Keep this draft when disabled");
+    const beginRemoval = async () => {
+      await page.evaluate(() => { window.removeDone = false; window.removeError = null; window.kaiCore.call("plugins.change", {id:"example.dialogs", action:"remove"}).then(() => {window.removeDone=true;},error=>{window.removeError=String(error);window.removeDone=true;}); });
+      return dialog();
+    };
+    popup = await beginRemoval();
+    assert.match(await popup.locator("body").innerText(), /Permanently delete/);
+    assert.equal(await popup.getByRole("button", {name:"Disable instead",exact:true}).count(), 1);
+    await capture(popup, "plugin-removal-warning");
+    await closeDialog(popup, () => popup.keyboard.press("Escape"), async () => {await page.waitForFunction(()=>window.removeDone);return page.evaluate(()=>window.removeError);}, null);
+    assert.equal(fs.readFileSync(savedFile,"utf8"), "Keep this draft when disabled");
+    popup = await beginRemoval();
+    await closeDialog(popup, () => popup.getByRole("button", {name:"Disable instead",exact:true}).click(), async () => {await page.waitForFunction(()=>window.removeDone);return page.evaluate(()=>window.removeError);}, null);
+    await until(() => page.locator('[data-app="example.dialogs"]').count().then(count=>count===0), "Disabled app stayed in menu");
+    assert.equal(fs.readFileSync(savedFile,"utf8"), "Keep this draft when disabled");
+    popup = await beginRemoval();
+    await closeDialog(popup, () => popup.getByRole("button", {name:"Remove plugin and data",exact:true}).click(), async () => {await page.waitForFunction(()=>window.removeDone);return page.evaluate(()=>window.removeError);}, null);
+    assert.equal(fs.existsSync(pluginDirectory), false);
+    await until(() => page.locator('[data-installed-plugin="example.dialogs"]').count().then(count=>count===0), "Removed plugin stayed in list");
+    report.checks.push("Removal warning cancels on Escape, Disable instead keeps files and hides Apps, confirmed removal deletes the entire plugin directory");
     await evaluate(() => { global.__foundationWindow.show(); return true; });
     await page.evaluate(() => { window.coreDialogDone = false; window.kaiCore.dialogs.confirm("This review must cancel when Core goes to the tray.").then(value => { window.coreDialogValue = value; window.coreDialogDone = true; }); });
     await dialog(); await evaluate(() => { global.__foundationWindow.hide(); return true; }); await page.waitForFunction(() => window.coreDialogDone); assert.equal(await page.evaluate(() => window.coreDialogValue), false);

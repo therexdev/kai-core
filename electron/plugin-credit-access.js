@@ -91,6 +91,18 @@ class PluginCreditAccess {
     for (const lease of this.leases) if (lease.id === id) lease.abort();
     return { revoked: true };
   }
+  removePlugin(pluginId) {
+    if (!require("../core/lib/plugins/package").safeId(pluginId)) throw Error("Invalid plugin ID");
+    const ids = new Set(this.saved.filter(row => row.pluginId === pluginId).map(row => row.id));
+    for (const session of this.sessions.values()) if (session.owner.pluginId === pluginId) ids.add(session.id);
+    for (const lease of this.leases) if (lease.owner.pluginId === pluginId) ids.add(lease.id);
+    if (ids.size) this.save(this.saved.filter(row => row.pluginId !== pluginId));
+    for (const id of ids) {
+      this.epochs.set(id, (this.epochs.get(id) || 0) + 1);
+      for (const session of this.sessions.values()) if (session.id === id) session.remove();
+      for (const lease of this.leases) if (lease.id === id) lease.abort();
+    }
+  }
   dispose() { for (const session of this.sessions.values()) session.remove(); for (const lease of this.leases) lease.abort(); this.leases.clear(); }
 }
 module.exports = { PluginCreditAccess, creditBinding, workflow };
