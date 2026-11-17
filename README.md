@@ -53,7 +53,7 @@ A detached helper verifies the staged AppImage again and waits for Core's proces
 | Network policy, protected account requests and secure-storage primitives | Documents, coding, comparisons, developer tools and MCP |
 | Common service-management screens and simple model chat | Koinos Node's node/wallet/funding and Remote Access's keys/gateway/relay |
 
-Core does not include these optional feature engines. The build generates an explicit production file list and fails if an optional engine re-enters that dependency graph. Installing a plugin supplies its engine; removing it stops the feature and removes it from Apps. Versioned package files and saved data remain in the profile. Plugin data is separate from versioned code.
+Core does not include these optional feature engines. The build generates an explicit production file list and fails if an optional engine re-enters that dependency graph. Installing a plugin supplies its engine. **Disable** stops the plugin and removes it from Apps while preserving its files and settings, so you can enable it again later. **Remove plugin and data**, after an explicit warning, permanently deletes the Core-managed plugin folder, including all installed versions, saved files, settings and any plugin-specific wallets, keys and backups inside that folder, as well as the plugin's local credit history. Back up anything you need first. Shared Core wallets and models are kept; files exported or stored in custom folders outside the plugin folder are not deleted by Core. Failed or interrupted removal leaves the plugin disabled with a retry option.
 
 ## Runtime and trust
 
