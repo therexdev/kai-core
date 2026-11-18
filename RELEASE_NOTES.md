@@ -1,4 +1,14 @@
-# KAI Core Beta 0.7.31
+# KAI Core Beta 0.7.32
+
+Local model context now grows automatically for each task, within the model's supported limit and your optional per-model cap. Short requests start with a small allocation. Longer requests can request more room; Core verifies the running engine's allocation before inference and queues resizing behind active replies.
+
+Leave **Models → Automatic context** on Auto for normal use. Set an optional cap there to limit memory use. Larger windows need enough available RAM/VRAM; a configured limit is not proof that the engine can allocate it.
+
+Update through **Settings → Application updates → Download update → Restart and install**. For the Android app's Koinos API connection, also update **Remote Access to 0.3.4** and install **kai Android 0.4.16**. The app discovers the context limit automatically, including after restart and for saved tasks. Existing model files, API keys and saved data are retained.
+
+This update applies to local inference through Core and its public plugin API. Prepaid-network context limits and credit approvals are unchanged.
+
+## Previous release: KAI Core Beta 0.7.31
 
 **Remove** now warns before permanently deleting a plugin's installation folder, all installed versions, saved files, settings and local credit history. The warning includes plugin-specific wallets, keys and backups stored in that folder. Back up anything you need before confirming removal.
 
