@@ -24,6 +24,25 @@ jobs:
       - run: npm run build:manifest
       - run: npm test
       - run: npm run test:services
+      - name: Checkout the reviewed Compare Models stream regression
+        uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai-plugin-model-compare
+          ref: f2f1492d2972729b2eeb09a835da578e5837c90e
+          path: .inference-plugins/compare
+          persist-credentials: false
+      - name: Checkout the reviewed Documents stream regression
+        uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai-plugin-documents
+          ref: 419199f38237fc38a080c890cdf87cec29a81b10
+          path: .inference-plugins/documents
+          persist-credentials: false
+      - name: Verify local inference ownership across Compare Models and Documents
+        run: node .inference-plugins/compare/scripts/test-inference-integration.cjs
+        env:
+          KAI_CORE_SOURCE: ${{ github.workspace }}
+          KAI_DOCUMENTS_SOURCE: ${{ github.workspace }}/.inference-plugins/documents
       - name: Checkout the reviewed additive network backend
         uses: actions/checkout@v4
         with:

@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: therexdev/kai-plugin-model-compare
-          ref: 9a447d3f39b7b205fabe19e995505815502e01bd
+          ref: f2f1492d2972729b2eeb09a835da578e5837c90e
           path: .inference-plugins/compare
           persist-credentials: false
       - name: Checkout the reviewed Documents stream regression
