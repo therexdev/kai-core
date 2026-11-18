@@ -48,5 +48,7 @@ test("fresh Core reads locked-wallet Testnet KAI in Local-Only without activatin
   const result = await core.gateway.earn.legacyBalance();
   assert.equal(result.earnings.kai, "12345.67890123"); assert.equal(result.wallet.address, created.address); assert.equal(core.account.wallet.status().unlocked, false);
   assert.equal(core.gateway.network.status().privacyMode, "local-only"); assert.equal((await core.gateway.earn.status()).worker.running, false); assert.equal(requests, 1);
-  assert.deepEqual(require("../../ui-core/earning").legacySummary(result), { wallet: created.address, kai: "12,345.67890123", koin: "2,469.13578024" });
+  const display = require("../../ui-core/earning").legacySummary(result);
+  assert.equal(display.wallet, created.address); assert.equal(display.koin, "0");
+  assert.equal(display.drop.state, "not-eligible", "live testnet balance cannot create a new frozen-snapshot entitlement");
 });

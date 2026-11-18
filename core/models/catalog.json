@@ -102,6 +102,34 @@
       "label": "Dev Tiny (pipeline testing only — not a launch model)",
       "package": "smollm2-135m-instruct-q8_0@1",
       "dev": true
+    },
+    "gemma4-12b": {
+      "label": "Gemma 4 12B",
+      "blurb": "Creative writing and brainstorming on smaller machines. · 7.7 GB",
+      "minRamGb": 16,
+      "package": "gemma4-12b-q4_k_m@1",
+      "localOnly": true
+    },
+    "muse-glimmer-30b": {
+      "label": "Muse-Glimmer 30B",
+      "blurb": "Stories, dialogue, and imaginative writing. · 16.8 GB",
+      "minRamGb": 32,
+      "package": "muse-glimmer-30b-q4_k_m@1",
+      "localOnly": true
+    },
+    "qwen38-27b": {
+      "label": "Qwen 3.8 27B",
+      "blurb": "Writing, brainstorming, and general-purpose tasks. · 17.4 GB",
+      "minRamGb": 32,
+      "package": "qwen38-27b-q4_k_m@1",
+      "localOnly": true
+    },
+    "gemma4-31b": {
+      "label": "Gemma 4 31B",
+      "blurb": "Longer stories and creative writing on larger machines. · 19.6 GB",
+      "minRamGb": 32,
+      "package": "gemma4-31b-q4_k_m@1",
+      "localOnly": true
     }
   },
   "packages": {
@@ -288,6 +316,72 @@
         "reasoning": "on",
         "reasoningBudget": 0,
         "reasoningFormat": "deepseek"
+      }
+    },
+    "gemma4-12b-q4_k_m@1": {
+      "filename": "gemma-4-12B-it-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/gemma-4-12B-it-GGUF/resolve/2ae7d41be21ca62de00a2d320ee9cec50daa3aa6/gemma-4-12B-it-Q4_K_M.gguf",
+      "sha256": "3962624dcd25b947d889dc9ae1bf275b61db6cd4dbe694057f34fffef1671509",
+      "sizeBytes": 7662533088,
+      "contextSize": 8192,
+      "runtime": "llamacpp",
+      "license": "apache-2.0",
+      "creator": "Google DeepMind (quantized by bartowski)",
+      "allowFallback": false,
+      "generation": {
+        "jinja": true,
+        "reasoningBudget": 0
+      }
+    },
+    "muse-glimmer-30b-q4_k_m@1": {
+      "filename": "Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf",
+      "url": "https://huggingface.co/meta-models/Muse-Glimmer-30B-GGUF/resolve/b44f1072cf75e918a1b82a3a17b45c4389b076e7/Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf",
+      "sha256": "4cc57c0f51040a226e5a72cc47b7613f7772950e460a665f7083de89f183f60e",
+      "sizeBytes": 16756683904,
+      "contextSize": 8192,
+      "runtime": "llamacpp",
+      "license": "apache-2.0",
+      "creator": "Meta",
+      "allowFallback": false,
+      "generation": {
+        "jinja": true,
+        "temperature": 1.0,
+        "topP": 0.95,
+        "topK": 64,
+        "reasoningBudget": 0
+      }
+    },
+    "qwen38-27b-q4_k_m@1": {
+      "filename": "Qwen3.8-27B-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Qwen3.8-27B-GGUF/resolve/87410e7b9a5c21e6ca70c0c9cc5237de909fe621/Qwen3.8-27B-Q4_K_M.gguf",
+      "sha256": "880a52af8317974f7b4b064a6bc29ff49e188b91aa218e08eea3078b6b1cc673",
+      "sizeBytes": 17442399968,
+      "contextSize": 8192,
+      "runtime": "llamacpp",
+      "license": "apache-2.0",
+      "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
+      "allowFallback": false,
+      "generation": {
+        "jinja": true,
+        "temperature": 0.7,
+        "topP": 0.8,
+        "topK": 20,
+        "reasoningBudget": 0
+      }
+    },
+    "gemma4-31b-q4_k_m@1": {
+      "filename": "google_gemma-4-31B-it-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/google_gemma-4-31B-it-GGUF/resolve/619aca7589c72be65dd968de8602ad23d68b5c14/google_gemma-4-31B-it-Q4_K_M.gguf",
+      "sha256": "2959c1b0a4f792493bb0092846ea06aec54547e47be979c282634d938d501b75",
+      "sizeBytes": 19598489952,
+      "contextSize": 8192,
+      "runtime": "llamacpp",
+      "license": "apache-2.0",
+      "creator": "Google DeepMind (quantized by bartowski)",
+      "allowFallback": false,
+      "generation": {
+        "jinja": true,
+        "reasoningBudget": 0
       }
     }
   }

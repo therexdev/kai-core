@@ -251,6 +251,7 @@ class Worker {
       // would have accepted it. One fit rule, both sides).
       const fits = (a) => capacityGb == null || !a.minRamGb || a.minRamGb <= Math.round(capacityGb);
       const approved = (a) => {
+        if (a.localOnly || this.models.catalog?.aliases?.[a.alias]?.localOnly) return false;
         if (!this.modelPins) return true;
         const alias = this.models.catalog?.aliases?.[a.alias], pack = this.models.catalog?.packages?.[alias?.package];
         return !!alias && !this.models.quarantineOf?.(alias.package) && this.modelPins[a.alias] === pack?.sha256 && !!this.modelPins[a.alias];
@@ -523,6 +524,7 @@ class Worker {
   }
 
   _modelOffered(model) {
+    if (this.models?.catalog?.aliases?.[model]?.localOnly) return false;
     if (!this.modelPins) return true;
     const alias = this.models?.catalog?.aliases?.[model], pack = this.models?.catalog?.packages?.[alias?.package];
     return !!alias && !alias.custom && !alias.dev && !pack?.custom && !this.models.quarantineOf?.(alias.package) &&

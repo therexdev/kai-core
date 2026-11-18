@@ -30,7 +30,8 @@ test("catalog contexts follow the native configurations, including Qwen's non-Ya
   const f = fixture(t);
   const expected = { "koinos-fast": 32768, "koinos-smart": 32768, "qwen25-14b": 32768, "qwen25-32b": 32768, "qwen-coder-7b": 32768, "qwen-coder-32b": 32768,
     "koinos-balanced": 131072, "llama31-8b": 131072, "gemma3-4b": 131072, "gemma3-12b": 131072, "gemma3-27b": 131072,
-    "mistral-7b": 32768, "mistral-small-24b": 32768, "phi-4": 16384, "deepseek-r1-32b": 131072, "lfm3-1.7b": 262144, "dev-tiny": 8192 };
+    "mistral-7b": 32768, "mistral-small-24b": 32768, "phi-4": 16384, "deepseek-r1-32b": 131072, "lfm3-1.7b": 262144, "dev-tiny": 8192,
+    "gemma4-12b": 8192, "muse-glimmer-30b": 8192, "qwen38-27b": 8192, "gemma4-31b": 8192 };
   for (const model of f.models.aliases()) {
     assert.equal(model.contextSize, expected[model.alias]); assert.equal(model.maxContextSize, expected[model.alias]); assert.equal(model.contextLimitKnown, true);
   }

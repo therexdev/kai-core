@@ -1,0 +1,42 @@
+name: Update published Core release notes
+on:
+  push:
+    branches: [main]
+    paths:
+      - RELEASE_NOTES.md
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: core-release-notes
+  cancel-in-progress: false
+jobs:
+  notes:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Update only the matching published release description
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node <<'JS'
+          const fs = require('node:fs'), cp = require('node:child_process'), assert = require('node:assert/strict');
+          const version = require('./package.json').version, tag = `v${version}`;
+          assert.match(version, /^\d+\.\d+\.\d+$/);
+          const notes = fs.readFileSync('RELEASE_NOTES.md', 'utf8');
+          assert.equal(notes.split(/\r?\n/)[0], `# KAI Core Beta ${version}`);
+          const repo = process.env.GITHUB_REPOSITORY;
+          assert.equal(repo, 'therexdev/kai-core');
+          const gh = args => cp.execFileSync('gh', args, { encoding: 'utf8' });
+          const release = JSON.parse(gh(['api', `repos/${repo}/releases/tags/${tag}`]));
+          assert.equal(release.tag_name, tag); assert.equal(release.draft, false); assert.equal(release.prerelease, false);
+          assert.ok(Number.isSafeInteger(release.id) && release.id > 0);
+          const updated = JSON.parse(gh(['api', '--method', 'PATCH', `repos/${repo}/releases/${release.id}`, '-F', 'body=@RELEASE_NOTES.md']));
+          assert.equal(updated.id, release.id); assert.equal(updated.body, notes);
+          assert.deepEqual(updated.assets.map(a => [a.id, a.name, a.digest]), release.assets.map(a => [a.id, a.name, a.digest]));
+          console.log(`Updated ${tag} release description; installer assets are unchanged.`);
+          JS

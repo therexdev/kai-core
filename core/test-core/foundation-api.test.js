@@ -22,6 +22,23 @@ function fixture(t, { id="community.test", fingerprint="a".repeat(64), permissio
 }
 function mockFetch(t, implementation){const previous=global.fetch;global.fetch=implementation;t.after(()=>{global.fetch=previous;});}
 
+test("credit review offers explicit durations and retains exact-document review checks", async t => {
+  const f = fixture(t), scope = { id: "run-1", name: "Article" }, request = { model: "koinos-network:test", messages: [{ role: "user", content: "private input" }] };
+  let details, response = 2;
+  f.context.electron.dialog.showMessageBox = async (_window, options) => { details = options; return { response }; };
+  f.context.payments = () => ({ completeForPlugin: async (input, run, caller, review) => {
+    assert.deepEqual(input, request); assert.deepEqual(run, scope); assert.equal(caller.pluginId, "community.test");
+    return review({ model: "test", maxCharge: "100000", maxFree: "100000", maxPaid: "0" });
+  } });
+  assert.equal(await f.api.wallet.complete(request, { workflow: scope }), "workflow");
+  assert.deepEqual(details.buttons, ["Cancel", "Allow once", "Allow for Workflow", "Allow Always"]);
+  assert.equal(details.defaultId, 0); assert.match(details.detail, /current|this run/);
+  response = 3; assert.equal(await f.api.wallet.complete(request, { workflow: scope }), "always");
+  f.context.electron.dialog.showMessageBox = async () => { f.setVisible(false); return { response: 3 }; };
+  assert.equal(await f.api.wallet.complete(request, { workflow: scope }), "cancel");
+  await assert.rejects(f.api.wallet.complete(request, { allowAlways: true }), /Unsupported/);
+});
+
 test("public native API has no raw Core object and checks each capability",t=>{
   const {api}=fixture(t,{permissions:[]});assert.equal(api.core,undefined);assert.equal(api.gateway,undefined);assert.equal(api.accountToken,undefined);
   assert.throws(()=>api.models.list(),/models.read/);assert.throws(()=>api.settings.get("key"),/storage.read/);assert.throws(()=>api.desktop.hostWindowId(),/desktop.windows/);assert.throws(()=>api.wallet.summary(),/wallet.read/);assert.throws(()=>api.secrets.encryptString("secret"),/secrets.use/);
@@ -139,4 +156,34 @@ test("embeddings use only a validated installed model and the private authentica
   const f=fixture(t);let called;mockFetch(t,async(url,options)=>{called={url,options};return Response.json({data:[{embedding:[0.1,0.2]}]});});
   await assert.rejects(f.api.models.embeddings({model:"koinos-network",input:"text"}),/local embedding model/);
   const result=await f.api.models.embeddings({model:"local-model",input:"text"});assert.deepEqual(result.data[0].embedding,[0.1,0.2]);assert.match(called.url,/\/core\/embeddings$/);assert.equal(called.options.headers.authorization,"Bearer core-only-secret");
+});
+
+test("plugin inference outlives three minutes while ordinary credit reads remain bounded", async t => {
+  t.mock.timers.enable({apis:["setTimeout"]});
+  t.mock.method(AbortSignal,"timeout",ms=>{const c=new AbortController();setTimeout(()=>c.abort(new DOMException("Timed out","TimeoutError")),ms);return c.signal;});
+  const f=fixture(t), calls=[];
+  f.context.payments=()=>({
+    completeForPlugin:async(_input,_scope,caller)=>{calls.push(caller.signal);return{};},
+    runForPlugin:async(action,_input,caller)=>{calls.push(caller.signal);return{completion:{choices:[{message:{content:"ok"}}]}};}
+  });
+  mockFetch(t,async(_url,options)=>{calls.push(options.signal);return new Response('{"choices":[]}');});
+  const request={model:"koinos-network:test",messages:[{role:"user",content:"Article"}]};
+  await f.api.wallet.complete(request,{workflow:{id:"run",name:"Article"}});
+  await f.api.wallet.authorize("chat-completion",request);
+  await f.api.wallet.authorize("chat-recover",{});
+  await f.api.models.chat({model:"local-model",messages:[]});
+  await f.api.wallet.authorize("chat-info",{});
+  t.mock.timers.tick(180001);
+  assert.deepEqual(calls.map(s=>s.aborted),[false,false,false,false,true]);
+  t.mock.timers.tick(719999);
+  assert.ok(calls.every(s=>s.aborted));
+});
+test("inference retains caller cancellation and plugin lifetime revocation inside its longer ceiling", async t => {
+  const f=fixture(t), calls=[], shorter=new AbortController();
+  f.context.payments=()=>({completeForPlugin:async(_input,_scope,caller)=>{calls.push(caller.signal);return{};}});
+  const request={model:"koinos-network:test",messages:[]};
+  await f.api.wallet.complete(request,{},shorter.signal);
+  await f.api.wallet.complete(request,{});
+  shorter.abort(Error("Stop this step"));assert.equal(calls[0].aborted,true);assert.equal(calls[1].aborted,false);
+  f.controller.abort(Error("Plugin disabled"));assert.equal(calls[1].aborted,true);
 });

@@ -120,15 +120,16 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
     if (["/tokenize", "/completion"].includes(req.url)) {
       const chunks = []; for await (const chunk of req) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks));
-      res.writeHead(200, { "content-type": "application/json" });
-      if (req.url === "/tokenize") res.end(JSON.stringify({ tokens: encode(body.content) }));
+      if (req.url === "/tokenize") { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ tokens: encode(body.content) })); }
       else {
         inferenceCalls++; assert.ok(Array.isArray(body.prompt));
         const messages = runtimeReadiness ? JSON.parse(Buffer.from(body.prompt).toString("utf8")) : null;
         const nonce = messages && JSON.stringify(messages).match(/KAI-[A-F0-9]{16}/)?.[0];
         const content = nonce || "Yes";
         inferenceRecords.push({ messages, nonce, maxOutput: body.n_predict, content });
-        res.end(JSON.stringify({ content, stop: true, stopped_eos: true }));
+        res.writeHead(200, { "content-type": body.stream ? "text/event-stream" : "application/json" });
+        const reply = JSON.stringify({ content, stop: true, stopped_eos: true });
+        res.end(body.stream ? "data: " + reply + "\n\ndata: [DONE]\n\n" : reply);
       }
       return;
     }
@@ -229,6 +230,41 @@ async function assignedReply(f, context, worker, input, { wrongDevice } = {}) {
   assert.ok(completed.value.koin.receipt.signature.startsWith("pd1."));
   return { job, proof, answer: completed.value };
 }
+
+test("buffered network replies cross the real streaming scheduler and charge only one verified job", options, async t => {
+  const f = await fixture(t), signal = AbortSignal.timeout(45000);
+  await f.service.connectWallet(f.window, {}, signal);
+  await f.providerDevice.authorize(f.window, {}, signal);
+  const context = await f.providerDevice.context(signal), worker = await f.register(context);
+  const originalFetch = f.service.fetchImpl;
+  f.service.fetchImpl = (url, init) => url.endsWith("/consume/chat/completions") && JSON.parse(init.body).stream !== true
+    ? Promise.resolve(new Response("<!DOCTYPE html><title>Gateway timeout</title>", { status: 524 }))
+    : originalFetch(url, init);
+  let finished;
+  const pending = f.service.run("chat-completion", { model: "koinos-network:" + f.tariff.model,
+    messages: [{ role: "user", content: "A buffered reply" }], max_tokens: 32, stream: false }, signal)
+    .then(value => finished = { value }, error => finished = { error });
+  let job;
+  for (let tries = 0; tries < 100; tries++) {
+    const response = await f.request("/scheduler/worker/next-job?token=" + encodeURIComponent(worker.token));
+    if (response.body?.job) { job = response.body.job; break; }
+    if (finished?.error) throw finished.error;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.ok(job); assert.equal(job.stream, true); context.signer.assign(job);
+  const prefix = "Verified ", output = prefix + "complete reply";
+  const chunk = await f.request("/scheduler" + f.wire.prefix + "chunk?token=" + encodeURIComponent(worker.token),
+    { jobId: job.id, output: prefix, sequence: 1, signature: context.signer.chunk(job, prefix, 1) });
+  assert.equal(chunk.status, 200, JSON.stringify(chunk.body)); assert.equal(finished, undefined);
+  const final = await f.request("/scheduler" + f.wire.prefix + "result?token=" + encodeURIComponent(worker.token),
+    { jobId: job.id, output, signature: context.signer.result(job, output) });
+  assert.equal(final.status, 200, JSON.stringify(final.body));
+  await pending; if (finished.error) throw finished.error;
+  assert.equal(finished.value.id, job.id); assert.equal(finished.value.choices[0].message.content, output);
+  assert.equal(finished.value.koin.receipt.sequence, undefined, "only the provider's final proof completes a buffered answer");
+  const status = await f.service.run("credit-status", undefined, signal);
+  assert.equal(status.usage.length, 1); assert.equal(status.usage[0].id, job.id);
+});
 
 test("real HTTP wallet-only enrollment, free balance, purchase finality and locked-wallet assigned replies work together", options, async t => {
   const f = await fixture(t), signal = AbortSignal.timeout(45000);

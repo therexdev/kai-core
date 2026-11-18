@@ -55,9 +55,11 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       save: ids => bridge.call("plugins.order", { ids }), changed: render,
       failed: error => { announce("Could not save the app order. Your previous order has been restored."); notify(error.message || "Could not save the app order.", true); },
     });
+    const visibleIds = () => order.get().filter(id => plugins.some(plugin => plugin.id === id && plugin.enabled));
     function render() {
-      section.hidden = plugins.length === 0;
-      const ids = drag?.preview || order.get(), available = new Map(plugins.map(plugin => [plugin.id, plugin]));
+      const available = new Map(plugins.filter(plugin => plugin.enabled).map(plugin => [plugin.id, plugin]));
+      section.hidden = available.size === 0;
+      const ids = (drag?.preview || order.get()).filter(id => available.has(id));
       const focused = document.activeElement;
       for (const [id, node] of nodes) if (!available.has(id)) { node.row.remove(); nodes.delete(id); }
       ids.forEach((id, index) => {
@@ -78,7 +80,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
             if (current.enabled) open(current); else manage(current);
           };
           handle.onkeydown = event => {
-            const current = order.get(), from = current.indexOf(id);
+            const current = visibleIds(), from = current.indexOf(id);
             const to = { ArrowUp: from - 1, ArrowDown: from + 1, Home: 0, End: current.length - 1 }[event.key];
             if (to === undefined) return;
             event.preventDefault(); cancelDrag();
@@ -87,7 +89,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
             announce(`${root.KaiPluginPresentation.get(id, plugin).name} moved to position ${next.indexOf(id) + 1} of ${next.length}.`);
           };
           handle.ondragstart = event => {
-            drag = { id, preview: order.get() };
+            drag = { id, preview: visibleIds() };
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", id);
             event.dataTransfer.setDragImage(row, Math.min(40, row.offsetWidth / 2), row.offsetHeight / 2);
@@ -135,8 +137,8 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
     return {
       update(snapshot) {
         plugins = snapshot.plugins || []; order.sync(plugins, snapshot.pluginsOrder);
-        if (drag && !plugins.some(plugin => plugin.id === drag.id)) drag = null;
-        if (drag) drag.preview = orderedIds(plugins, drag.preview);
+        if (drag && !plugins.some(plugin => plugin.id === drag.id && plugin.enabled)) drag = null;
+        if (drag) drag.preview = orderedIds(plugins.filter(plugin => plugin.enabled), drag.preview);
         render();
       },
       select(id) { active = id; render(); },

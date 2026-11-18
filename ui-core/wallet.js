@@ -50,7 +50,9 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       clearTimer(timer); state.loading = true; if (!automatic) state.readVersion++; paint();
       const task = (async () => {
         let deadline;
-        const read = (method, input) => Promise.race([Promise.resolve().then(() => call(method, input)), new Promise((_, reject) => { deadline = setTimer(() => reject(Error("Wallet update timed out. Try again.")), 20000); })]).finally(() => clearTimer(deadline));
+        // History may need a second index plus transaction/block metadata.
+        // Let that read finish without extending the balance freshness policy.
+        const read = (method, input) => Promise.race([Promise.resolve().then(() => call(method, input)), new Promise((_, reject) => { deadline = setTimer(() => reject(Error("Wallet update timed out. Try again.")), method === "wallet.history" ? 45000 : 20000); })]).finally(() => clearTimer(deadline));
         if (!older) {
           try {
             const result = await read("wallet.summary", {}); if (!current()) return;

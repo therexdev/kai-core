@@ -39,7 +39,8 @@ function catalog(value, config, now = Date.now()) {
   if (!value || value.schema !== 1) throw Error("Approved network model catalog unavailable");
   const approved = approvedTariffs(value.tariffs, config, value.policyHash);
   P.integer(value.asOf); P.integer(value.validUntil);
-  if (value.asOf > now + 5000 || value.validUntil <= now || value.validUntil <= value.asOf || value.validUntil > value.asOf + 15000) throw Error("Network model availability is out of date. Refresh and try again");
+  if (value.asOf > now + 5000 || value.validUntil <= value.asOf || value.validUntil > value.asOf + 15000) throw Error("Network model availability is out of date. Refresh and try again");
+  if (value.validUntil <= now) throw Object.assign(Error("Network model availability expired. Refresh and try again"), { code: "network-models-stale" });
   if (!Array.isArray(value.models) || value.models.length !== approved.length) throw Error("Incomplete network model availability");
   const rows = new Map();
   for (const row of value.models) {

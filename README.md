@@ -10,6 +10,12 @@ The Beta name is display branding. Core keeps the `io.koinosai.core` application
 
 Follow the [illustrated transfer guide](docs/TRANSFER_GUIDE.md) to migrate models, your Core wallet and the regular Koinos Node. It includes snapshots, a PDF download and guidance for creating a separate Node wallet.
 
+## Local model testing
+
+**Model library → Unsupported Earn Models** lists experimental downloads for local chat and plugins that support local inference. Gemma 4 12B, Muse-Glimmer 30B, Qwen 3.8 27B, and Gemma 4 31B are initial text-only candidates. They are excluded from Earn, including **Share all compatible installed models**. Importing a custom GGUF also keeps it local.
+
+Each card shows its download size and suggested memory. **Share feedback** opens a GitHub report template for you to review and submit; it does not upload conversations. Compatibility and quality remain experimental. See [local model testing and Earn approval](docs/foundation/LOCAL_MODEL_TESTING.md) for the catalog policy and promotion procedure.
+
 ## Model storage folders
 
 **Settings → Model storage** lets you choose separate folders for downloaded models and custom GGUF imports, including folders on another drive. Downloaded models default to `models` inside the Foundation profile. Custom imports stay at their original locations until you choose a custom folder. New catalog downloads and GGUF imports use the selected folders immediately, and the choices survive restart. New imports always keep their source files.
@@ -55,7 +61,7 @@ A detached helper verifies the staged AppImage again and waits for Core's proces
 | Network policy, protected account requests and secure-storage primitives | Documents, coding, comparisons, developer tools and MCP |
 | Common service-management screens and simple model chat | Koinos Node's node/wallet/funding and Remote Access's keys/gateway/relay |
 
-Core does not include these optional feature engines. The build generates an explicit production file list and fails if an optional engine re-enters that dependency graph. Installing a plugin supplies its engine; removing it stops the feature and removes it from Apps. Versioned package files and saved data remain in the profile. Plugin data is separate from versioned code.
+Core does not include these optional feature engines. The build generates an explicit production file list and fails if an optional engine re-enters that dependency graph. Installing a plugin supplies its engine. **Disable** stops the plugin and removes it from Apps while preserving its files and settings, so you can enable it again later. **Remove plugin and data**, after an explicit warning, permanently deletes the Core-managed plugin folder, including all installed versions, saved files, settings and any plugin-specific wallets, keys and backups inside that folder, as well as the plugin's local credit history. Back up anything you need first. Shared Core wallets and models are kept; files exported or stored in custom folders outside the plugin folder are not deleted by Core. Failed or interrupted removal leaves the plugin disabled with a retry option.
 
 ## Runtime and trust
 

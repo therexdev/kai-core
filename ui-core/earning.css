@@ -5,3 +5,8 @@
 .product-legacy-drop b{font-weight:550;color:var(--text-dim)}
 .product-legacy-drop small{font-size:9px;color:var(--text-dim)}
 @media(max-width:520px){.product-reward-heading{gap:8px;align-items:flex-start}.product-legacy-drop{font-size:9px;max-width:48%}}
+/* Temporary legacy-drop receipt, removed with the legacy summary. */
+.product-legacy-drop .product-drop-paid{display:inline-flex;align-items:center;padding:1px 7px;margin-left:5px;border:1px solid #238b55;border-radius:999px;background:#123b28;color:#a6f3c4;font-size:9px;font-weight:750;letter-spacing:.05em;vertical-align:middle}
+.product-legacy-drop .product-drop-paid[hidden],.product-drop-tx[hidden]{display:none}
+.product-legacy-drop .product-drop-tx{margin-left:5px;color:var(--accent,#77b7ff);font-weight:650;text-decoration:underline;cursor:pointer}
+.product-drop-tx:focus-visible{outline:2px solid currentColor;outline-offset:3px}

@@ -1,4 +1,117 @@
-# KAI Core Beta 0.7.19
+# KAI Core Beta 0.7.31
+
+**Remove** now warns before permanently deleting a plugin's installation folder, all installed versions, saved files, settings and local credit history. The warning includes plugin-specific wallets, keys and backups stored in that folder. Back up anything you need before confirming removal.
+
+Choose **Disable instead** to keep the plugin's files and settings while stopping it and hiding it from the Apps menu. You can enable it again on the Plugins page. Failed or interrupted removal stays disabled with **Retry removal**, including after restarting Core.
+
+Shared Core wallets and models are kept. Custom folders outside Core, such as a separate node-data drive, still require plugin-specific cleanup and are not deleted by this update. Installing the update itself does not remove any plugins or saved data.
+
+Update through **Settings → Application updates**, then choose **Download update** and **Restart and install**. This is a Core update; plugin updates are not required for cleanup of Core-managed files.
+
+## Previous release: KAI Core Beta 0.7.30
+
+Fixes Network overview showing **0 models available** when other providers still have models ready. The model and provider counts now both describe the whole network. Account restrictions appear separately, including guidance to connect your wallet under **Credits and Usage** when sharing models through an unlinked free-access account.
+
+The overview still reports genuine changes in provider readiness. Interrupted status checks show **Last known network status**, and model-use buttons continue to enforce account eligibility.
+
+Update through **Settings → Application updates**, then choose **Download update** and **Restart and install**. This is a Core update; no plugin update is needed for the overview correction.
+
+## Previous release: KAI Core Beta 0.7.29
+
+Adds **Model library → Unsupported Earn Models** for downloading and testing Gemma 4 12B, Muse-Glimmer 30B, Qwen 3.8 27B, and Gemma 4 31B locally. Cards show file sizes, suggested memory, and an optional GitHub feedback report. Downloads reuse the existing queue, cancellation, and SHA-256 verification.
+
+These experimental models cannot be offered or used for Earn, including when sharing all compatible installed models. Approval requires a later reviewed Core catalog change and the matching network tariff/pins. Local testing does not qualify a model for rewards.
+
+Update through **Settings → Application updates**, then choose **Download update** and **Restart and install**. Open **Model library → Unsupported Earn Models** to try the new choices. These are experimental local models; loading speed and writing quality still need community testing.
+
+## Previous release: KAI Core Beta 0.7.28
+
+Native plugin model requests now have a bounded 15-minute Core ceiling, replacing the shared 180-second deadline that could terminate a network reply while its provider was loading a model, processing the prompt or generating. A plugin can still set a shorter timeout. This applies equally to local inference, network completions and explicit saved-response recovery; ordinary credit reads retain their existing limit.
+
+Stop, plugin shutdown, revoked credit access and privacy changes retain their existing cancellation behavior. No generation or payment is automatically resent by this change. Credit approvals, token budgets and verified recovery records are preserved.
+
+Update through **Settings → Application updates** and restart Core. Update **Workflows to 0.3.14** in the plugin catalog for its matching 10-minute per-reply setting and research corrections. Updating only one layer does not remove both old three-minute limits.
+
+## Previous release: 0.7.27
+
+Temporary network failures during model availability, price, balance and saved-reply checks now get up to two retries within the request deadline. This lets a workflow continue when a brief gateway failure clears. Persistent failures identify which check failed.
+
+Retries keep the same request inputs and respect cancellation and revoked access. Generation and payment requests are never automatically resent. Saved replies still require their original request ID and verified provider signature.
+
+Update through **Settings → Application updates**, then restart Core. Keep **Workflows 0.3.11** from the in-app catalog; existing article imports need no changes. Finish or cancel active work before restarting.
+
+## Previous release: 0.7.26
+
+Keeps network replies connected while a model loads or processes a prompt. Core opts in to server keep-alive messages and treats them only as connection activity, never generated text or billable usage. This requires the matching [credit-server update](https://github.com/therexdev/kai/blob/fix/credit-stream-keepalive/deploy/koin-mainnet/CREDIT_STREAM.md).
+
+If a reply connection breaks, Core checks the same request for an already completed, signed answer without submitting another generation. Verified partial replies and request records remain saved. Unrecoverable disconnects show a clear network error instead of `terminated`. Cancellation, output limits and credit approvals still apply.
+
+Update through **Settings → Application updates**, then restart Core. Keep **Workflows 0.3.11** from the in-app catalog; existing article imports need no changes. Finish or cancel active work before restarting.
+
+## Previous release: 0.7.25
+
+Fixes the network transport used by Workflows and other plugins requesting a complete model response. Core now receives signed replies incrementally instead of leaving long requests silent behind a gateway. Plugins still receive one completed answer, with the same credit approval and token limits.
+
+HTML gateway responses now report a clear network error and HTTP status instead of “Unexpected token '<'”. Request records and verified partial replies remain available for recovery. Buffered callers require the provider's final signature, and recovery reads the saved job without starting another generation.
+
+Update through **Settings → Application updates**, then restart Core. Keep **Workflows 0.3.9** from the in-app catalog; existing article imports need no changes. Finish or cancel active work before restarting.
+
+## Previous release: 0.7.24
+
+Fixes model availability expiring while Core checks network eligibility. Pricing and provider observations are fetched together, validated when both arrive, and refreshed up to twice if they expire in transit. Provider identity, signed prices and freshness checks remain enforced.
+
+Adds a public native SDK signal for availability failures confirmed to occur before generation starts. Automatic-model plugins can refresh and select another eligible model while preserving normal credit approval. Interrupted requests and saved answers retain their recovery records; uncertain outcomes are never marked safe to retry.
+
+Replies that exhaust their verified output token budget now report the length limit, allowing existing workflow continuations to finish long outlines and sections instead of treating a clipped answer as complete.
+
+Install Workflows 0.3.8 from the in-app catalog for automatic research, outline and writing fallback. Existing imported article workflows continue to work without reimporting.
+
+Update through **Settings → Application updates**, then restart Core before updating Workflows.
+
+## Previous release: 0.7.23
+
+Adds reusable credit permissions for plugins. Network approval can now offer **Allow once**, **Allow for Workflow**, and **Allow Always**.
+
+- **Allow for Workflow** covers the current run, including later steps and continuations. It ends when the run finishes, fails, is cancelled, or Core exits.
+- **Allow Always** lets the same plugin publisher use the approved credit account across future runs and restarts, including background runs. Core still verifies each request and available credits.
+- **Settings → Access** lists ongoing credit access and lets you revoke it. Revocation blocks queued uses and cancels active requests where possible. Already consumed credits cannot be undone.
+- Credit purchases and KOIN transfers retain their separate approvals. Local-Only continues to block network work.
+
+Install Workflows 0.3.7 from the in-app catalog to use these controls with workflow runs.
+
+Update through **Settings → Application updates**, or download the appropriate installer below.
+
+## Previous release: 0.7.22
+
+Moves the compact KOIN/USD balance box to the top of the sidebar, directly above **Chat with KAI**. Click the box to open Wallet; it replaces the separate Wallet menu item and highlights when Wallet is open.
+
+Update through **Settings → Application updates**, or download the appropriate installer below.
+
+## Previous release: 0.7.21
+
+Adds a compact KOIN wallet summary beneath the upper sidebar menu and fixes missing wallet history and KAI airdrop receipts.
+
+- The sidebar shows your liquid KOIN balance with its estimated USD value underneath. Click it to open Wallet; hover to see all eight decimals. Missing or stale price data shows a dash, and USD price requests pause in Local-Only mode.
+- Wallet and Earn now check the remaining configured history services before accepting an empty result.
+- The drop monitor allows more time for fallback and canonical receipt verification. The exact amount, sender, recipient, KOIN contract and irreversible mainnet block must still match before **PAID** and **TX** appear.
+- Existing payments are detected automatically when Wallet or Earn refreshes. Do not resend a completed drop.
+
+Update through **Settings → Check for updates → Download update → Restart and install**, then open **Wallet** and **Earn**. Portable Windows and macOS users can download the new build from this release.
+
+## Previous release: 0.7.20
+
+Earn now shows the exact final KAI-to-KOIN airdrop allocation for each eligible wallet:
+
+- Amounts match the final 32-wallet drop record, using 5 KAI per KOIN and rounding to eight decimal places per wallet.
+- A green **PAID** badge and **TX** link appear after a finalized mainnet KOIN transfer matches the exact amount, recipient and designated Master Node sending wallet.
+- Payments received while Core was closed are found when Earn checks history again. Checking works with the wallet locked and earning disabled.
+- Network outages retain the fixed allocation and retry. Unrelated transfers, VHP and failed transactions do not count as this KOIN drop.
+
+This temporary display will be removed when the legacy drop is retired. It does not send funds or start earning.
+
+Update through **Settings → Check for updates → Download update → Restart and install**, or download the appropriate installer below. Update **Master KAI Koinos Node** separately in Plugins to version **0.1.7** for the new Airdrops tab.
+
+## Previous release: 0.7.19
 
 Choose where Core stores your models in **Settings → Model storage**:
 

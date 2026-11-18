@@ -142,7 +142,7 @@ async function start() {
   async function openCoreView(view, section) {
     if (shuttingDown) throw Error("Application is closing");
     if (!require("./foundation-api").CORE_VIEWS.has(view)) throw Error("Unknown Core page");
-    if (section !== undefined && (view !== "settings" || !["website-account", "credit-account"].includes(section))) throw Error("Unknown Core section");
+    if (section !== undefined && (view !== "settings" || !["website-account", "credit-account", "access"].includes(section))) throw Error("Unknown Core section");
     pluginHost.hide(); desktopTray.show(); win.webContents.send("kai-core:open-view", section ? {page:view,section} : view); return { opened: true };
   }
   const openPlugin = async (id, section) => { await pluginHost.open(id); if (typeof section === "string") pluginHost.renderer(id)?.send("kai-plugin:navigate", { section }); return {opened:true}; };
@@ -171,6 +171,8 @@ async function start() {
     switch (method) {
       case "locale.get": return core.locale.get();
       case "locale.set": return core.locale.set(input?.language);
+      case "access.list": return payments.listCreditAccess();
+      case "access.revoke": return payments.revokeCreditAccess(input?.id);
       case "dialog.confirm": case "dialog.alert": {
         const frame = event.senderFrame;
         return require("./core-renderer-dialogs").showRendererDialog({ dialog, parent: win, name: release.productName, kind: method.slice(7), input,
@@ -235,12 +237,16 @@ async function start() {
           if (!shuttingDown) void features.startInstalledBackground(manager, m.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed;
         } finally { try { await verified?.dispose?.(); } finally { installBusy = false; pluginDownload = null; } }
       }
-      case "plugins.open": return pluginHost.open(input?.id, input?.bounds);
+      case "plugins.open": { if (installBusy) throw Error("Finish the current plugin operation first"); return pluginHost.open(input?.id, input?.bounds); }
       case "plugins.hide": return pluginHost.hide();
       case "plugins.bounds": { const { id, ...bounds } = input || {}; return pluginHost.setBounds(bounds, id); }
       case "plugins.order": return { ids: appOrder.save(input?.ids) };
-      case "plugins.change": { await pluginHost.close(input.id, input.action); const installed = manager.change(input.id, input.action);
-        if (["enable", "rollback"].includes(input.action)) void features.startInstalledBackground(manager, input.id).catch(error => console.warn("[plugin-startup]", error.message)); return installed; }
+      case "plugins.change": {
+        if (installBusy) throw Error("Finish the current plugin operation first"); installBusy = true;
+        try { return await trackPluginIO(require("./core-plugin-change").changePlugin({ manager, host: pluginHost, payments, appOrder, features, dialog, parent: win,
+          reviewable: () => !shuttingDown && trustedMainDocument(event, win, origin) && win.isVisible() && !win.isMinimized() }, input)); }
+        finally { installBusy = false; }
+      }
       case "privacy": {
         return setPrivacyMode(input.mode);
       }

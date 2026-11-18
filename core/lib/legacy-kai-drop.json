@@ -1,0 +1,147 @@
+{
+  "id": "kai-testnet-drop-2026-11-01",
+  "source": "KAI-Testnet-Drop-Record-2026-11-01.xlsx",
+  "snapshotAt": "2026-11-02T03:52:48.642Z",
+  "snapshotContract": "149YvYQfj4MNaFecd7Rm3Z2rK6y2fkPYXz",
+  "snapshotBlocks": {
+    "start": 9726121,
+    "end": 9726199
+  },
+  "sender": "15CM9Qr4GKREDgqnyXJ8tckPj2biERTM1T",
+  "chainId": "EiBZK_GGVP0H_fXVAM3j6EAuz3-B-l3ejxRSewi7qIBfSA==",
+  "token": "19GYjDBVXU7keLbYvMLazsGQn3GTWHjHkK",
+  "kaiPerKoin": 5,
+  "rounding": "nearest atomic unit per wallet",
+  "totalKaiAtoms": "9923510871539",
+  "totalKoinAtoms": "1984702174310",
+  "allocations": {
+    "1H7QvaYveeG4oBM7krKSpEMXwREv1RFjvK": {
+      "kaiAtoms": "1866402917941",
+      "koinAtoms": "373280583588"
+    },
+    "1E5cxCsLuYRttZRJjKj8ZJzwuFXUVEjR7g": {
+      "kaiAtoms": "1410060268229",
+      "koinAtoms": "282012053646"
+    },
+    "1EXvuuW5HMrYRPdkraSi5Z4TBd4djyMj6E": {
+      "kaiAtoms": "1336419037969",
+      "koinAtoms": "267283807594"
+    },
+    "155h7M4TnHe5AMxTyuPPtXGaNEGRAQo6wz": {
+      "kaiAtoms": "1247244499403",
+      "koinAtoms": "249448899881"
+    },
+    "1AUgCZZiiPkPsdK36uNE4H9ihFS7m6AXHo": {
+      "kaiAtoms": "1182436025959",
+      "koinAtoms": "236487205192"
+    },
+    "1LHn82EemUVZjPoKunYH7u7xaqZ9FtGQQU": {
+      "kaiAtoms": "1057684625565",
+      "koinAtoms": "211536925113"
+    },
+    "15CM9Qr4GKREDgqnyXJ8tckPj2biERTM1T": {
+      "kaiAtoms": "643135584745",
+      "koinAtoms": "128627116949"
+    },
+    "1AggJL4LShQYhXyvMiKKQhRUtC8B7p3kbz": {
+      "kaiAtoms": "276436362928",
+      "koinAtoms": "55287272586"
+    },
+    "1NgvLptJc2nX4i6tArtaRYY1mt9Loy2fBJ": {
+      "kaiAtoms": "150241977755",
+      "koinAtoms": "30048395551"
+    },
+    "1PBEjvJjZtQngeVgnoSDZ2M9Rzr8hPuEiS": {
+      "kaiAtoms": "140320793871",
+      "koinAtoms": "28064158774"
+    },
+    "1DrHGkcYex34F9P4Kdh2kkq1WUxkr3nLNm": {
+      "kaiAtoms": "111159040405",
+      "koinAtoms": "22231808081"
+    },
+    "1M1jV8riUpLfJ1Bxbrdv7TsvY1vcizxb2W": {
+      "kaiAtoms": "92123387436",
+      "koinAtoms": "18424677487"
+    },
+    "1E2gk42gd5nADK83VffXBsDXoFi21mHb5T": {
+      "kaiAtoms": "89721821733",
+      "koinAtoms": "17944364347"
+    },
+    "1GMwTTtZhEZuRQHsCSPTHGpGwwLshLCBoM": {
+      "kaiAtoms": "81718983763",
+      "koinAtoms": "16343796753"
+    },
+    "1P7aPBKECmMrrRohz65WETFzjZnYa5hsou": {
+      "kaiAtoms": "60805258110",
+      "koinAtoms": "12161051622"
+    },
+    "1H7T7DD3c3wTpfzmhCwX16kL84to4C4gg": {
+      "kaiAtoms": "27405191221",
+      "koinAtoms": "5481038244"
+    },
+    "1wS5RAQQcHmoK7VBQyekn9CP5EenPGbLL": {
+      "kaiAtoms": "24270395738",
+      "koinAtoms": "4854079148"
+    },
+    "16wmrJE7GN66ReYk1mavYVWb5dUw7g1EYi": {
+      "kaiAtoms": "24230658029",
+      "koinAtoms": "4846131606"
+    },
+    "1K9dZYyqgd2WjW4eV1ypEypreXyPt3iRMN": {
+      "kaiAtoms": "23481240323",
+      "koinAtoms": "4696248065"
+    },
+    "12Y8WwS7dNc5JXAiSzND1L9hHa99MyT8ii": {
+      "kaiAtoms": "23091245815",
+      "koinAtoms": "4618249163"
+    },
+    "1AQWxWMC3ncHSrMboY1jM2BARALmofbs59": {
+      "kaiAtoms": "16327225904",
+      "koinAtoms": "3265445181"
+    },
+    "1CkzKKzSyvtH71KPymbVEvy3mHmt5kfs5u": {
+      "kaiAtoms": "15626798645",
+      "koinAtoms": "3125359729"
+    },
+    "1H449jnvrnPAsLcL9g8LxNWGm9fjgqQiF9": {
+      "kaiAtoms": "13781651000",
+      "koinAtoms": "2756330200"
+    },
+    "1J6gKHPJGb8bdCMtBUJbv1WL17pj1i5PGb": {
+      "kaiAtoms": "4152949301",
+      "koinAtoms": "830589860"
+    },
+    "1CTtpsjy2zKD6g5XxGuvm2Q8VXEzZoSyJk": {
+      "kaiAtoms": "2343622940",
+      "koinAtoms": "468724588"
+    },
+    "1GnvzQwFDNCbHEukkDGRVbHB8w37AbY7r1": {
+      "kaiAtoms": "1758768907",
+      "koinAtoms": "351753781"
+    },
+    "1FcvhNmr3k6wXEbqSvPSu37dVb2guKT6ur": {
+      "kaiAtoms": "633156250",
+      "koinAtoms": "126631250"
+    },
+    "1F8EWm9gToNv3bngz2HxDYtLhLUw7sXqRz": {
+      "kaiAtoms": "200000000",
+      "koinAtoms": "40000000"
+    },
+    "1LXQ2D3bPkJwpU7T7dDG3jwL3v38MKFfL8": {
+      "kaiAtoms": "123456789",
+      "koinAtoms": "24691358"
+    },
+    "1GKctNV8qn5nGeCqeCbyKM5FeZTGjAmCHX": {
+      "kaiAtoms": "63924865",
+      "koinAtoms": "12784973"
+    },
+    "1PcDjVRGwnLeQ4n5cDtJK8qxwH5mXGaUvP": {
+      "kaiAtoms": "60000000",
+      "koinAtoms": "12000000"
+    },
+    "1ErgkAV6x7RkpRrjyLvqMd92UMnUD6WmBK": {
+      "kaiAtoms": "50000000",
+      "koinAtoms": "10000000"
+    }
+  }
+}

@@ -50,6 +50,7 @@ class FailoverProvider extends Provider {
     const urls = [...this.rpcNodes];
     const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
     let lastError = new Error("No Koinos RPC endpoint configured");
+    let emptyHistory;
     for (let i = 0; i < urls.length; i++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -80,9 +81,21 @@ class FailoverProvider extends Provider {
         if (reply.error.code === -32601) continue;
         throw lastError;
       }
+      // A synced node can have an empty/filtered account-history index. Its
+      // successful {} response is not proof that this wallet has no activity.
+      // Try the remaining configured history services before accepting empty.
+      // Keep this limited to this read-only method: balances, contract reads
+      // and transaction submissions retain their normal response semantics.
+      const result = reply.result;
+      if (method === "account_history.get_account_history" && result && typeof result === "object" && !Array.isArray(result) &&
+          !result.error && !result.rpc_error && (result.values === undefined || Array.isArray(result.values) && result.values.length === 0)) {
+        emptyHistory ??= { result, node: i };
+        continue;
+      }
       this.currentNodeId = i;
-      return reply.result;
+      return result;
     }
+    if (emptyHistory) { this.currentNodeId = emptyHistory.node; return emptyHistory.result; }
     throw lastError;
   }
 }

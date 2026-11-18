@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.19",
+  "version": "0.7.31",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
@@ -32,7 +32,9 @@
     "test:language": "node scripts/foundation/language-smoke.js",
     "build:locales": "node scripts/foundation/build-locales.js",
     "test:model-storage": "node scripts/foundation/model-storage-smoke.js",
-    "test:context": "node scripts/foundation/model-context-smoke.js"
+    "test:context": "node scripts/foundation/model-context-smoke.js",
+    "test:legacy-drop": "node scripts/foundation/legacy-drop-smoke.js",
+    "test:sidebar-wallet": "node scripts/foundation/sidebar-wallet-smoke.js"
   },
   "devDependencies": {
     "electron": "^43.8.1",
@@ -100,6 +102,8 @@
       "core/lib/koinos/wallet-history.js",
       "core/lib/koinos/wallet-nonce.js",
       "core/lib/legacy-kai-balance.js",
+      "core/lib/legacy-kai-drop.js",
+      "core/lib/legacy-kai-drop.json",
       "core/lib/local-chat-messages.js",
       "core/lib/model-context.js",
       "core/lib/model-load-queue.js",
@@ -115,6 +119,7 @@
       "core/lib/plugins/package.js",
       "core/lib/plugins/registry-format.js",
       "core/lib/plugins/registry.js",
+      "core/lib/plugins/remove-directory.js",
       "core/lib/plugins/updates.js",
       "core/lib/protected-storage.js",
       "core/lib/public-http.js",
@@ -145,6 +150,7 @@
       "electron/core-main.js",
       "electron/core-model-storage.js",
       "electron/core-plugin-catalog.js",
+      "electron/core-plugin-change.js",
       "electron/core-plugin-host.js",
       "electron/core-plugin-install-preload.js",
       "electron/core-plugin-install.js",
@@ -184,6 +190,7 @@
       "electron/koin-test-config.js",
       "electron/koin-test-ipc.js",
       "electron/koin-test-payments.js",
+      "electron/plugin-credit-access.js",
       "electron/provider-device.js",
       "electron/session-free-chat.js",
       "electron/wallet-session-secret.js",

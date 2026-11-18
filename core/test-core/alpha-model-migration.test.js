@@ -406,8 +406,12 @@ test("cancelling before commit restores an unfinished move; completed earlier mo
   await assert.rejects(migrateAlphaModels({...f,deleteOldModels:true,signal:cancel.signal,onProgress:p=>{if(p.detail.startsWith("Finishing move"))cancel.abort();}}),error=>{assert.equal(error.partialResult.deleted,0);assert.equal(error.partialResult.copied,0);return error.name==="AbortError";});
   assert.equal(fs.existsSync(source),true);assert.equal(fs.statSync(source).nlink,1);assert.equal(fs.existsSync(f.models.packagePath("tiny@1")),false);
   const second=f.alphaModel("next.gguf",gguf(4)),cancelLater=new AbortController();
-  await assert.rejects(migrateAlphaModels({...f,deleteOldModels:true,signal:cancelLater.signal,onProgress:p=>{if(p.detail==="Checking next.gguf")cancelLater.abort();}}),error=>{assert.equal(error.partialResult.deleted,1);assert.equal(error.partialResult.copied,1);return error.name==="AbortError";});
-  assert.equal(fs.existsSync(source),false);assert.equal(fs.existsSync(second),true);assert.deepEqual(fs.readFileSync(f.models.packagePath("tiny@1")),f.payload);assert.equal(f.models._alphaMigration,null);
+  // Directory enumeration order is unspecified. Stop at the second model
+  // after one committed move, whichever model the filesystem lists first.
+  await assert.rejects(migrateAlphaModels({...f,deleteOldModels:true,signal:cancelLater.signal,onProgress:p=>{if(p.detail.startsWith("Checking ")&&p.copied===1)cancelLater.abort();}}),error=>{assert.equal(error.partialResult.deleted,1);assert.equal(error.partialResult.copied,1);return error.name==="AbortError";});
+  assert.notEqual(fs.existsSync(source),fs.existsSync(second));
+  const movedSource=!fs.existsSync(source),target=movedSource?f.models.packagePath("tiny@1"):owned(f,gguf(4));
+  assert.deepEqual(fs.readFileSync(target),movedSource?f.payload:gguf(4));assert.equal(f.models._alphaMigration,null);
 });
 
 test("retry recovers only a verified interrupted Core staging pair before source cleanup", async t => {

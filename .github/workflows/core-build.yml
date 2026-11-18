@@ -4,11 +4,13 @@ on:
     branches: [main, foundation-v1]
     paths-ignore:
       - README.md
+      - RELEASE_NOTES.md
       - 'docs/**'
       - scripts/foundation/publish-core-release.js
       - core/test-core/windows-release-signing.test.js
       - .github/workflows/core-release-078-recovery.yml
       - .github/workflows/core-build.yml
+      - .github/workflows/core-release-notes.yml
       # App-smoke tooling has its own CI; test-only changes do not replace
       # already-published installers for the same application version.
       - scripts/foundation/apps-smoke.js
@@ -108,12 +110,30 @@ jobs:
       - name: Application update desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:updates
+      - name: Legacy drop receipt desktop check (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:legacy-drop
+      - name: Legacy drop receipt desktop check (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:legacy-drop
+      - name: Sidebar wallet desktop check (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:sidebar-wallet
+      - name: Sidebar wallet desktop check (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:sidebar-wallet
       - name: Model storage desktop check (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:model-storage
       - name: Model storage desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:model-storage
+      - name: Local-only model library desktop check (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/foundation/local-models-smoke.js
+      - name: Local-only model library desktop check (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: node scripts/foundation/local-models-smoke.js
       - name: Native AppImage replacement and relaunch check
         if: runner.os == 'Linux'
         run: node scripts/foundation/linux-updates-smoke.js

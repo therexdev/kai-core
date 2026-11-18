@@ -61,3 +61,9 @@ llama.cpp uses one parallel slot and Core reads `/props` to verify the per-slot 
 Provider preparation uses the baseline. Signed network jobs allocate for their quoted input plus output tokens. The existing prepaid tariff determines which context requirements network clients can request. A larger requested window is rejected during request validation when it exceeds that tariff, before creating spending terms. Larger paid-network windows require a matching scheduler/protocol rollout.
 
 The engine verification approach follows the contribution in [kaiapp PR #10](https://github.com/therexdev/kaiapp/pull/10). This implementation integrates it with Foundation's per-request API and generation queue.
+
+## Remote clients and integration validation
+
+Remote clients reach local inference through the Remote Access plugin's public SDK calls. Its model catalog must forward the permitted ceiling as `context_window` and indicate `context_mode: "auto"` only when Core supplies the automatic-allocation metadata. The ceiling is not an active allocation. Optional `context_tokens` requirements are per request; verified streaming allocation is carried by `x-kai-context-size`, and non-streaming SDK replies include `kai_context`. Older plugin versions omit this metadata, so clients must use a conservative fallback and identify it as an assumption.
+
+Run `node scripts/foundation/remote-context-integration.js /path/to/kai-plugin-remote-access` against the matching plugin source. It exercises the real Remote Access HTTP listener, public Foundation SDK, Core gateway, runtime manager and llama.cpp adapter. Only the engine child process is synthetic. It checks a 4K-to-16K transition, response metadata, owner-cap enforcement and unchanged saved settings. It does not validate GPU capacity, live inference, a relay deployment or prepaid-network expansion.

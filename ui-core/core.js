@@ -24,7 +24,9 @@ async function action(button, fn) { globalNotice.clear(); if (button) button.dis
 const apps = window.KaiCoreApps?.create({ document, bridge, open: plugin => { void openApp(plugin); }, manage: plugin => {
   showPage("plugins"); notify(`${window.KaiPluginPresentation.get(plugin.id, plugin).name} is disabled. Choose Enable in Your installed plugins to use it.`);
 }, notify });
-const modelCards = window.KaiCoreModels.create({ document, container: $("models"), request: api, refresh });
+const modelCards = window.KaiCoreModels.create({ document, container: $("models"),
+  unsupportedContainer: $("unsupported-models"), unsupportedSection: $("unsupported-models-section"),
+  openFeedback: url => bridge.call("desktop.openExternal", { url }), request: api, refresh });
 function appBounds() {
   const rect = $("app-content")?.getBoundingClientRect?.();
   return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
@@ -80,7 +82,7 @@ function showPage(next, app) {
   if (next === "network") window.KaiCoreNetwork?.enter();
   if (next === "wallet") window.KaiCoreWallet?.enter();
   if (next === "plugins") void checkPluginCatalog();
-  if (next === "settings") { window.KaiCoreAccount?.enter(); void window.KaiCoreUpdates?.enter(); window.KaiModelStorage?.enter(); }
+  if (next === "settings") { window.KaiCoreAccount?.enter(); void window.KaiCoreUpdates?.enter(); window.KaiModelStorage?.enter(); void window.KaiCoreAccess?.enter(); }
   if (next === "credits") { renderCredits(); void refreshCreditActivity(); void window.KaiCreditConnection?.enter(); }
   if (next === "buy-credits") void price();
 }
@@ -91,6 +93,7 @@ bridge?.onOpenView?.(target => {
   if (target?.error) notify(target.error, true);
   if (target?.section === "website-account") window.KaiCoreAccount?.openWebsite();
   if (target?.section === "credit-account") window.KaiCoreAccount?.openCredit();
+  if (target?.section === "access") window.KaiCoreAccess?.open();
 });
 function html(id, value) { if ($(id).innerHTML !== value) $(id).innerHTML = value; }
 function modelDisplayName(value) {
@@ -116,6 +119,7 @@ async function refresh() {
     text("wallet-address", ((_value) => _value ? KaiLocale.literal(_value) : KaiLocale.message(["No wallet created"]))(address)); text("wallet-detail", (s.wallet.unlocked ? KaiLocale.message(["Wallet unlocked. Core’s plugin API does not share its private key."]) : KaiLocale.message(["Unlock to authorize wallet actions."])));
     $("create-wallet").hidden = s.wallet.exists; $("restore-wallet").hidden = s.wallet.exists; $("unlock-button").hidden = !s.wallet.exists || s.wallet.unlocked; $("lock-wallet").hidden = !s.wallet.unlocked;
     window.KaiCoreWallet?.observe(s.wallet, s.network.privacyMode);
+    window.KaiSidebarWallet?.observe(s.wallet, s.network.privacyMode);
     window.KaiCoreEarning?.observe(s.wallet, s.network.privacyMode);
     window.KaiCoreNetwork?.observe(s.wallet, s.network.privacyMode);
     window.KaiCreditConnection?.observe(s.wallet, s.network.privacyMode);
@@ -179,8 +183,8 @@ function renderInstalledPlugins() {
     const display = pluginCardDisplay(p), update = updates.get(p.id), blocked = update?.compatible === false;
     const updateLabel = update ? KaiLocale.html`<span class="pill plugin-update-label">${blocked ? "Core update required" : "Update available"}</span>` : "";
     const version = update ? KaiLocale.html`Version ${esc(p.version)} <span aria-hidden="true">→</span><span class="sr-only"> to </span> <strong>${esc(update.version)}</strong>` : `Version ${esc(p.version)}`;
-    const updateButton = update ? `<button class="primary" data-install-plugin="${esc(p.id)}" ${blocked ? "disabled" : ""}>${blocked ? "Requires newer Core" : "Review update"}</button>` : "";
-    return KaiLocale.html`<article class="plugin-card${update ? " plugin-update-available" : ""}" data-installed-plugin="${esc(p.id)}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div class="plugin-identity"><h2>${esc(display.name)}</h2>${pluginDeveloper(p.repository)}</div></div><div class="pills plugin-status"><span class="pill">${p.enabled ? "Enabled" : "Disabled"}</span>${updateLabel}</div><p class="plugin-description">${esc(display.description)}</p>${p.backgroundError ? KaiLocale.html`<p class="plugin-card-notice error">Background service needs attention: ${esc(p.backgroundError)}</p>` : ""}${blocked ? KaiLocale.html`<p class="plugin-card-notice">${esc(update.compatibilityReason || `Requires KAI Core Beta ${update.minCoreVersion || "a newer version"}.`)}</p>` : ""}<div class="plugin-card-footer"><p class="muted plugin-version">${version}</p><div class="actions">${updateButton}${p.enabled ? `<button${update ? "" : ' class="primary"'} data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">Remove</button></div></div></article>`;
+    const updateButton = update && !p.removing ? `<button class="primary" data-install-plugin="${esc(p.id)}" ${blocked ? "disabled" : ""}>${blocked ? "Requires newer Core" : "Review update"}</button>` : "";
+    return KaiLocale.html`<article class="plugin-card${update ? " plugin-update-available" : ""}" data-installed-plugin="${esc(p.id)}"><div class="plugin-heading"><span class="plugin-icon" aria-hidden="true">${display.icon}</span><div class="plugin-identity"><h2>${esc(display.name)}</h2>${pluginDeveloper(p.repository)}</div></div><div class="pills plugin-status"><span class="pill">${p.removing ? "Removal incomplete" : p.enabled ? "Enabled" : "Disabled"}</span>${updateLabel}</div><p class="plugin-description">${esc(display.description)}</p>${p.backgroundError ? KaiLocale.html`<p class="plugin-card-notice error">Background service needs attention: ${esc(p.backgroundError)}</p>` : ""}${blocked ? KaiLocale.html`<p class="plugin-card-notice">${esc(update.compatibilityReason || `Requires KAI Core Beta ${update.minCoreVersion || "a newer version"}.`)}</p>` : ""}<div class="plugin-card-footer"><p class="muted plugin-version">${version}</p><div class="actions">${updateButton}${p.enabled ? `<button${update ? "" : ' class="primary"'} data-plugin="${esc(p.id)}" data-operation="open">Open</button>` : ""}${p.removing ? "" : `<button data-plugin="${esc(p.id)}" data-operation="${p.enabled ? "disable" : "enable"}">${p.enabled ? "Disable" : "Enable"}</button>`}${p.rollbackAvailable ? `<button data-plugin="${esc(p.id)}" data-operation="rollback">Roll back</button>` : ""}<button data-plugin="${esc(p.id)}" data-operation="remove">${p.removing ? "Retry removal" : "Remove"}</button></div></div></article>`;
   }).join("") : KaiLocale.html("<article><h2>Your workspace starts here</h2><p>No plugins installed yet. Choose a plugin below to add the tools you need.</p></article>"));
 }
 function renderCatalog() {
