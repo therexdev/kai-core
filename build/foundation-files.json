@@ -58,6 +58,7 @@
     "core/lib/legacy-kai-drop.js",
     "core/lib/legacy-kai-drop.json",
     "core/lib/local-chat-messages.js",
+    "core/lib/model-context.js",
     "core/lib/model-load-queue.js",
     "core/lib/model-manager.js",
     "core/lib/model-storage.js",

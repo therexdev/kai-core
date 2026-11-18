@@ -5,16 +5,19 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
   const bytes = value => new TextEncoder().encode(value).length;
   const cleanError = error => String(error?.message || error || "Chat could not finish").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "").slice(0, 1000);
   const modelId = value => String(value || "").replace(/^koinos-network:/, "");
-  function conversation(turns, prompt) {
+  function conversation(turns, prompt, contextSize = null) {
+    const local = Number.isSafeInteger(contextSize) && contextSize >= 2048;
+    const limit = local ? Math.min(8 * 1024 * 1024, contextSize * 8) : MAX_INPUT_BYTES;
+    const fits = messages => bytes(JSON.stringify(messages)) <= limit && (!local || Math.ceil(messages.reduce((sum, message) => sum + message.content.length, 0) / 4) + messages.length * 4 <= contextSize - 1536);
     const messages = [{ role: "user", content: prompt }];
     for (let index = turns.length - 1; index >= 0; index--) {
       const turn = turns[index];
       if (turn.state !== "done") continue;
       const previous = [{ role: "user", content: turn.prompt }, { role: "assistant", content: turn.answer }];
-      if (messages.length + 2 > 31 || bytes(JSON.stringify([...previous, ...messages])) > MAX_INPUT_BYTES) break;
+      if (messages.length + 2 > (local ? 1023 : 31) || !fits([...previous, ...messages])) break;
       messages.unshift(...previous);
     }
-    if (bytes(JSON.stringify(messages)) > MAX_INPUT_BYTES) throw Error("Send a shorter message");
+    if (!fits(messages)) throw Error("Send a shorter message");
     return messages;
   }
   function completionText(result) {
@@ -120,12 +123,14 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
     async function send(prompt = state.draft[state.source]) {
       if (active || disposed) return false;
       prompt = String(prompt).trim();
-      if (!prompt || bytes(prompt) > MAX_PROMPT_BYTES) { state.status = prompt ? "Send a shorter message (up to 16,000 bytes)." : "Write a message first."; state.error = true; emit(); return false; }
+      const contextSize = state.source === "local" ? state.models.find(model => model.alias === state.selected.local)?.contextSize : null;
+      const promptLimit = Number.isSafeInteger(contextSize) ? Math.min(8 * 1024 * 1024, contextSize * 8) : MAX_PROMPT_BYTES;
+      if (!prompt || bytes(prompt) > promptLimit) { state.status = prompt ? (state.source === "local" ? "Send a shorter message" : "Send a shorter message (up to 16,000 bytes).") : "Write a message first."; state.error = true; emit(); return false; }
       const source = state.source, turns = state.turns[source];
       // Retrying an interrupted turn keeps one copy of the user's message.
       if (turns.at(-1)?.state === "failed" && turns.at(-1).prompt === prompt) turns.pop();
       let messages;
-      try { messages = conversation(turns, prompt); }
+      try { messages = conversation(turns, prompt, contextSize); }
       catch (error) { state.status = cleanError(error); state.error = true; emit(); return false; }
       const turn = { prompt, answer: "", state: "pending" };
       const operation = { source, turn, stopped: false, started: false, partial: "" }; active = operation;
@@ -221,7 +226,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       <div id="chat-empty" class="chat-empty"><img class="brand-mark" src="assets/brand-mark.svg" width="64" height="64" alt=""><h2 class="chat-welcome">How can I help?</h2><p>Ask a question or start a conversation.</p><button id="chat-setup" type="button">Choose a model</button></div>
       <div id="chat-recovery" class="chat-recovery" hidden><p>An unfinished network request is available. Resuming uses credits if the reply needs to be retried.</p><button id="chat-recover" type="button">Resume saved request</button></div>
       <div id="chat-status-notice" class="dismissible-notice inline-notice" hidden><p id="chat-status" class="chat-status" role="status"></p><button id="chat-status-close" class="notice-close" type="button" aria-label="Dismiss message" title="Dismiss message"><span aria-hidden="true">×</span></button></div>
-      <form id="chat-form" class="chat-composer"><label class="sr-only" for="chat-input">Message</label><textarea id="chat-input" rows="3" maxlength="16000" placeholder="Message KAI…"></textarea><div class="chat-compose-actions"><span id="chat-hint" class="muted"></span><button id="chat-stop" type="button" hidden>Stop</button><button id="chat-send" type="submit" class="primary">Send</button></div></form>
+      <form id="chat-form" class="chat-composer"><label class="sr-only" for="chat-input">Message</label><textarea id="chat-input" rows="3" maxlength="2097152" placeholder="Message KAI…"></textarea><div class="chat-compose-actions"><span id="chat-hint" class="muted"></span><button id="chat-stop" type="button" hidden>Stop</button><button id="chat-send" type="submit" class="primary">Send</button></div></form>
     </div>`;
     const $ = id => document.getElementById(id);
     const statusNotice = window.KaiCoreNotice.create({ container: $("chat-status-notice"), message: $("chat-status"), close: $("chat-status-close"), focusTarget: () => $("chat-input") });
@@ -261,6 +266,9 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
         }
         if (nearBottom || state.busy) log.scrollTop = log.scrollHeight;
       }
+      const selectedLocal = state.models.find(model => model.alias === state.selected.local);
+      $("chat-input").maxLength = network ? 16000 : Math.min(8 * 1024 * 1024, (selectedLocal?.contextSize || 4096) * 8);
+      if (!network && selectedLocal?.contextSize) KaiLocale.setText($("chat-model-detail"), KaiLocale.message`Automatic local context · up to ${selectedLocal.contextSize.toLocaleString()} tokens`);
       $("chat-messages").hidden = !turns.length; $("chat-empty").hidden = !!turns.length;
       $("chat-setup").hidden = !!picked?.available && (!network || state.privacyMode !== "local-only");
       KaiLocale.setText($("chat-setup"), (network ? (state.privacyMode === "local-only" ? KaiLocale.message(["Open Settings"]) : KaiLocale.message(["Open Network"])) : KaiLocale.message(["Open Models"])));

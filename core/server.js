@@ -63,6 +63,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     onEvent: events,
   });
 
+  await models.refreshCustomContexts();
+
   // KAI_LLAMA_BIN (or the llamaBin option) forces a specific binary and skips
   // provisioning; otherwise the right build is fetched on first need.
   const forcedBin = llamaBin || process.env.KAI_LLAMA_BIN || null;

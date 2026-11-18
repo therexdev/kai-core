@@ -5,14 +5,16 @@ const MAX_INPUT_BYTES = 24000, MAX_OUTPUT_BYTES = 1024 * 1024;
 function chatInput(input, models) {
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !["model", "messages", "maxTokens"].includes(key))) throw Error("Invalid chat request");
   if (typeof input.model !== "string" || !models.some(model => model.alias === input.model && model.status === "ready") || /^(?:koinos-network|desktop:)/.test(input.model)) throw Error("Choose an installed local model in Models");
+  const model = models.find(model => model.alias === input.model);
+  const maxInputBytes = Number.isSafeInteger(model.contextSize) ? Math.min(8 * 1024 * 1024, model.contextSize * 8) : MAX_INPUT_BYTES;
   const maxTokens = input.maxTokens ?? 1024;
   if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 4096) throw Error("Invalid chat output limit");
-  if (!Array.isArray(input.messages) || input.messages.length < 1 || input.messages.length > 32 || input.messages.length % 2 !== 1) throw Error("Invalid chat history");
+  if (!Array.isArray(input.messages) || input.messages.length < 1 || input.messages.length > 1024 || input.messages.length % 2 !== 1) throw Error("Invalid chat history");
   const messages = input.messages.map((message, index) => {
     if (!message || typeof message !== "object" || Array.isArray(message) || Object.keys(message).some(key => !["role", "content"].includes(key)) || message.role !== (index % 2 ? "assistant" : "user") || typeof message.content !== "string" || !message.content.trim()) throw Error("Chat accepts only user and assistant text");
     return { role: message.role, content: message.content };
   });
-  if (Buffer.byteLength(JSON.stringify(messages)) > MAX_INPUT_BYTES) throw Error("Chat history is too long. Start a new chat or send a shorter message.");
+  if (Buffer.byteLength(JSON.stringify(messages)) > maxInputBytes) throw Error("Chat history is too long. Start a new chat or send a shorter message.");
   return { model: input.model, messages, maxTokens };
 }
 

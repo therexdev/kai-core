@@ -20,7 +20,7 @@ test("Core opens with one installed model without starting it; explicit load and
   core.runtime.makeRuntime = () => {
     let running = false;
     return { endpoint: `http://127.0.0.1:${engine.address().port}`, status: () => ({ kind: "llamacpp", running }),
-      start: async ({ modelPath }) => { starts.push(modelPath); running = true; }, stop: () => { running = false; } };
+      async start({ modelPath, contextSize }) { this.contextSize = contextSize; starts.push(modelPath); running = true; }, stop: () => { running = false; } };
   };
   await core.start(); await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(starts, []); assert.equal(core.runtime.status().loading, false); assert.equal(core.runtime.status().runtime, null);

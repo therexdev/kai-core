@@ -347,6 +347,15 @@ class Gateway {
           : null,
       });
     }
+    if (path === "/core/models/context" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.alias !== "string" ||
+            !Object.hasOwn(body, "contextSize") || Object.keys(body).some(key => !["alias", "contextSize"].includes(key))) throw Error("Invalid context setting");
+        const model = this.runtime.configureContext(body.alias, body.contextSize);
+        return this._json(res, 200, { ok: true, model });
+      } catch (error) { return this._json(res, 400, { ok: false, error: { message: String(error.message) } }); }
+    }
     // UI onboarding: download + load a model in the background; poll /core/models.
     if (path === "/core/models/ensure" && req.method === "POST") {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
@@ -672,6 +681,8 @@ class Gateway {
       return this._json(res, 400, { error: { message: "Body must be JSON", type: "invalid_request_error" } });
     }
     const alias = String(body.model || "");
+    if (body.context_tokens !== undefined && (!Number.isSafeInteger(body.context_tokens) || body.context_tokens < 1 || body.context_tokens > 262144))
+      return this._json(res, 400, { error: { message: "context_tokens must be a positive integer up to 262144", type: "invalid_request_error" } });
     // An opt-out, never a grant of desktop authority. Private screen data must
     // not overflow to network operators when a local model fails or is full.
     const privateDesktop = body.kai_private_desktop === true;
@@ -749,13 +760,19 @@ class Gateway {
     // request without changing persisted history or any network request.
     const localMessages = require("./local-chat-messages").localChatMessages(body.messages, localModel);
     const estTok = Math.max(estimateMessageTokens(body.messages), estimateMessageTokens(localMessages));
-    if (localCtx && estTok > localCtx - CTX_HEADROOM_TOKENS) {
+    if (body.max_tokens !== undefined && (!Number.isSafeInteger(body.max_tokens) || body.max_tokens < 1))
+      return this._json(res, 400, { error: { message: "max_tokens must be a positive integer", type: "invalid_request_error" } });
+    const headroom = Math.max(CTX_HEADROOM_TOKENS, body.max_tokens || 0);
+    const requiredContext = Math.max(body.context_tokens || 0, estTok + headroom);
+    if (localCtx && body.context_tokens > localCtx)
+      return this._json(res, 400, { error: { message: `The requested context exceeds this model's ${localCtx}-token limit`, type: "context_limit", contextSize: localCtx } });
+    if (localCtx && estTok > localCtx - headroom) {
       const net = this.network ? this.network.status() : null;
       // A grounded request never overflows to the network: the whole promise
       // is that the fetched material and the question stay on this machine.
       const canNetwork = !privateDesktop && net && net.privacyMode !== "local-only" && net.schedulerUrl;
       const netCtx = canNetwork ? (await this._networkRates(net.schedulerUrl)).ctxTokens : 0;
-      if (canNetwork && estTok <= netCtx - CTX_HEADROOM_TOKENS) {
+      if (canNetwork && estTok <= netCtx - headroom) {
         const reason = `prompt ~${estTok} tokens exceeds the ${localCtx}-token local context`;
         this.onEvent({ type: "gateway:overflow", from: alias, reason });
         return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: reason });
@@ -779,11 +796,12 @@ class Gateway {
     let releaseHold = () => {};
     try {
       if (this.runtime.acquireFor) {
-        const hold = await this.runtime.acquireFor(alias, { signal: lifetime.signal });
+        const hold = await this.runtime.acquireFor(alias, { signal: lifetime.signal, contextSize: requiredContext });
         endpoint = hold.endpoint;
         releaseHold = hold.release;
+        if (Number.isSafeInteger(hold.contextSize)) res.setHeader("x-kai-context-size", String(hold.contextSize));
       } else {
-        endpoint = await this.runtime.ensure(alias, { signal: lifetime.signal });
+        endpoint = await this.runtime.ensure(alias, { signal: lifetime.signal, contextSize: requiredContext });
       }
     } catch (e) {
       lifetime.dispose();
@@ -802,6 +820,11 @@ class Gateway {
     }
     try {
       lifetime.signal.throwIfAborted();
+      // This optional requirement belongs to Core, never the engine payload.
+      if (body.context_tokens !== undefined) {
+        delete body.context_tokens;
+        raw = Buffer.from(JSON.stringify(body));
+      }
       if (localMessages !== body.messages) {
         body.messages = localMessages;
         raw = Buffer.from(JSON.stringify(body));
@@ -870,11 +893,13 @@ class Gateway {
       overflowFrom ||
       (picked.startsWith("koinos-network:") ? picked.slice("koinos-network:".length) : picked && picked !== "koinos-network" ? picked : "auto");
     if (this.koinFundedConsume || this.network.status().koinRehearsal) {
+      if (body.context_tokens !== undefined) return fail(400, "Use the plugin credit API to request a context requirement for a prepaid model", "invalid_request_error");
       return this._chatKoinRehearsal(body, req, res, { schedulerUrl, netModel, fail });
     }
     // §7 context: refuse an oversized prompt BEFORE buying tokens — the
     // provider would fail on it and the failure would still be billed.
     const netCtx = (await this._networkRates(schedulerUrl, netModel)).ctxTokens;
+    if (body.context_tokens > netCtx) return fail(400, `The network model supports ${netCtx} context tokens`, "context_limit");
     const estTok = estimateMessageTokens(body.messages);
     if (estTok > netCtx - CTX_HEADROOM_TOKENS) {
       return fail(400, `Prompt is ~${estTok} tokens — larger than the network's ${netCtx}-token class. Shorten the prompt.`, "invalid_request_error");

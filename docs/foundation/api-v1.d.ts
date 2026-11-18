@@ -35,6 +35,14 @@ export interface ModelAlias {
   label?: string;
   status: string;
   blurb?: string;
+  /** Local context ceiling, including an optional user cap. Actual allocation is task-dependent. */
+  contextSize?: number;
+  defaultContextSize?: number;
+  minContextSize?: number;
+  maxContextSize?: number;
+  contextOverride?: number | null;
+  /** False when an imported GGUF's supported context could not be read. */
+  contextLimitKnown?: boolean;
   /** Expected weights-file size, excluding any vision projector. */
   sizeBytes?: number | null;
   /** Core 0.7.5+: expected weights plus projector; null when unknown. */
@@ -50,10 +58,15 @@ export interface ModelRequest {
   messages: ChatMessage[];
   stream?: boolean;
   max_tokens?: number;
+  /** Optional minimum total input + output window for this request. Core sizes it automatically when omitted.
+   * Local requests stay within the model/user ceiling. Network requests must fit the approved tariff. */
+  context_tokens?: number;
   temperature?: number;
   [option: string]: unknown;
 }
 export interface ChatCompletion {
+  /** Verified local allocation for this response, when served by a supporting Core. */
+  kai_context?: { contextSize: number; verified: true };
   id?: string;
   model?: string;
   choices?: Array<{ index?: number; message?: { role?: string; content?: string }; finish_reason?: string }>;

@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.31",
+  "version": "0.7.32",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
@@ -32,6 +32,7 @@
     "test:language": "node scripts/foundation/language-smoke.js",
     "build:locales": "node scripts/foundation/build-locales.js",
     "test:model-storage": "node scripts/foundation/model-storage-smoke.js",
+    "test:context": "node scripts/foundation/model-context-smoke.js",
     "test:legacy-drop": "node scripts/foundation/legacy-drop-smoke.js",
     "test:sidebar-wallet": "node scripts/foundation/sidebar-wallet-smoke.js"
   },
@@ -104,6 +105,7 @@
       "core/lib/legacy-kai-drop.js",
       "core/lib/legacy-kai-drop.json",
       "core/lib/local-chat-messages.js",
+      "core/lib/model-context.js",
       "core/lib/model-load-queue.js",
       "core/lib/model-manager.js",
       "core/lib/model-storage.js",

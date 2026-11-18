@@ -9,13 +9,14 @@ function fixture({ alias = "lfm3-1.7b", preferFallback = false, failLlama = fals
   const resolved = { ...source, packageId: catalog.aliases[alias].package, ...(projectorError ? { vision: true, mmproj: {} } : {}) };
   const starts = [], downloads = [], fallbacks = [];
   const models = { resolveAlias: () => resolved, ensurePackage: async id => { downloads.push(id); return "/fixture/model.gguf"; }, ensureMmproj: async () => { throw projectorError; } };
-  const makeRuntime = () => ({ endpoint: "http://fixture", status: () => ({ kind: "llamacpp", running: true }), stop() {}, start: async options => {
+  const makeRuntime = () => ({ endpoint: "http://fixture", status: () => ({ kind: "llamacpp", running: true }), stop() {}, async start(options) {
+    this.contextSize = options.contextSize;
     starts.push(options);
     if (failLlama) throw Error("Fixture engine unavailable");
   } });
   const runtime = new RuntimeManager({ models, makeRuntime, preferFallback, makeFallback: async () => {
     fallbacks.push(true);
-    return { endpoint: "http://fallback", status: () => ({ kind: "ollama", running: true }), stop() {}, start: async () => {} };
+    return { endpoint: "http://fallback", status: () => ({ kind: "ollama", running: true }), stop() {}, async start({ contextSize }) { this.contextSize = contextSize; } };
   } });
   return { runtime, starts, downloads, fallbacks, resolved };
 }
@@ -74,7 +75,7 @@ test("a queued fallback switch keeps an active caller's served model until its l
   let model = "old-model", starts = 0;
   f.runtime._llamaDead = true;
   f.runtime.activeAlias = "old-model";
-  f.runtime.runtime = { endpoint: "http://fallback", status: () => ({ kind: "ollama", running: true }), servedName: () => model, stop() {}, start: async options => { starts++; model = options.modelName; } };
+  f.runtime.runtime = { endpoint: "http://fallback", status: () => ({ kind: "ollama", running: true }), servedName: () => model, stop() {}, async start(options) { this.contextSize = options.contextSize; starts++; model = options.modelName; } };
   const lease = f.runtime.acquireCurrent("old-model");
   const switching = f.runtime.ensure("koinos-fast");
   await new Promise(resolve => setImmediate(resolve));
@@ -92,7 +93,10 @@ test("local test models pass their required chat templates and bounded reasoning
     assert.ok(f.starts[0].extraArgs.includes("--jinja"));
     const args = f.starts[0].extraArgs;
     assert.equal(args[args.indexOf("--reasoning-budget") + 1], "0");
-    assert.equal(f.starts[0].contextSize, 8192);
+    assert.equal(f.starts[0].contextSize, 4096);
+    await f.runtime.ensure(alias, { contextSize: 6000 });
+    assert.equal(f.starts[1].contextSize, 8192);
+    assert.deepEqual(f.starts[1].extraArgs, f.starts[0].extraArgs);
     const forced = fixture({ alias, preferFallback: true });
     await assert.rejects(forced.runtime.ensure(alias), /forced Ollama/);
     assert.equal(forced.downloads.length, 0);

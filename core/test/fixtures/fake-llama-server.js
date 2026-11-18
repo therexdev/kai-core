@@ -45,6 +45,10 @@ try {
 }
 
 const server = http.createServer((req, res) => {
+  if (req.url === "/props") {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ default_generation_settings: { n_ctx: Number(argValue("--ctx-size") || 4096) }, total_slots: 1 }));
+  }
   if (req.url === "/health") {
     if (Date.now() - startedAt < READY_DELAY_MS) {
       res.writeHead(503, { "content-type": "application/json" });

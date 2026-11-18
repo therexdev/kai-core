@@ -20,7 +20,7 @@ test("cancelling real engine startup stops and reaps its child before reporting 
 });
 
 test("engine stdout is drained so a verbose child cannot block before its health endpoint starts", async t => {
-  const script = `const fs=require('node:fs'),http=require('node:http');fs.writeSync(1,Buffer.alloc(2*1024*1024,120));const p=process.argv.indexOf('--port');http.createServer((req,res)=>res.end('ok')).listen(Number(process.argv[p+1]),'127.0.0.1');`;
+  const script = `const fs=require('node:fs'),http=require('node:http');fs.writeSync(1,Buffer.alloc(2*1024*1024,120));const p=process.argv.indexOf('--port');http.createServer((req,res)=>res.end(JSON.stringify({default_generation_settings:{n_ctx:4096},total_slots:1}))).listen(Number(process.argv[p+1]),'127.0.0.1');`;
   const runtime = new LlamaCppRuntime({ binPath: process.execPath, spawnProcess: (_bin, args, options) => spawn(process.execPath, ["-e", script, "--", ...args], options) });
   t.after(() => runtime.stop());
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 5000);
@@ -34,7 +34,7 @@ test("a model switch waits for the previous process to stop before allocating th
   const manager = new RuntimeManager({
     models: { resolveAlias: alias => ({ packageId: alias }), ensurePackage: async alias => alias },
     makeRuntime: () => { let model, running = false; return { endpoint: "http://fixture", status: () => ({ running, kind: "llamacpp" }),
-      start: async ({ modelPath }) => { model = modelPath; starts.push(model); running = true; },
+      async start({ modelPath, contextSize }) { this.contextSize = contextSize; model = modelPath; starts.push(model); running = true; },
       stop: () => model === "old" ? new Promise(resolve => { stopOld = () => { stopped = true; running = false; resolve(); }; }) : (running = false),
     }; },
   });

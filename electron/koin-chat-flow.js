@@ -6,7 +6,7 @@ const P = require("../core/lib/koin-network/job-protocol");
 const terminal = s => ["finalized", "reverted", "consumed_elsewhere"].includes(s);
 const delay = (ms, signal) => require("node:timers/promises").setTimeout(ms, undefined, { signal });
 function request(value, config, tariffs) {
-  if (!value || Object.keys(value).some(k => !["model", "messages", "max_tokens", "stream", "freeOnly", "paidFirst", "runId"].includes(k))) throw Error("Unsupported network chat request");
+  if (!value || Object.keys(value).some(k => !["model", "messages", "max_tokens", "context_tokens", "stream", "freeOnly", "paidFirst", "runId"].includes(k))) throw Error("Unsupported network chat request");
   if (value.runId !== undefined) { P.digest(value.runId); if (!require("../core/lib/koin-network/product").isUsd(config.deployment)) throw Error("Advanced run budgets require USD credits"); }
   if (value.freeOnly !== undefined && (typeof value.freeOnly !== "boolean" || !require("../core/lib/koin-network/product").isPrepaid(config.deployment))) throw Error("Invalid Free only preference");
   if (value.paidFirst !== undefined && (typeof value.paidFirst !== "boolean" || !require("../core/lib/koin-network/product").isUsd(config.deployment))) throw Error("Invalid paid-first preference");
@@ -14,6 +14,11 @@ function request(value, config, tariffs) {
   const selected = value.model === "koinos-network" ? config.model : typeof value.model === "string" && value.model.startsWith("koinos-network:") ? value.model.slice(15) : null;
   const tariff = tariffs?.find(t => t.model === selected);
   if (!selected || (tariffs ? !tariff : selected !== config.model)) throw Error("Choose the approved network model");
+  if (value.context_tokens !== undefined) {
+    if (!tariff) throw Error("This network model does not publish a verified context limit");
+    if (!Number.isSafeInteger(value.context_tokens) || value.context_tokens < 1 || value.context_tokens > tariff.contextTokens)
+      throw Error(`The network model supports ${tariff.contextTokens} context tokens`);
+  }
   if (value.stream !== undefined && typeof value.stream !== "boolean") throw Error("Invalid stream flag");
   const messages = P.messages(value.messages);
   // Leave room for private session authorization within the server body limit.

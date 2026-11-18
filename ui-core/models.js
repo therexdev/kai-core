@@ -54,7 +54,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
     return url.href;
   }
   function create({ document, container, unsupportedContainer, unsupportedSection, openFeedback, request, refresh }) {
-    const cards = new Map(), pending = new Map(), errors = new Map();
+    const cards = new Map(), pending = new Map(), errors = new Map(), contextPending = new Set(), contextErrors = new Map();
     let snapshot = { models: [] };
     const putText = (node, value) => KaiLocale.setText(node, value && typeof value === "object" ? value : KaiLocale.literal(value));
     function element(tag, className, parent) {
@@ -67,6 +67,16 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       const heading = element("div", "model-card-heading", article);
       const title = element("h2", "", heading), status = element("span", "pill", heading);
       const blurb = element("p", "model-description", article);
+      const context = element("details", "model-context", article);
+      const contextSummary = element("summary", "", context);
+      const contextLabel = element("label", "model-context-label", context);
+      const contextTitle = element("span", "", contextLabel); putText(contextTitle, KaiLocale.message`Advanced context limit`);
+      const contextSelect = element("select", "", contextLabel); contextSelect.dataset.contextModel = model.alias;
+      const contextHelp = element("p", "model-context-help", context);
+      putText(contextHelp, KaiLocale.message`Core automatically sizes context for each task. You can set a lower limit to reduce memory use.`);
+      const contextNote = element("p", "model-context-help", context);
+      const contextError = element("p", "model-card-error", context); contextError.setAttribute("role", "alert"); contextError.hidden = true;
+      contextSelect.onchange = () => { void setContext(model.alias, contextSelect.value === "default" ? null : Number(contextSelect.value)); };
       const localNotice = element("p", "model-local-notice", article); localNotice.hidden = true;
       const footer = element("div", "model-card-footer", article), size = element("span", "model-size", footer);
       const controls = element("div", "model-card-controls", footer);
@@ -88,7 +98,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       };
       button.onclick = () => { if (!button.disabled) void perform(model.alias, "enqueue"); };
       cancel.onclick = () => { if (!cancel.disabled && !cancel.hidden) void perform(model.alias, "cancel"); };
-      card = { article, title, status, blurb, localNotice, size, controls, button, label, cancel, error, detail, feedback };
+      card = { article, title, status, blurb, localNotice, feedback, size, controls, button, label, cancel, error, detail, context, contextSummary, contextSelect, contextNote, contextError };
       cards.set(model.alias, card); return card;
     }
     function paint() {
@@ -107,6 +117,24 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
         if (target.children[index] !== card.article) target.insertBefore(card.article, target.children[index] || null);
         putText(card.title, model.label || model.alias); putText(card.status, view.status);
         putText(card.blurb, description(model)); card.blurb.hidden = !card.blurb.textContent;
+        card.context.hidden = !Number.isSafeInteger(model.contextSize);
+        if (!card.context.hidden) {
+          putText(card.contextSummary, model.contextOverride === null ? KaiLocale.message`Automatic context` : KaiLocale.message`Context limit ${model.contextSize.toLocaleString()} tokens`);
+          const choices = [...new Set([2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, model.defaultContextSize, model.contextOverride].filter(size => Number.isSafeInteger(size) && size >= (model.minContextSize || 2048) && size <= model.maxContextSize))].sort((a, b) => a - b);
+          const signature = JSON.stringify([choices, model.defaultContextSize]);
+          if (card.contextChoices !== signature) {
+            card.contextChoices = signature; card.contextSelect.textContent = "";
+            const automatic = element("option", "", card.contextSelect); automatic.value = "default";
+            putText(automatic, KaiLocale.message`Automatic (up to ${model.defaultContextSize.toLocaleString()} tokens)`);
+            for (const size of choices) { const option = element("option", "", card.contextSelect); option.value = String(size); putText(option, KaiLocale.message`${size.toLocaleString()} tokens`); }
+          }
+          if (!contextPending.has(model.alias)) card.contextSelect.value = model.contextOverride === null ? "default" : String(model.contextOverride);
+          card.contextSelect.disabled = contextPending.has(model.alias) || view.busy || !!snapshot.runtime?.loading || !!snapshot.runtime?.inference?.activeAlias;
+          putText(card.contextNote, model.contextLimitKnown ? KaiLocale.message`Model limit: ${model.maxContextSize.toLocaleString()} tokens. Input and reply share this window.` : KaiLocale.message`Model limit unknown. Check the model documentation before increasing the window.`);
+          if (snapshot.runtime?.activeAlias === model.alias && snapshot.runtime?.contextVerified)
+            putText(card.contextNote, KaiLocale.message`Verified active window ${snapshot.runtime.contextSize.toLocaleString()} tokens. Model limit ${model.contextSize.toLocaleString()} tokens.`);
+          putText(card.contextError, contextErrors.get(model.alias) || ""); card.contextError.hidden = !contextErrors.has(model.alias);
+        }
         card.article.dataset.localOnly = String(local);
         putText(card.localNotice, local ? `Local use only · Not supported for Earn${Number.isFinite(model.minRamGb) ? ` · Suggested memory: ${model.minRamGb} GB+` : ""}` : "");
         card.localNotice.hidden = !local;
@@ -125,6 +153,16 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       }
       for (const [alias, card] of cards) if (!current.has(alias)) { card.article.remove(); cards.delete(alias); errors.delete(alias); }
     }
+    async function setContext(alias, contextSize) {
+      if (contextPending.has(alias)) return;
+      contextPending.add(alias); contextErrors.delete(alias); paint();
+      try {
+        const result = await request("/core/models/context", { alias, contextSize });
+        if (result?.model) snapshot = { ...snapshot, models: snapshot.models.map(model => model.package === result.model.packageId ? { ...model, ...Object.fromEntries(["contextSize", "defaultContextSize", "minContextSize", "maxContextSize", "contextOverride", "contextLimitKnown"].map(key => [key, result.model[key]])) } : model) };
+        await refresh();
+      } catch (error) { contextErrors.set(alias, String(error.message || error)); }
+      finally { contextPending.delete(alias); paint(); }
+    }
     async function perform(alias, operation) {
       if (pending.has(alias)) return;
       const model = snapshot.models?.find(item => item.alias === alias);
@@ -140,7 +178,7 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
       } catch (error) { errors.set(alias, String(error.message || error)); }
       finally { pending.delete(alias); paint(); }
     }
-    return { update(value) { snapshot = value || { models: [] }; paint(); }, perform };
+    return { update(value) { snapshot = value || { models: [] }; paint(); }, perform, setContext };
   }
   const api = { create, presentation, description, sizeLabel, isLocalOnly, feedbackUrl };
   if (typeof module === "object") module.exports = api;
