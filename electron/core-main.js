@@ -53,6 +53,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(start).catch(async error => { if (!shuttingDown) await dialog.showErrorBox("KAI Core Beta could not start", error.message); beginShutdown(); await stop().catch(() => {}); shutdownComplete = true; app.quit(); });
 }
 async function start() {
+  try { require("./appimage-install").repairManagedLauncher(); }
+  catch (error) { console.warn("[appimage-launcher]", error.message); }
   const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "foundation-v1");
   report = require("./foundation-profile").prepareFoundationProfile(dataDir);
   const service = require("./credit-service").manifest(require("../core/lib/koin-network/credit-service.json"));

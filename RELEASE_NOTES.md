@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.32
+# KAI Core Beta 0.7.33
+
+Fixes Raspberry Pi/Linux plugin installation failing with `ENOENT`, `lstat` or a missing `/tmp/appimage_extracted_...` directory after opening Core again while it was already running. Managed launches and update restarts retain the shared extracted application files so a second instance cannot remove code still needed by the running app. Existing managed Pi launchers are repaired when the updated Core starts.
+
+Update through **Settings → Application updates → Download update → Restart and install**. If the current app already shows this error, fully quit Core including its tray instance, then reopen it once before updating or retrying installation. Your wallets, models, plugins and saved data are retained. Teleno 1.2.0 itself does not need another plugin update.
+
+Native release checks exercise repeated launches and plugin verification/installation using the packaged x64 and ARM64 AppImages. These are runner checks, not a claim of testing on every physical Pi.
+
+## Previous release: KAI Core Beta 0.7.32
 
 Local model context now grows automatically for each task, within the model's supported limit and your optional per-model cap. Short requests start with a small allocation. Longer requests can request more room; Core verifies the running engine's allocation before inference and queues resizing behind active replies.
 

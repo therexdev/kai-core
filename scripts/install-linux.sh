@@ -138,6 +138,8 @@ os.replace(download, binary)
 write_atomic(launcher, '#!/bin/sh\n# Managed KAI Core Beta launcher\n'
              '# Run without FUSE; retain the protected GNOME Keyring backend.\n'
              'export APPIMAGE_EXTRACT_AND_RUN=1\n'
+             '# A second launch must not remove files used by the running app.\n'
+             'export NO_CLEANUP=1\n'
              f'export KAI_CORE_APPIMAGE_PATH={shlex.quote(str(binary))}\n'
              f'exec {shlex.quote(str(binary))}{" --password-store=gnome-libsecret" if suffix == "arm64" else ""} "$@"\n', 0o755)
 write_atomic(icon, '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">

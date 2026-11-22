@@ -23,9 +23,42 @@ function identity(file) {
 }
 function sameIdentity(a, b) { return Object.keys(a).every(key => a[key] === b[key]); }
 function launchEnv(env, target) {
-  const clean = { ...env, APPIMAGE_EXTRACT_AND_RUN: "1", KAI_CORE_APPIMAGE_PATH: target };
+  const clean = { ...env, APPIMAGE_EXTRACT_AND_RUN: "1", NO_CLEANUP: "1", KAI_CORE_APPIMAGE_PATH: target };
   for (const name of ["ELECTRON_RUN_AS_NODE", "APPIMAGE", "APPDIR", "ARGV0", "OWD", "APPIMAGE_EXIT_AFTER_INSTALL", "APPIMAGE_SILENT_INSTALL"]) delete clean[name];
   return clean;
+}
+// Repair only the launch script written by our per-user Linux installer.
+// AppImage extract-and-run shares its content-addressed directory across
+// launches; an exiting second instance must not delete the first one's code.
+function repairManagedLauncher({ platform = process.platform, env = process.env, home = require("node:os").homedir() } = {}) {
+  if (platform !== "linux") return false;
+  const target = env.KAI_CORE_APPIMAGE_PATH || env.APPIMAGE;
+  if (target !== path.join(home, "Applications/KAI-Core/KAI-Core.AppImage")) return false;
+  const file = path.join(home, ".local/bin/kai-core-beta");
+  let before;
+  try { before = fs.lstatSync(file); } catch (error) { if (error.code === "ENOENT") return false; throw error; }
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > 32768 ||
+      process.getuid && before.uid !== process.getuid() || fs.realpathSync(path.dirname(file)) !== path.dirname(file)) return false;
+  const same = stat => stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 &&
+    ["dev", "ino", "size", "mtimeMs", "ctimeMs"].every(key => stat[key] === before[key]);
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  let source, bytes;
+  try { if (!same(fs.fstatSync(fd))) throw Error("Managed launcher changed; it was preserved."); bytes = fs.readFileSync(fd); source = bytes.toString("utf8"); }
+  finally { fs.closeSync(fd); }
+  const marker = "#!/bin/sh\n# Managed KAI Core Beta launcher\n", extract = "export APPIMAGE_EXTRACT_AND_RUN=1\n";
+  const quotedTarget = /^[A-Za-z0-9_@%+=:,./-]+$/.test(target) ? target : "'" + target.replaceAll("'", "'\"'\"'") + "'";
+  if (!bytes.equals(Buffer.from(source)) || source.includes("\0") || !source.startsWith(marker) || !source.includes(extract) ||
+      !source.includes(`\nexport KAI_CORE_APPIMAGE_PATH=${quotedTarget}\n`) || /^\s*(?:export\s+)?NO_CLEANUP=/m.test(source)) return false;
+  const temporary = path.join(path.dirname(file), `.kai-core-launcher-${crypto.randomUUID()}.tmp`);
+  let created = false;
+  try {
+    const output = fs.openSync(temporary, "wx", before.mode & 0o777); created = true;
+    try { fs.writeFileSync(output, source.replace(extract, extract + "export NO_CLEANUP=1\n")); fs.fchmodSync(output, before.mode & 0o777); fs.fsyncSync(output); }
+    finally { fs.closeSync(output); }
+    if (!same(fs.lstatSync(file))) throw Error("Managed launcher changed; it was preserved.");
+    fs.renameSync(temporary, file); created = false;
+    return true;
+  } finally { if (created) fs.rmSync(temporary, { force: true }); }
 }
 async function stageInstall({ target, file, info, parentPid, args = [], env = process.env }) {
   const before = identity(target), directory = await fs.promises.mkdtemp(path.join(path.dirname(target), ".kai-core-update-"));
@@ -99,4 +132,4 @@ async function main(jobFile) {
   } finally { await fs.promises.rm(path.dirname(jobFile), { recursive: true, force: true }); }
 }
 if (require.main === module) main(process.argv[2]).catch(() => { process.exitCode = 1; });
-module.exports = { verifyImage, identity, launchEnv, stageInstall, startHelper, installStaged };
+module.exports = { verifyImage, identity, launchEnv, repairManagedLauncher, stageInstall, startHelper, installStaged };
