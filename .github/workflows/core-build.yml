@@ -180,6 +180,12 @@ jobs:
         run: npm run dist -- ${{ matrix.args }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify packaged Linux AppImage survives a second launch
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          node scripts/foundation/appimage-launcher-smoke.js "dist/KAI-Core-Beta-$version-linux-x86_64.AppImage"
       - name: Verify Windows signatures, publisher, timestamps and update feed
         if: runner.os == 'Windows'
         run: node scripts/foundation/verify-windows-signatures.js dist
@@ -201,8 +207,32 @@ jobs:
             build/foundation-files.json
           if-no-files-found: error
 
-  release:
+  appimage-arm64:
     needs: build
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install native AppImage loader libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libnss3 libgtk-3-0t64 libasound2t64 libgbm1
+      - uses: actions/download-artifact@v4
+        with:
+          name: kai-core-foundation-Linux
+          path: native-appimage
+      - name: Verify real ARM64 AppImage and plugin installation after a second launch
+        shell: bash
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          image="native-appimage/dist/KAI-Core-Beta-$version-linux-arm64.AppImage"
+          chmod 755 "$image"
+          node scripts/foundation/appimage-launcher-smoke.js "$image"
+
+  release:
+    needs: [build, appimage-arm64]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

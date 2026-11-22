@@ -32,7 +32,12 @@ jobs:
           const repo = process.env.GITHUB_REPOSITORY;
           assert.equal(repo, 'therexdev/kai-core');
           const gh = args => cp.execFileSync('gh', args, { encoding: 'utf8' });
-          const release = JSON.parse(gh(['api', `repos/${repo}/releases/tags/${tag}`]));
+          const pages = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/releases?per_page=100`]));
+          assert.ok(Array.isArray(pages) && pages.every(Array.isArray));
+          const matches = pages.flat().filter(release => release.tag_name === tag);
+          assert.ok(matches.length <= 1, 'Ambiguous release tag');
+          const release = matches[0];
+          if (!release || release.draft) { console.log(`The installer workflow owns publication of ${tag}; no published release notes were changed.`); process.exit(0); }
           assert.equal(release.tag_name, tag); assert.equal(release.draft, false); assert.equal(release.prerelease, false);
           assert.ok(Number.isSafeInteger(release.id) && release.id > 0);
           const updated = JSON.parse(gh(['api', '--method', 'PATCH', `repos/${repo}/releases/${release.id}`, '-F', 'body=@RELEASE_NOTES.md']));

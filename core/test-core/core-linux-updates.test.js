@@ -2,7 +2,7 @@
 const test = require("node:test"), assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), crypto = require("node:crypto");
 const { createLinuxUpdater, assetInfo, assertLinuxInfo, assetResponse } = require("../../electron/core-linux-updates");
-const { verifyImage, stageInstall, installStaged, launchEnv, startHelper } = require("../../electron/appimage-install");
+const { verifyImage, stageInstall, installStaged, launchEnv, repairManagedLauncher, startHelper } = require("../../electron/appimage-install");
 const { createCoreUpdates } = require("../../electron/core-updates");
 const image = payload => Buffer.concat([Buffer.from([127,69,76,70,2,1,1,0,65,73,2,0]), Buffer.from(payload)]);
 const checksum = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -54,6 +54,7 @@ test("real Linux adapter runs through Core check/download/reverify/approval with
   const job = JSON.parse(fs.readFileSync(f.helper.jobFile, "utf8"));
   assert.deepEqual(job.args, ["--password-store=gnome-libsecret"]); assert.equal(job.env.DBUS_SESSION_BUS_ADDRESS, "session-bus");
   assert.equal(job.env.APPIMAGE_EXTRACT_AND_RUN, "1"); assert.equal(job.env.KAI_CORE_APPIMAGE_PATH, f.target); assert.equal(job.env.APPIMAGE, undefined);
+  assert.equal(job.env.NO_CLEANUP, "1");
   assert.deepEqual(fs.readFileSync(f.target), image("previous app")); // helper waits until Core exits
   await updates.dispose();
 });
@@ -111,4 +112,34 @@ test("helper handshake happens in a real detached Node process before parent exi
   await startHelper({ helper, jobFile: path.join(dir, "job.json") });
   const env = launchEnv({ ELECTRON_RUN_AS_NODE: "1", APPIMAGE: "old", APPDIR: "temp", DBUS_SESSION_BUS_ADDRESS: "bus" }, "/apps/KAI.AppImage");
   assert.equal(env.ELECTRON_RUN_AS_NODE, undefined); assert.equal(env.DBUS_SESSION_BUS_ADDRESS, "bus");
+  assert.equal(env.NO_CLEANUP, "1");
+});
+test("an existing managed Pi launcher is repaired atomically and preserves its target, keyring arguments and permissions", t => {
+  const home = path.join(fs.realpathSync(root(t)), "Pi's home with spaces"), directory = path.join(home, ".local/bin"), file = path.join(directory, "kai-core-beta");
+  fs.mkdirSync(directory, { recursive: true });
+  const target = path.join(home, "Applications/KAI-Core/KAI-Core.AppImage"), quoted = "'" + target.replaceAll("'", "'\"'\"'") + "'";
+  const source = `#!/bin/sh\n# Managed KAI Core Beta launcher\nexport APPIMAGE_EXTRACT_AND_RUN=1\nexport KAI_CORE_APPIMAGE_PATH=${quoted}\nexec ${quoted} --password-store=gnome-libsecret "$@"\n`;
+  fs.writeFileSync(file, source, { mode: 0o755 }); const beforeMode = fs.statSync(file).mode;
+  const options = { platform: "linux", home, env: { KAI_CORE_APPIMAGE_PATH: path.join(home, "Applications/KAI-Core/KAI-Core.AppImage") } };
+  const previousMask = process.umask(0o077);
+  try { assert.equal(repairManagedLauncher(options), true); } finally { process.umask(previousMask); }
+  assert.equal(fs.readFileSync(file, "utf8"), source.replace("export APPIMAGE_EXTRACT_AND_RUN=1\n", "export APPIMAGE_EXTRACT_AND_RUN=1\nexport NO_CLEANUP=1\n"));
+  assert.equal(fs.statSync(file).mode, beforeMode);
+  assert.equal(repairManagedLauncher(options), false);
+  assert.deepEqual(fs.readdirSync(directory), ["kai-core-beta"]);
+});
+test("managed-launcher repair preserves custom, linked and unrelated launchers", t => {
+  const home = fs.realpathSync(root(t)), directory = path.join(home, ".local/bin"), file = path.join(directory, "kai-core-beta"); fs.mkdirSync(directory, { recursive: true });
+  const options = { platform: "linux", home, env: { APPIMAGE: path.join(home, "Applications/KAI-Core/KAI-Core.AppImage") } };
+  assert.equal(repairManagedLauncher(options), false);
+  for (const source of ["#!/bin/sh\nexec custom-app\n", "#!/bin/sh\n# Managed KAI Core Beta launcher\nexport APPIMAGE_EXTRACT_AND_RUN=1\nexport NO_CLEANUP=custom\n"] ) {
+    fs.writeFileSync(file, source); assert.equal(repairManagedLauncher(options), false); assert.equal(fs.readFileSync(file, "utf8"), source);
+  }
+  fs.unlinkSync(file); const target = path.join(home, "custom"); fs.writeFileSync(target, "keep custom data");
+  fs.linkSync(target, file); assert.equal(repairManagedLauncher(options), false); fs.unlinkSync(file);
+  if (process.platform !== "win32") { fs.symlinkSync(target, file); assert.equal(repairManagedLauncher(options), false); fs.unlinkSync(file); }
+  fs.writeFileSync(file, "#!/bin/sh\n# Managed KAI Core Beta launcher\nexport APPIMAGE_EXTRACT_AND_RUN=1\n");
+  for (const env of [{}, { APPIMAGE: "/another/KAI.AppImage" }]) assert.equal(repairManagedLauncher({ ...options, env }), false);
+  assert.equal(repairManagedLauncher({ ...options, platform: "darwin" }), false);
+  assert.equal(fs.readFileSync(target, "utf8"), "keep custom data");
 });

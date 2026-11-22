@@ -49,6 +49,7 @@ assert '--password-store=gnome-libsecret' in text
 assert 'KAI_CORE_APPIMAGE_PATH=' in text
 assert '--no-sandbox' not in text
 assert 'APPIMAGE_EXTRACT_AND_RUN=1' in text
+assert 'NO_CLEANUP=1' in text
 assert (home / 'Desktop/KAI Core Beta.desktop').read_text() == (home / '.local/share/applications/kai-core-beta.desktop').read_text()
 # Reinstall keeps the same launcher and shortcut paths.
 prepare(release)
