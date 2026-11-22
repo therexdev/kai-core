@@ -27,7 +27,12 @@ catch(error){fs.writeFileSync(paths.result,JSON.stringify({ok:false,error:error.
 finally{await verified?.dispose();}},50);setInterval(()=>{},1000);
 `;
   // Test-only Node mode avoids a display/keyring and never starts live Core.
-  const env={...launchEnv({...process.env,TMPDIR:extract},binary),ELECTRON_RUN_AS_NODE:"1"};
+  // electron-builder's AppRun probes `unshare` even in Node mode. Restricted
+  // CI hosts otherwise add a Chromium-only --no-sandbox flag that Node rejects.
+  // Satisfy that probe only for these Node processes; no Chromium sandbox or
+  // application launch policy is changed. Native desktop checks run separately.
+  const testBin=path.join(root,"node-only-tools");fs.mkdirSync(testBin,{mode:0o700});fs.writeFileSync(path.join(testBin,"unshare"),"#!/bin/sh\nexit 0\n",{mode:0o700});
+  const env={...launchEnv({...process.env,TMPDIR:extract,PATH:testBin+path.delimiter+process.env.PATH},binary),ELECTRON_RUN_AS_NODE:"1"};
   const child=spawn(binary,["-e",code],{env,stdio:["ignore","ignore","pipe"]});let errors="",started;
   child.stderr.on("data",chunk=>{errors=(errors+chunk).slice(-32768);});
   const closed=new Promise(resolve=>{child.once("exit",resolve);child.once("error",error=>{errors+=error.message;resolve();});});
