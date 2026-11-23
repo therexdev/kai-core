@@ -588,11 +588,16 @@ class Gateway {
           return this._json(res, 200, { ok: true });
         }
         if (accountPath === "/core/account/wallet" && req.method === "POST") {
-          return this._json(res, 200, { ok: true, account: await account.linkWallet() });
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, account: await account.linkWallet(body) });
         }
         if (accountPath === "/core/account/wallet/unlink" && req.method === "POST") {
           const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
           return this._json(res, 200, { ok: true, account: await account.unlinkWallet(body.address) });
+        }
+        if (account === this.creditAccount && accountPath === "/core/account/wallet/revoke-links" && req.method === "POST") {
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          await account.revokeCreditLinks(body); return this._json(res, 200, { ok: true });
         }
         // Spend grants: only this machine can create one (the wallet key
         // signs it here); revoking needs nothing but the session.

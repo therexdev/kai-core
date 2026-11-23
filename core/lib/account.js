@@ -49,6 +49,9 @@ class AccountService {
     this._ignoreStoredSession = false;
     this._pending = null; // in-flight device link {userCode, deviceSecret, verifyUrl, expiresAt}
     this._lastPoll = 0;
+    this._linkEpoch = 0;
+    this._starting = null;
+    this._polling = null;
   }
 
   /** koinosai.com, derived from the scheduler URL so a self-hosted network
@@ -157,7 +160,7 @@ class AccountService {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
-      ...(this.accountOrigin ? { redirect: "error", signal: AbortSignal.timeout(10000) } : {}),
+      redirect: "error", signal: AbortSignal.timeout(10000),
     });
     const j = await r.json().catch(() => ({}));
     return { status: r.status, ...j };
@@ -168,12 +171,15 @@ class AccountService {
     const base = {
       site: this.origin(),
       tokenStored: Boolean(this._token()),
+      savedConnectionExists: Boolean(this._memorySession) || fs.existsSync(this.file),
       credsEncrypted: this._encrypted(),
       secureStorage: storageState(this.safeStorage),
       sessionOnly: Boolean(this._memorySession),
       authScope: this._tokenRecord()?.scope || "account",
+      walletAddress: this.wallet?.address || null,
       savedConnectionPreserved: this._ignoreStoredSession,
       pendingCode: this._pending && this._pending.expiresAt > Date.now() ? this._pending.userCode : null,
+      pendingExpiresAt: this._pending?.expiresAt || null,
       verifyUrl: this._pending && this._pending.expiresAt > Date.now() ? this._pending.verifyUrl : null,
     };
     if (!base.tokenStored) return { ...base, signedIn: false };
@@ -234,63 +240,95 @@ class AccountService {
 
   /* ---------------------------------------------------- device link ---- */
   async linkStart() {
-    const r = await this._call("/auth/device/start", { method: "POST", body: {}, auth: false });
-    if (!r.ok) throw new Error(r.error || "the account server refused to start a sign-in");
-    this._pending = {
-      userCode: r.userCode,
-      deviceSecret: r.deviceSecret,
-      verifyUrl: r.verifyUrl,
-      expiresAt: Date.now() + (Number(r.expiresInSec) || 600) * 1000,
-    };
-    this.onEvent({ type: "account:link-started" });
-    return { userCode: r.userCode, verifyUrl: r.verifyUrl, expiresInSec: r.expiresInSec };
+    if (this._starting) return this._starting;
+    const epoch = ++this._linkEpoch;
+    this._pending = null;
+    const operation = (async () => {
+      const r = await this._call("/auth/device/start", { method: "POST", body: {}, auth: false });
+      if (epoch !== this._linkEpoch) throw Error("Sign-in was cancelled. Start again.");
+      if (!r.ok) throw new Error(r.error || "The account server refused to start sign-in");
+      const url = new URL(r.verifyUrl);
+      if (url.origin !== this.origin() || url.username || url.password || url.pathname !== "/link" ||
+          typeof r.userCode !== "string" || !/^[A-Z2-9-]{8,16}$/.test(r.userCode) || typeof r.deviceSecret !== "string" || !/^ds_[A-Za-z0-9_-]{32}$/.test(r.deviceSecret) ||
+          !Number.isFinite(r.expiresInSec) || r.expiresInSec <= 0 || r.expiresInSec > 1800) throw Error("The account service returned an invalid sign-in link");
+      url.search = ""; url.hash = ""; url.searchParams.set("code", r.userCode);
+      this._pending = { userCode: r.userCode, deviceSecret: r.deviceSecret, verifyUrl: url.href, expiresAt: Date.now() + r.expiresInSec * 1000, epoch };
+      this.onEvent({ type: "account:link-started" });
+      return { userCode: r.userCode, verifyUrl: url.href, expiresInSec: r.expiresInSec };
+    })();
+    this._starting = operation;
+    try { return await operation; } finally { if (this._starting === operation) this._starting = null; }
   }
 
   async linkPoll() {
-    if (!this._pending) throw new Error("no sign-in in progress — start one first");
-    if (this._pending.expiresAt < Date.now()) {
+    if (this._polling?.pending === this._pending) return this._polling.promise;
+    const pending = this._pending;
+    if (!pending) throw Error("No sign-in in progress. Get a code first.");
+    const active = () => {
+      if (pending !== this._pending || pending.epoch !== this._linkEpoch) throw Error("Sign-in was cancelled. Start again.");
+      if (pending.expiresAt <= Date.now()) { this._pending = null; throw Error("The sign-in code expired. Get a new code."); }
+    };
+    const operation = (async () => {
+      active();
+      if (!pending.result) {
+        const wait = this._lastPoll + POLL_MIN_MS - Date.now();
+        if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+        active(); this._lastPoll = Date.now();
+        let r;
+        try { r = await this._call("/auth/device/poll", { method: "POST", auth: false, body: { userCode: pending.userCode, deviceSecret: pending.deviceSecret } }); }
+        catch { active(); return { pending: true, retrying: true }; }
+        active();
+        if (r.status >= 500 || r.status === 429) return { pending: true, retrying: true };
+        if (!r.ok) { this._pending = null; throw Error(r.error || "Sign-in failed. Get a new code."); }
+        if (r.pending) return { pending: true };
+        if (typeof r.token !== "string" || !/^sk_[A-Za-z0-9_-]{43}$/.test(r.token) || typeof r.account?.id !== "string") throw Error("Invalid account sign-in response");
+        pending.result = r;
+      }
+      active();
+      // Keep the successful response until encrypted storage succeeds. A locked
+      // keyring must not consume the only recoverable account credential.
+      this._saveToken(pending.result.token);
+      const account = pending.result.account;
       this._pending = null;
-      throw new Error("the sign-in code expired — start again");
-    }
-    // Server asks for >=2s spacing; a hot UI loop must not turn into a hammer.
-    const wait = this._lastPoll + POLL_MIN_MS - Date.now();
-    if (wait > 0) await new Promise((res) => setTimeout(res, wait));
-    this._lastPoll = Date.now();
-    const r = await this._call("/auth/device/poll", {
-      method: "POST",
-      auth: false,
-      body: { userCode: this._pending.userCode, deviceSecret: this._pending.deviceSecret },
-    });
-    if (!r.ok) {
-      this._pending = null;
-      throw new Error(r.error || "sign-in failed — start again");
-    }
-    if (r.pending) return { pending: true };
-    this._pending = null;
-    this._saveToken(r.token);
-    this.onEvent({ type: "account:signed-in" });
-    return { pending: false, account: r.account };
+      this.onEvent({ type: "account:signed-in" });
+      return { pending: false, account };
+    })();
+    const polling = this._polling = { pending, promise: operation };
+    try { return await operation; } finally { if (this._polling === polling) this._polling = null; }
   }
 
   async signOut() {
+    const epoch = ++this._linkEpoch; this._pending = null; this._starting = null;
     await this._call(this._tokenRecord()?.scope === "wallet-credits" ? "/auth/wallet-credit/logout" : "/auth/logout", { method: "POST", body: {} }).catch(() => {});
+    if (epoch !== this._linkEpoch) return;
     this._clearToken();
     this.onEvent({ type: "account:signed-out" });
   }
 
   /* --------------------------------------------------- wallet link ---- */
-  async linkWallet() {
+  async linkWallet(review = {}) {
     const st = this.wallet?.status?.();
     if (!st?.unlocked || !st?.address) throw new Error("Unlock your earning account first — the wallet signs the link proof");
+    const token = this._token(), epoch = this._linkEpoch;
+    const current = () => {
+      if (token !== this._token() || epoch !== this._linkEpoch || this.wallet?.address !== st.address)
+        throw Error("The account or wallet changed. Review the credit link again.");
+    };
     const session = await this._call("/auth/session");
+    current();
     if (!session.ok) throw new Error("Sign in to your Koinos AI account first");
+    if (this.accountOrigin && session.scope) throw Error("Connect to your website account first, then link this Core wallet to it.");
+    if (this.accountOrigin && (review.accountId !== session.account.id || review.address !== st.address))
+      throw Error("The account or wallet changed. Review the credit link again.");
     const address = st.address;
     const ts = Date.now();
-    const hash = crypto.createHash("sha256").update(`link|${address}|${session.account.id}|${ts}`).digest();
+    const proof = this.accountOrigin ? JSON.stringify(["KAI-CREDIT-WALLET-LINK-V1", this.origin(), address, session.account.id, ts]) : `link|${address}|${session.account.id}|${ts}`;
+    const hash = crypto.createHash("sha256").update(proof).digest();
     // WalletService.signHash already returns base64 (field lesson from this
     // file's own test: re-wrapping it in Buffer.from() double-encodes).
     const signature = await this.wallet.signHash(hash);
-    const r = await this._call("/account/wallets", { method: "POST", body: { address, ts, signature } });
+    current();
+    const r = await this._call(this.accountOrigin ? "/account/credit-wallets" : "/account/wallets", { method: "POST", body: { address, ts, signature } });
     if (!r.ok) throw new Error(r.error || "the account server refused the wallet link");
     this.onEvent({ type: "account:wallet-linked", address });
     return r.account;
@@ -300,6 +338,17 @@ class AccountService {
     const r = await this._call(`/account/wallets/${encodeURIComponent(String(address || ""))}`, { method: "DELETE" });
     if (!r.ok) throw new Error(r.error || "unlink failed");
     return r.account;
+  }
+
+  async revokeCreditLinks(review = {}) {
+    const st = this.wallet?.status?.(), epoch = this._linkEpoch;
+    if (!this.accountOrigin || !st?.unlocked || !st.address || review.address !== st.address) throw Error("Unlock and review this Core wallet first");
+    const ts = Date.now(), hash = crypto.createHash("sha256").update(JSON.stringify(["KAI-CREDIT-WALLET-REVOKE-V1", this.origin(), st.address, ts])).digest();
+    const signature = await this.wallet.signHash(hash);
+    if (this.wallet?.address !== st.address || epoch !== this._linkEpoch) throw Error("The account or wallet changed. Review again.");
+    const r = await this._call("/auth/credit-wallets/revoke", { method: "POST", auth: false, body: { address: st.address, ts, signature } });
+    if (!r.ok) throw Error(r.error || "The credit service could not remove website access");
+    this.onEvent({ type: "account:credit-links-revoked", address: st.address });
   }
 
   /* --------------------------------------------------- spend grants ---- */
@@ -324,10 +373,14 @@ class AccountService {
     if (!response.ok) throw authError("service-unavailable", "The credit service is temporarily unavailable. Your connection and balance are preserved");
     if (value.ok !== true || typeof value.account?.id !== "string" || !value.account.id || value.account.id.length > 200 || !Array.isArray(value.account.wallets) || value.account.wallets.length > 64 || value.account.wallets.some(w => !require("koilib").utils.isChecksumAddress(w?.address))) throw authError("identity-unverified", "The credit service did not return a verifiable account identity. Your saved connection is preserved");
     if (saved?.scope === "wallet-credits" && (value.scope !== "wallet-credits" || value.freeOnly !== saved.freeOnly || value.account.freeOnly !== saved.freeOnly || value.account.id !== saved.accountId || value.account.wallets.length !== 1 || value.account.wallets[0].address !== saved.wallet)) throw authError("identity-changed", "The network credit identity changed; your existing balances are preserved");
-    const accountId = value.account.id, localWallet = this.wallet?.address || null;
+    const localWallet = this.wallet?.address || null;
     // With several linked wallets, use only the wallet explicitly loaded on
     // this device. No arbitrary first-wallet selection or balance transfer.
     const wallet = value.account.wallets.length === 1 ? value.account.wallets[0].address : value.account.wallets.find(w => w.address === localWallet)?.address;
+    const linked = value.account.wallets.find(w => w.address === wallet);
+    if (linked?.creditAccountId !== undefined && (typeof linked.creditAccountId !== "string" || !/^acc_[a-f0-9]{16}$/.test(linked.creditAccountId)))
+      throw authError("identity-unverified", "The linked Core credit identity could not be verified. Your saved data is preserved");
+    const accountId = linked?.creditAccountId || value.account.id;
     const auth = { sessionToken: token, accountId, localWallet, ownershipWallets: value.account.wallets.map(w => w.address), owner: wallet || "account-" + crypto.createHash("sha256").update("verified-account:" + accountId).digest("hex"), schedulerUrl: pinned,
       ...(saved?.sessionOnly ? { sessionOnly: true } : {}), ...(saved?.scope ? { scope: saved.scope } : {}) };
     this.assertCreditAuthorization(auth, pinned); return auth;
