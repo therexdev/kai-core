@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.33
+# KAI Core Beta 0.7.34
+
+Adds GPT OSS 120B, Llama 3.3 70B, Qwen 3.8 27B, GLM 5.3, Qwen 3.6 35B A3B and Kimi K3.1 Pro to normal network model selection when the credit server enables them. These hosted models use the same daily-free and purchased KAI credits as other network models. The backend applies a 25% supplier-cost markup, except Qwen 3.6 and Kimi K3.1 Pro at 15%.
+
+The six models share one additional available network provider. They do not earn KOIN usage or availability rewards and cannot be shared through desktop Earn. The API key stays on the server. Text replies arrive after their complete usage and signed billing receipt are verified.
+
+Update through **Settings → Application updates → Download update → Restart and install**. The operator must also complete the [AkashML server activation](https://github.com/therexdev/kai/blob/fix/rpc-adaptive-recovery/deploy/koin-mainnet/AKASHML.md). Models appear as available only after the server validates the supplier catalog and pricing. No plugin update or model download is required for hosted inference. Existing wallets, models, plugins and saved data are retained.
+
+## Previous release: KAI Core Beta 0.7.33
 
 Fixes Raspberry Pi/Linux plugin installation failing with `ENOENT`, `lstat` or a missing `/tmp/appimage_extracted_...` directory after opening Core again while it was already running. Managed launches and update restarts retain the shared extracted application files so a second instance cannot remove code still needed by the running app. Existing managed Pi launchers are repaired when the updated Core starts.
 

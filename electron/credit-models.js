@@ -23,6 +23,13 @@ function tariffs(value, expected) {
   return entries;
 }
 function approvedTariffs(value, config, hash) {
+  const managed = require("../core/lib/koin-network/managed-protocol");
+  if (Array.isArray(value) && value.some(t => managed.find(t?.model))) {
+    const extra = value.filter(t => managed.find(t?.model)), native = value.filter(t => !managed.find(t?.model));
+    if (!require("../core/lib/koin-network/product").isUsd(config.deployment) || extra.length !== managed.models.length ||
+        new Set(extra.map(t => t.model)).size !== extra.length || extra.some(t => JSON.stringify(t) !== JSON.stringify(managed.tariff(t.model)))) throw Error("Managed network model prices differ from the approved policy");
+    return [...approvedTariffs(native, config, hash), ...extra];
+  }
   const extra = require("../core/lib/koin-network/catalog-extension").validate(config.catalogExtension,config.policyHash);
   if (hash === undefined) { // Saved recovery tariffs predate catalog negotiation.
     try { return tariffs(value,config.policyHash); } catch (error) { if (!extra) throw error; }
@@ -51,8 +58,8 @@ function catalog(value, config, now = Date.now()) {
   }
   const credits = require("../core/lib/koin-network/purchase-quote").credits;
   return { schema: 1, policyHash: value.policyHash, asOf: value.asOf, validUntil: value.validUntil, tariffs: approved,
-    models: approved.map(t => ({ model: t.model, label: labels[t.model]?.label || t.model, available: rows.get(t.model).available,
+    models: approved.map(t => ({ model: t.model, label: require("../core/lib/koin-network/managed-protocol").find(t.model)?.label || labels[t.model]?.label || t.model, available: rows.get(t.model).available,
       providers: rows.get(t.model).providers, inputCreditsPerMillion: credits(t.inputAtomsPerMillion), outputCreditsPerMillion: credits(t.outputAtomsPerMillion),
-      maxOutput: Math.min(config.maxOutput, t.maxOutputTokens), version: t.version })) };
+      maxOutput: require("../core/lib/koin-network/managed-protocol").find(t.model) ? t.maxOutputTokens : Math.min(config.maxOutput, t.maxOutputTokens), version: t.version })) };
 }
 module.exports = { tariffs, approvedTariffs, catalog };

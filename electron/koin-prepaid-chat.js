@@ -84,7 +84,7 @@ class PrepaidChat extends ChatFlow {
     const selectedOwner = a.owner || this.config.owner;
     const route = action === "chat" ? "/consume/chat/completions" : "/koin/prepaid/" + action;
     const request = { method: "POST", redirect: "error", signal,
-      headers: { "content-type": "application/json", ...(action === "chat" ? { "x-kai-credit-stream": "keepalive-v1" } : {}), ...(action === "models" ? require("../core/lib/koin-network/catalog-extension").headers(this.config) : {}) }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken,
+      headers: { "content-type": "application/json", ...(action === "chat" ? { "x-kai-credit-stream": "keepalive-v1" } : {}), ...(action === "models" ? { ...require("../core/lib/koin-network/catalog-extension").headers(this.config), "x-kai-managed-catalog": require("../core/lib/koin-network/managed-protocol").policyHash } : {}) }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken,
         ...(isUsd(this.product) ? { creditWallet: /^account-[a-f0-9]{64}$/.test(selectedOwner) ? null : selectedOwner } : {}) }) };
     let response;
     try { response = await this.fetch(this.config.schedulerUrl + route, request); }
@@ -225,6 +225,7 @@ class PrepaidChat extends ChatFlow {
     return checked;
   }
   verify(result, input, id, excludedProviders = this.excludedProviders()) {
+    if (require("../core/lib/koin-network/managed-protocol").find(input.model)) return require("./managed-network-answer").verifyManagedAnswer(result, input, id, this.config, this.target, this.clock());
     const jobTarget = require("../core/lib/koin-network/catalog-extension").target(this.target,this.config.catalogExtension,input.model);
     const k = result?.koin, q = k?.quote, r = k?.receipt, output = result?.choices?.[0]?.message?.content;
     if (result?.id !== id || k?.product !== this.product || JSON.stringify(k.target) !== JSON.stringify(jobTarget) ||

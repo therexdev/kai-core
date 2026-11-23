@@ -16,7 +16,7 @@ function configuredModelPricing(config, value, now = Date.now()) {
   if (!Number.isSafeInteger(now) || now < 0) throw Error("Model pricing verification time is invalid");
   return { schema: 1, product: "prepaid-usd-v1", policyHash: value.policyHash,
     observedAt: now, availabilityValidUntil: null,
-    models: approved.map(t => ({ model: t.model, label: labels[t.model]?.label || t.model,
+    models: [...approved, ...require("../core/lib/koin-network/managed-protocol").models.map(m => require("../core/lib/koin-network/managed-protocol").tariff(m.model))].map(t => ({ model: t.model, label: require("../core/lib/koin-network/managed-protocol").find(t.model)?.label || labels[t.model]?.label || t.model,
       inputCreditsPerMillion: credits(t.inputAtomsPerMillion), outputCreditsPerMillion: credits(t.outputAtomsPerMillion),
       inputUsdPerMillion: dollars(t.inputAtomsPerMillion), outputUsdPerMillion: dollars(t.outputAtomsPerMillion) })) };
 }

@@ -23,8 +23,9 @@ function request(value, config, tariffs) {
   const messages = P.messages(value.messages);
   // Leave room for private session authorization within the server body limit.
   if (Buffer.byteLength(JSON.stringify(messages)) > 24000) throw Error("This conversation is too long for the current network model. Start a new chat or shorten the message");
-  const ceiling = tariff ? Math.min(config.maxOutput, tariff.maxOutputTokens) : config.maxOutput;
-  const maxOutput = value.max_tokens === undefined ? ceiling : P.integer(value.max_tokens, 1, ceiling);
+  const managed = require("../core/lib/koin-network/managed-protocol").find(selected);
+  const ceiling = managed ? managed.maxOutputTokens : tariff ? Math.min(config.maxOutput, tariff.maxOutputTokens) : config.maxOutput;
+  const maxOutput = value.max_tokens === undefined ? managed ? Math.min(2048, ceiling) : ceiling : P.integer(value.max_tokens, 1, ceiling);
   return { messages, model: selected, maxOutput, ...(value.freeOnly !== undefined ? { freeOnly: value.freeOnly } : {}), ...(value.paidFirst === true ? { paidFirst: true } : {}), ...(value.runId ? { runId: value.runId } : {}) };
 }
 class ChatFlow {
