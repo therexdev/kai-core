@@ -15,8 +15,10 @@ const accountNotice = window.KaiCoreNotice.create({container:$("account-notice")
  * Local-Only privacy mode with words. */
 let accountFetchedAt = 0;
 let accountPolling = false;
-let websiteAccount = true;
+let websiteAccount = false;
 let accountEpoch = 0;
+let connectedAccount = null;
+let creditWalletAddress = null;
 const accountPath = suffix => (websiteAccount ? "/core/website-account" : "/core/account") + suffix;
 function selectAccountScope(website) {
   websiteAccount = !!website;
@@ -24,7 +26,9 @@ function selectAccountScope(website) {
   accountPolling = false;
   accountFetchedAt = 0;
   accountGrantId = null;
-  for (const id of ["account-code-row", "account-web", "account-signedin", "account-signedout"]) $(id).hidden = true;
+  connectedAccount = null;
+  creditWalletAddress = null;
+  for (const id of ["account-code-row", "account-web", "account-signedin", "account-signedout", "btn-account-disconnect", "btn-account-revoke-credit-links"]) $(id).hidden = true;
   for (const id of ["btn-account-signin", "btn-account-linkwallet", "btn-account-signout"]) $(id).disabled = false;
   accountMsg("");
   return renderAccount(true);
@@ -62,11 +66,14 @@ async function renderAccount(force) {
     si.hidden = true;
     return accountMsg(e.message);
   }
-  KaiLocale.setText($("account-heading"), (j.scope === "credits" ? KaiLocale.message(["AI credit account"]) : KaiLocale.message(["Koinos AI account"])));
-  KaiLocale.setText($("account-hint"), (j.scope === "credits" ? KaiLocale.message(["Connect your existing credit account using its browser sign-in. Wallet connection in Credits and device setup in Earn also work without this sign-in. Your website and Connections sign-in stays saved separately."]) : KaiLocale.message(["Sign in to your website account for Connections and web access. Approve the app's short code in your browser, then link this wallet if needed."])));
+  KaiLocale.setText($("account-heading"), (j.scope === "credits" ? KaiLocale.message(["KAI account & credits"]) : KaiLocale.message(["Koinos AI account"])));
+  KaiLocale.setText($("account-hint"), (j.scope === "credits" ? KaiLocale.message(["Connect to the same account you use for Chat, Build and Credits & API on the website. Open the link beside your code to approve this computer. Your wallet and saved files stay on this device."]) : KaiLocale.message(["Sign in to your website account for Connections and web access. Approve the app's short code in your browser, then link this wallet if needed."])));
   $("btn-account-scope").hidden = !j.separateCreditAccount;
-  KaiLocale.setText($("btn-account-scope"), (websiteAccount ? KaiLocale.message(["Open AI credit account"]) : KaiLocale.message(["Website account and Connections"])));
+  KaiLocale.setText($("btn-account-scope"), (websiteAccount ? KaiLocale.message(["KAI account & credits"]) : KaiLocale.message(["Website tools & Connections"])));
   $("account-web").hidden = true;
+  creditWalletAddress = j.scope === "credits" ? j.walletAddress : null;
+  $("btn-account-revoke-credit-links").hidden = !creditWalletAddress;
+  $("btn-account-disconnect").hidden = j.signedIn || !j.savedConnectionExists;
   /*
    * Three different things used to look identical here: signed out, session
    * rejected, and the account server simply unreachable. The last one is the
@@ -82,7 +89,7 @@ async function renderAccount(force) {
   accountMsg(j.sessionRejected ? "That session has ended. Sign in again to reconnect this device." : "");
   if (j.verifyUrl || j.site) {
     const link = $("account-verify-link");
-    const url = (j.site || "https://koinosai.com") + "/link";
+    const url = j.verifyUrl || (j.site || "https://credits.koinosai.com") + "/link";
     link.href = url;
     link.textContent = url.replace(/^https:\/\//, "");
   }
@@ -90,13 +97,18 @@ async function renderAccount(force) {
     so.hidden = true;
     si.hidden = false;
     const a = j.account;
+    connectedAccount = { email: a.email, id: a.id, wallet: j.walletAddress, credits: j.scope === "credits" };
+    const walletOnly = j.scope === "credits" && j.authScope === "wallet-credits";
+    $("btn-account-connect-login").hidden = !walletOnly;
+    KaiI18n.setText($("btn-account-linkwallet"), j.scope === "credits" ? "Link this Core wallet" : "Link this wallet");
+    KaiI18n.setText($("account-connected-hint"), walletOnly ? "Your Core wallet is connected. Link to your website account, then choose Link this Core wallet to use its existing credits in Chat and API. Your wallet and credits are preserved." : "Your website account can use the Core wallets you explicitly link here. Choose the same credit balance in Chat and Credits & API. Purchases still require wallet approval.");
     const methods = [
       a.email ? "email" : null,
       a.google ? "Google" : null,
       a.passkeys?.length ? `${a.passkeys.length} passkey${a.passkeys.length > 1 ? "s" : ""}` : null,
     ].filter(Boolean);
     const rows = [
-      ["Signed in as", a.email || a.id],
+      ["Connected account", a.email || (j.authScope === "wallet-credits" ? "Wallet connection · " + (a.wallets?.[0]?.address || a.id) : a.id)],
       ["Sign-in methods", methods.join(", ") || "none yet — add a passkey on the account page"],
       ["Linked wallets", String(a.wallets?.length ?? 0)],
       ["This wallet", j.thisWalletLinked ? "✓ linked to your account" : "not linked yet"],
@@ -105,6 +117,7 @@ async function renderAccount(force) {
     $("btn-account-linkwallet").hidden = Boolean(j.thisWalletLinked);
     if (j.scope !== "credits") renderWebAccess(j);
   } else {
+    connectedAccount = null;
     si.hidden = true;
     so.hidden = false;
     $("account-web").hidden = true;
@@ -113,6 +126,11 @@ async function renderAccount(force) {
       $("account-code").textContent = j.pendingCode;
       startAccountPoll();
     }
+  }
+  if (j.pendingCode) {
+    $("account-code-row").hidden = false;
+    $("account-code").textContent = j.pendingCode;
+    startAccountPoll();
   }
 }
 
@@ -128,6 +146,7 @@ function startAccountPoll() {
       if (epoch !== accountEpoch) return;
       if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       if (j.pending) {
+        KaiI18n.setText($("account-poll-status"), j.retrying ? "Connection interrupted. Retrying this code…" : "Waiting for approval in your browser…");
         setTimeout(tick, 3000);
         return;
       }
@@ -139,16 +158,21 @@ function startAccountPoll() {
     } catch (e) {
       if (epoch !== accountEpoch) return;
       accountPolling = false;
-      $("account-code-row").hidden = true;
+      $("account-code-row").hidden = false;
       accountMsg(e.message);
+      KaiI18n.setText($("account-poll-status"), "Connection paused. You can retry this code or get a new one.");
       $("btn-account-signin").disabled = false;
     }
   };
   setTimeout(tick, 3000);
 }
 
+$("btn-account-retry").addEventListener("click", () => { accountMsg(""); startAccountPoll(); });
+$("btn-account-connect-login").addEventListener("click", () => $("btn-account-signin").click());
+
 $("btn-account-signin").addEventListener("click", async () => {
-  const epoch = accountEpoch;
+  const epoch = ++accountEpoch;
+  accountPolling = false;
   const btn = $("btn-account-signin");
   btn.disabled = true;
   accountMsg("");
@@ -159,8 +183,15 @@ $("btn-account-signin").addEventListener("click", async () => {
     if (!r.ok || !j.ok) throw new Error(j.localOnly ? "Privacy is set to Local-Only — switch it in Settings → AI privacy first." : j.error || `HTTP ${r.status}`);
     $("account-code-row").hidden = false;
     $("account-code").textContent = j.userCode;
+    if (j.verifyUrl) { $("account-verify-link").href = j.verifyUrl; $("account-verify-link").textContent = "Open sign-in page"; }
+    KaiI18n.setText($("btn-account-signin"), "Get a new code");
+    btn.disabled = false;
     KaiI18n.setText($("account-poll-status"), "Waiting for approval… approve the code in your browser.");
     startAccountPoll();
+    if (j.verifyUrl) {
+      try { await window.kaiCore.call("desktop.openExternal", { url: j.verifyUrl }); }
+      catch { if (epoch === accountEpoch) accountMsg("The browser could not open. Use Open sign-in page above; your code is already filled in."); }
+    }
   } catch (e) {
     if (epoch !== accountEpoch) return;
     accountMsg(e.message);
@@ -170,15 +201,17 @@ $("btn-account-signin").addEventListener("click", async () => {
 
 $("btn-account-linkwallet").addEventListener("click", async () => {
   const epoch = accountEpoch;
+  const reviewed = connectedAccount;
   const btn = $("btn-account-linkwallet");
   btn.disabled = true;
   accountMsg("");
   try {
-    const r = await fetch(accountPath("/wallet"), { method: "POST" });
+    if (reviewed?.credits && (!await window.kaiCore.dialogs.confirm(`Allow ${reviewed.email || reviewed.id} to use the credits for Core wallet ${reviewed.wallet || "on this device"} in Chat and API, and view its credit usage?\n\nThis keeps the original balance and daily allowance. It does not transfer KOIN or authorize KOIN payments. You can remove the link in Credits & API → Wallets.`, { title: "Link Core credits", confirmLabel: "Link credits" }) || epoch !== accountEpoch)) return;
+    const r = await fetch(accountPath("/wallet"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(reviewed?.credits ? { accountId: reviewed.id, address: reviewed.wallet } : {}) });
     const j = await r.json();
     if (epoch !== accountEpoch) return;
     if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    accountMsg("Wallet linked — it now shows on your account everywhere.", true);
+    accountMsg(websiteAccount ? "Wallet linked — it now shows on your account everywhere." : "Core credits linked. Select this wallet's credit balance in Chat or Credits & API. Your existing balance is preserved.", true);
     if (!websiteAccount) window.dispatchEvent(new Event("kai-credit-identity-changed"));
     renderAccount(true);
   } catch (e) {
@@ -189,8 +222,28 @@ $("btn-account-linkwallet").addEventListener("click", async () => {
   }
 });
 
-$("btn-account-signout").addEventListener("click", async () => {
+$("btn-account-disconnect").addEventListener("click", async () => {
   const epoch = accountEpoch;
+  if (!await window.kaiCore.dialogs.confirm("Disconnect the saved account on this device? Your wallet, credits, chats and files are preserved. You can then connect to your website account again.", { title: "Disconnect saved account", confirmLabel: "Disconnect" }) || epoch !== accountEpoch) return;
+  $("btn-account-signout").click();
+});
+$("btn-account-revoke-credit-links").addEventListener("click", async () => {
+  const epoch = accountEpoch, address = creditWalletAddress, button = $("btn-account-revoke-credit-links");
+  if (!address) return;
+  button.disabled = true;
+  try {
+    if (!await window.kaiCore.dialogs.confirm(`Remove the credit access shared with website accounts for wallet ${address}?\n\nAPI keys created through those links will be revoked. Your original wallet account and credit balance stay intact.`, { title: "Remove shared credit access", confirmLabel: "Remove access" }) || epoch !== accountEpoch || address !== creditWalletAddress) return;
+    const r = await fetch(accountPath("/wallet/revoke-links"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address }) });
+    const j = await r.json(); if (epoch !== accountEpoch) return;
+    if (!r.ok || !j.ok) throw Error(j.error || "Credit access could not be removed");
+    accountMsg("Shared credit access removed. The original Core wallet and balance are preserved.", true);
+    window.dispatchEvent(new Event("kai-credit-identity-changed"));
+    await renderAccount(true);
+  } catch (e) { if (epoch === accountEpoch) accountMsg(e.message); }
+  finally { button.disabled = false; }
+});
+$("btn-account-signout").addEventListener("click", async () => {
+  const epoch = ++accountEpoch; accountPolling = false; $("account-code-row").hidden = true;
   try {
     const r = await fetch(accountPath("/logout"), { method: "POST" });
     const j = await r.json();

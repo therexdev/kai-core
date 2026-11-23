@@ -136,32 +136,38 @@
           <p id="access-status" class="muted" role="status" aria-live="polite"></p>
         </article>
         <article id="account-settings" class="account-settings">
-          <h2 id="account-heading">Koinos AI account</h2>
+          <h2 id="account-heading">KAI account & credits</h2>
           <button id="btn-account-scope" class="small" hidden>Website account and Connections</button>
           <p class="hint" id="account-hint">
             One account across your devices: sign in once, link this wallet, and your balance
             and claims follow you. Sign-in happens at koinosai.com with a passkey, email code,
-            or Google — the app never asks for a password, it just shows a short code.
+            or Google — your browser opens to approve the connection, with a short code available as a backup.
           </p>
+          <p class="hint"><a href="https://koinosai.com/chat">Open Chat</a> · <a href="https://koinosai.com/build">Open Build</a> · <a href="https://credits.koinosai.com/account">Open Credits & API</a></p>
           <div id="account-signedout" hidden>
-            <button id="btn-account-signin" class="primary small">Sign in / create account</button>
+            <button id="btn-account-signin" class="primary small">Connect to my KAI account</button>
+          </div>
             <div id="account-code-row" hidden>
               <p class="hint">
-                On any device, open
-                <a id="account-verify-link" href="https://koinosai.com/link" target="_blank" rel="noopener">koinosai.com/link</a>,
-                sign in, and type this code:
+                Your browser opens the sign-in page with your code filled in. Approve the connection there, then return to Core. If it did not open, use
+                <a id="account-verify-link" href="https://credits.koinosai.com/link" target="_blank" rel="noopener">Open sign-in page</a>,
+                or enter this backup code:
               </p>
               <div id="account-code" class="mono"></div>
               <p class="hint" id="account-poll-status">Waiting for approval…</p>
+              <button id="btn-account-retry" class="small">Retry connection</button>
             </div>
-          </div>
           <div id="account-signedin" hidden>
             <div class="hw-summary" id="account-stats"></div>
+            <p class="hint" id="account-connected-hint">To use a different account, sign out here, then connect again. Your wallet, credits, chats and files are preserved.</p>
             <div class="form-row">
+              <button id="btn-account-connect-login" class="primary small" hidden>Link to my website account</button>
               <button id="btn-account-linkwallet" class="primary small">Link this wallet</button>
-              <button id="btn-account-signout" class="small">Sign out on this device</button>
+              <button id="btn-account-signout" class="small">Sign out / change account</button>
             </div>
           </div>
+          <button id="btn-account-disconnect" class="small" hidden>Disconnect saved account</button>
+          <button id="btn-account-revoke-credit-links" class="small" hidden>Remove shared credit access</button>
           <div id="account-notice" class="dismissible-notice inline-notice" hidden><p class="hint" id="account-msg" role="status" hidden></p><button id="account-msg-close" class="notice-close" type="button" aria-label="Dismiss account message" title="Dismiss message"><span aria-hidden="true">×</span></button></div>
 
           <div id="account-web" hidden>
