@@ -27,7 +27,9 @@ var KaiLocale = globalThis.KaiI18n || (typeof require === "function" ? require("
   }
   function modelName(model) {
     const id = typeof model === "string" ? model : model.id;
-    const known = { "koinos-fast": "Qwen 2.5 1.5B", "koinos-balanced": "Llama 3.2 3B", "koinos-smart": "Qwen 2.5 7B" };
+    const known = { "koinos-fast": "Qwen 2.5 1.5B", "koinos-balanced": "Llama 3.2 3B", "koinos-smart": "Qwen 2.5 7B",
+      "akash-gpt-oss-120b": "GPT OSS 120B", "akash-llama33-70b": "Llama 3.3 70B", "akash-qwen38-27b": "Qwen 3.8 27B",
+      "akash-glm53": "GLM 5.3", "akash-qwen36-35b-a3b": "Qwen 3.6 35B A3B", "akash-kimi-k31-pro": "Kimi K3.1 Pro" };
     const ids = id.split(",");
     return ids.map(value => {
       const alias = value.trim().replace(/^koinos-network:/, "");
