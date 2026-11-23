@@ -18,7 +18,6 @@ Core uses each model's native context as the ceiling for automatic allocation. I
 | Gemma 3 4B, 12B, 27B | 131,072 | [Google model card](https://ai.google.dev/gemma/docs/core/model_card_3) |
 | DeepSeek R1 Distill Qwen 32B | 131,072 | [DeepSeek configuration](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B/blob/main/config.json) |
 | Liquid LFM3 1.7B | 262,144 | [Liquid AI model card](https://huggingface.co/LiquidAI/LFM3-1.7B) |
-| Dev Tiny (SmolLM2 135M) | 8,192 | [Hugging Face configuration](https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/blob/main/config.json) |
 
 Sources checked November 4, 2026. Qwen's advertised 128K extension requires additional YaRN configuration; Core deliberately uses the ordinary 32K configuration and does not claim that extension. The catalog Llama 3.2 GGUF is a conversion of the original model, not Meta's separate 8K QAT release.
 

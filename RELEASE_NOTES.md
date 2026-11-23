@@ -1,4 +1,10 @@
-# KAI Core Beta 0.7.34
+# KAI Core Beta 0.7.35
+
+Removes Dev Tiny, the pipeline testing model labeled "not a launch model", from the local Model library and the model choices exposed to plugins and local API clients. The production catalog no longer offers its testing weights for download.
+
+Update through **Settings → Application updates → Download update → Restart and install**. No server or plugin update is required for this removal. The six Akash network models remain available through the Network model source. Existing model files, wallets, plugins and saved data are retained.
+
+## Previous release: KAI Core Beta 0.7.34
 
 Adds GPT OSS 120B, Llama 3.3 70B, Qwen 3.8 27B, GLM 5.3, Qwen 3.6 35B A3B and Kimi K3.1 Pro to normal network model selection when the credit server enables them. These hosted models use the same daily-free and purchased KAI credits as other network models. The backend applies a 25% supplier-cost markup, except Qwen 3.6 and Kimi K3.1 Pro at 15%.
 

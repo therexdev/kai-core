@@ -1,6 +1,6 @@
 {
   "catalogVersion": 1,
-  "comment": "Model packages are versioned + immutable (spec §27): identity is the SHA-256. koinos-fast is the launch alias; dev-tiny is the CI/pipeline test model, hidden from the picker unless it is the model actually in use.",
+  "comment": "Model packages are versioned + immutable (spec §27): identity is the SHA-256. This production catalog contains user-selectable local models; test fixtures supply their own testing models.",
   "aliases": {
     "koinos-fast": {
       "label": "Qwen 2.5 1.5B",
@@ -98,11 +98,6 @@
       "minRamGb": 32,
       "package": "deepseek-r1-distill-qwen-32b-q4_k_m@1"
     },
-    "dev-tiny": {
-      "label": "Dev Tiny (pipeline testing only — not a launch model)",
-      "package": "smollm2-135m-instruct-q8_0@1",
-      "dev": true
-    },
     "gemma4-12b": {
       "label": "Gemma 4 12B",
       "blurb": "Creative writing and brainstorming on smaller machines. · 7.7 GB",
@@ -161,16 +156,6 @@
       "contextSize": 32768,
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
-      "runtime": "llamacpp"
-    },
-    "smollm2-135m-instruct-q8_0@1": {
-      "filename": "smollm2-135m-instruct-q8_0.gguf",
-      "url": "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q8_0.gguf",
-      "sha256": "5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83",
-      "sizeBytes": 144811360,
-      "contextSize": 8192,
-      "license": "apache-2.0",
-      "creator": "HuggingFaceTB (quantized by bartowski)",
       "runtime": "llamacpp"
     },
     "google_gemma-3-4b-it-q4_k_m@1": {
