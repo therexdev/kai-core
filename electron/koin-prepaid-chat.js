@@ -305,7 +305,11 @@ class PrepaidChat extends ChatFlow {
     let record = this.read(), input, requestHash;
     // A saved response remains verifiable even when the provider is offline or
     // the current catalog cannot be fetched. Its exact policy is pinned here.
-    try { input = this.input(value, record); requestHash = P.hash(JSON.stringify(input)); } catch (error) { if (record?.tariffs) throw error; }
+    // Reject corrupt saved tariffs separately. A new selection may be absent
+    // from a valid older catalog; that is not a recovery match and must be
+    // checked against the current approved catalog before any cancellation.
+    if (record?.tariffs) this.approvedTariffs = Models.approvedTariffs(record.tariffs, this.config);
+    try { input = this.input(value); requestHash = P.hash(JSON.stringify(input)); } catch { /* Validate new requests against the current catalog below. */ }
     const recovering = record && ["pending", "answered"].includes(record.state) && record.requestHash === requestHash;
     if (!recovering) {
       if (isUsd(this.product)) await this.models(signal);

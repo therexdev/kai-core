@@ -1,4 +1,10 @@
-# KAI Core Beta 0.7.35
+# KAI Core Beta 0.7.36
+
+Fixes "Choose the approved network model" when selecting GPT OSS 120B or another newly added network model after an earlier chat. Core now checks new requests against the current approved model list while preserving the original prices and request identity when recovering a saved reply.
+
+Update through **Settings → Application updates → Download update → Restart and install**, then resend your message with the desired network model selected. The fix applies to Assistant and other plugins using Core's network chat service. No separate plugin update is required. Existing chats, credit records, wallets and model files are retained.
+
+## Previous release: KAI Core Beta 0.7.35
 
 Removes Dev Tiny, the pipeline testing model labeled "not a launch model", from the local Model library and the model choices exposed to plugins and local API clients. The production catalog no longer offers its testing weights for download.
 
