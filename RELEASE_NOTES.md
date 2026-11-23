@@ -1,14 +1,14 @@
-## Unreleased — shared website login and Core credit links
+# KAI Core Beta 0.7.38
 
-- Link to my website account connects a wallet-only Core installation to the website login without first deleting the saved connection. Link this Core wallet requires a review naming the wallet and account, then signs permission to use its existing credits in Chat and API. The original balance, daily allowance and financial recovery identity are preserved.
-- Shared credit access can be removed from Core with a wallet signature, or from the website. KOIN purchases still require wallet approval.
-- Settings opens KAI account & credits with the account used by the website Chat and Credits/API dashboard.
-- Log in opens your browser on the exact issuing page with the code filled in, using the same approval flow as Android. The manual code, Get a new code and Retry connection remain available as backups.
-- The connected account, Sign out/change account, and Disconnect saved account remain accessible when a saved connection is rejected or offline. Wallets, balances, chats and files are preserved.
-- Temporary connection failures retain the pending code. Concurrent polls, cancelled sign-ins and late approvals cannot replace a newer connection; an approved reply can be retried after secure storage unlocks.
+Connect Core to the same login used by website Chat, Build and Credits/API. **Settings → KAI account & credits → Connect to my KAI account** now opens your browser with the approval code filled in, matching the Android flow. Approve there and return to Core. A backup code and Retry connection remain available if the browser or connection fails.
 
+For an existing wallet-only connection, choose **Link to my website account**, approve the website login, then **Link this Core wallet**. The review names the receiving account and wallet before granting access to its existing credits. Purchased balances, the original daily allowance and financial recovery records are preserved. Shared credit access can be removed from Core or the website; KOIN purchases still require wallet approval.
 
-# KAI Core Beta 0.7.37
+Website Chat stays at [koinosai.com/chat](https://koinosai.com/chat), Build at [koinosai.com/build](https://koinosai.com/build), and Credits/API at [credits.koinosai.com/account](https://credits.koinosai.com/account). Chat uses an optional primary credit account, then other linked accounts in the order added. The companion [server rollout](https://github.com/therexdev/kai/blob/fix/rpc-adaptive-recovery/docs/ACCOUNT_WORKSPACE.md) must be activated for shared website credit access.
+
+Update through **Settings → Application updates → Download update → Restart and install**. No plugin update is required. Existing wallets, balances, chats, plugins, models and files are retained. Interrupted approvals can recover the same session, and cancelled or older approvals cannot replace a newer connection.
+
+## Previous release: KAI Core Beta 0.7.37
 
 Fixes short Assistant messages being rejected by the saved per-request credit limit when using Kimi K3.1 Pro or GLM 5.3. When no reply length is specified, Core now fits the reply allowance to the selected model's approved price and the existing credit limit. It includes the full conversation's input reservation and never raises the spending cap or removes messages. Higher-priced models may provide shorter replies under the same limit.
 
