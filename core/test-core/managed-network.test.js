@@ -42,3 +42,36 @@ test("an unavailable managed provider cannot invalidate the ordinary native mode
   const result = require("../../electron/credit-network-eligibility").consumerCatalog(catalog, network, [], now);
   assert.equal(result.models.length, 22); assert.ok(result.models.every(m => !m.available));
 });
+
+test("managed defaults fit the exact credit boundary across all prices, conversation sizes and saved caps", () => {
+  const tariffs = [...prices.tariffs, ...M.models.map(m => M.tariff(m.model))];
+  const conversations = [
+    [{ role: "user", content: "What is a good diet plan for weight loss" }],
+    [{ role: "system", content: "Use concise replies." }, { role: "user", content: "Compare these options: " + "漢字🙂".repeat(250) }],
+    Array.from({ length: 24 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: "A previous conversation turn. ".repeat(10) })),
+  ];
+  for (const m of M.models) for (const messages of conversations) for (const perJob of ["1000", "100000", "1000000", "5000000"]) {
+    const value = { model: "koinos-network:" + m.model, messages }, c = { ...config, limits: { ...config.limits, perJob } };
+    const quote = output => M.quote("shadow:default-budget-test", m.model, messages, output, 0);
+    if (BigInt(quote(1).maxCharge) > BigInt(perJob)) {
+      assert.throws(() => request(value, c, tariffs), /no reply allowance.*saved per-request credit limit/); continue;
+    }
+    const input = request(value, c, tariffs), q = quote(input.maxOutput);
+    assert.ok(input.maxOutput > 0 && input.maxOutput <= 2048);
+    assert.ok(BigInt(q.maxCharge) <= BigInt(perJob), m.model + " must fit the exact configured cap");
+    if (input.maxOutput < 2048) assert.ok(BigInt(quote(input.maxOutput + 1).maxCharge) > BigInt(perJob), "no avoidable loss of reply allowance");
+    M.verifyQuote(q);
+    assert.deepEqual(input.messages, messages, "never trim the conversation to fit spending");
+  }
+});
+
+test("explicit reply limits, native defaults and uncapped callers keep their existing behavior", () => {
+  const tariffs = [...prices.tariffs, ...M.models.map(m => M.tariff(m.model))], messages = [{ role: "user", content: "Hello" }];
+  for (const m of M.models) {
+    const value = { model: "koinos-network:" + m.model, messages };
+    assert.equal(request({ ...value, max_tokens: 4096 }, config, tariffs).maxOutput, 4096);
+    for (const max_tokens of [0, 8193, 1.5, "64"]) assert.throws(() => request({ ...value, max_tokens }, config, tariffs), /Invalid integer/);
+    assert.equal(request(value, { ...config, limits: undefined }, tariffs).maxOutput, 2048);
+  }
+  assert.equal(request({ model: "koinos-network:koinos-fast", messages }, config, tariffs).maxOutput, 256);
+});

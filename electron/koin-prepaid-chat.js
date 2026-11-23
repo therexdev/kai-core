@@ -270,7 +270,10 @@ class PrepaidChat extends ChatFlow {
     const e = result.estimate;
     if (!e || (e.paidFirst === true) !== (input.paidFirst === true) || e.model !== input.model || e.unit !== (isUsd(this.product) ? "USD-1e-8" : "legacy-KOIN-1e-8") || typeof e.allowed !== "boolean" ||
         ![e.maxCharge, e.maxFree, e.maxPaid].every(n => typeof n === "string" && /^(0|[1-9]\d{0,19})$/.test(n)) || BigInt(e.maxFree) + BigInt(e.maxPaid) !== BigInt(e.maxCharge)) throw Error("Credit estimate could not be verified");
-    if (this.config.limits?.perJob && BigInt(e.maxCharge) > BigInt(this.config.limits.perJob)) throw Error("This message exceeds your saved per-request credit limit. Shorten it or choose a local model.");
+    if (this.config.limits?.perJob && BigInt(e.maxCharge) > BigInt(this.config.limits.perJob)) {
+      const credits = require("../core/lib/koin-network/purchase-quote").credits;
+      throw Error(`This request reserves up to ${credits(e.maxCharge)} credits, above your saved per-request credit limit of ${credits(this.config.limits.perJob)} credits. Reduce the reply length, start a new chat, or choose a lower-cost model.`);
+    }
     if (this.providerWallets && !catalogReady) { await this.models(signal); this.available(input.model); }
     return e;
   }
