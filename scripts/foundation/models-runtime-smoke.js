@@ -6,7 +6,6 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { JsonStore } = require("../../core/lib/store");
 const { ApiKeys } = require("../../core/lib/keys");
@@ -17,15 +16,10 @@ const { LlamaCppRuntime } = require("../../core/lib/runtimes/llamacpp");
 const { Gateway } = require("../../core/lib/gateway");
 const { CoreChat } = require("../../electron/core-chat");
 const { prepareModel } = require("./model-smoke-prepare");
+const { aliases, verifyModel } = require("./prepare-smoke-models");
 
 const source = path.resolve(__dirname, "../..");
-const aliases = ["lfm3-1.7b", "koinos-fast"];
 const maxReplyBytes = 1024 * 1024;
-async function hashFile(file) {
-  const hash = crypto.createHash("sha256");
-  for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
-  return hash.digest("hex");
-}
 function visibleReply(text, expected) {
   assert.equal(typeof text, "string", "The model must produce visible text");
   assert(text.trim(), "The model produced only reasoning or an empty answer");
@@ -105,8 +99,8 @@ async function main() {
         assert(/^[0-9a-f]{64}$/i.test(resolved.sha256), `${alias} has no verified hash`);
         // A supplied/shared cache must meet the same exact identity as a download.
         if (fs.existsSync(filename)) {
-          assert.equal(fs.statSync(filename).size, resolved.sizeBytes, `${alias} cached size mismatch`);
-          assert.equal(await hashFile(filename), resolved.sha256, `${alias} cached hash mismatch`);
+          await verifyModel(filename, resolved, stop.signal);
+          console.log(`Using verified cached model bytes for ${alias}`);
         }
         console.log(`Downloading/verifying and preparing ${alias} with ${build.version} (${build.key})`);
         const began = Date.now();

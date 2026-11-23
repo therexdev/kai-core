@@ -24,7 +24,25 @@ concurrency:
   group: kai-core-installers-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  model-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Restore or populate the shared immutable model cache
+        uses: actions/cache@v4
+        with:
+          path: .smoke/models
+          key: kai-core-smoke-models-v1-${{ hashFiles('core/models/catalog.json') }}
+          enableCrossOsArchive: true
+      - name: Download and verify the exact real-inference model weights
+        timeout-minutes: 25
+        run: node scripts/foundation/prepare-smoke-models.js .smoke/models
+
   build:
+    needs: model-cache
     strategy:
       fail-fast: false
       matrix:
@@ -143,11 +161,19 @@ jobs:
       - name: Wallet send dialog desktop check (Windows and macOS)
         if: runner.os != 'Linux'
         run: npm run test:wallet-send
+      - name: Restore the verified shared model weights
+        uses: actions/cache/restore@v4
+        with:
+          path: .smoke/models
+          key: kai-core-smoke-models-v1-${{ hashFiles('core/models/catalog.json') }}
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
       - name: Verify real LFM3 and existing Qwen inference through Core
         timeout-minutes: 25
         run: node scripts/foundation/models-runtime-smoke.js
         env:
           KAI_MODEL_SMOKE_OUTPUT: ${{ github.workspace }}/.smoke/model-runtime
+          KAI_MODEL_SMOKE_MODELS_DIR: ${{ github.workspace }}/.smoke/models
       - name: Preserve real model verification results
         if: always()
         uses: actions/upload-artifact@v4
