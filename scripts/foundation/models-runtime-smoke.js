@@ -16,6 +16,7 @@ const { RuntimeManager } = require("../../core/lib/runtime-manager");
 const { LlamaCppRuntime } = require("../../core/lib/runtimes/llamacpp");
 const { Gateway } = require("../../core/lib/gateway");
 const { CoreChat } = require("../../electron/core-chat");
+const { prepareModel } = require("./model-smoke-prepare");
 
 const source = path.resolve(__dirname, "../..");
 const aliases = ["lfm3-1.7b", "koinos-fast"];
@@ -109,7 +110,8 @@ async function main() {
         }
         console.log(`Downloading/verifying and preparing ${alias} with ${build.version} (${build.key})`);
         const began = Date.now();
-        await runtime.ensure(alias);
+        await prepareModel(() => runtime.ensure(alias), { signal: stop.signal,
+          onRetry: attempt => console.log(`Resuming ${alias} preparation after an interrupted download (attempt ${attempt}/4)`) });
         assert.equal(runtime.status().activeAlias, alias);
         assert.equal(runtime.status().runtime?.running, true);
         const result = { alias, packageId: resolved.packageId, sha256: resolved.sha256, sizeBytes: resolved.sizeBytes,
