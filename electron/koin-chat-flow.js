@@ -3,8 +3,25 @@
 // This coordinator cannot manufacture a transaction or approve spending itself.
 const fs = require("fs"), path = require("path"), crypto = require("crypto");
 const P = require("../core/lib/koin-network/job-protocol");
+const Managed = require("../core/lib/koin-network/managed-protocol");
 const terminal = s => ["finalized", "reverted", "consumed_elsewhere"].includes(s);
 const delay = (ms, signal) => require("node:timers/promises").setTimeout(ms, undefined, { signal });
+function defaultManagedOutput(model, messages, ceiling, limit) {
+  let high = Math.min(2048, ceiling);
+  if (limit === undefined) return high;
+  const budget = BigInt(limit), input = Managed.reservationTokens(messages);
+  // Use the same conservative, undiscounted reservation as the signed quote.
+  // Only an omitted reply limit is adaptive; explicit caller limits retain
+  // their meaning and still go through the ordinary credit estimate gate.
+  let low = 0;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (BigInt(Managed.ceiling(model, input, middle)) <= budget) low = middle;
+    else high = middle - 1;
+  }
+  if (!low) throw Error("This conversation leaves no reply allowance within your saved per-request credit limit. Start a new chat, shorten the conversation, or choose a lower-cost model.");
+  return low;
+}
 function request(value, config, tariffs) {
   if (!value || Object.keys(value).some(k => !["model", "messages", "max_tokens", "context_tokens", "stream", "freeOnly", "paidFirst", "runId"].includes(k))) throw Error("Unsupported network chat request");
   if (value.runId !== undefined) { P.digest(value.runId); if (!require("../core/lib/koin-network/product").isUsd(config.deployment)) throw Error("Advanced run budgets require USD credits"); }
@@ -23,9 +40,9 @@ function request(value, config, tariffs) {
   const messages = P.messages(value.messages);
   // Leave room for private session authorization within the server body limit.
   if (Buffer.byteLength(JSON.stringify(messages)) > 24000) throw Error("This conversation is too long for the current network model. Start a new chat or shorten the message");
-  const managed = require("../core/lib/koin-network/managed-protocol").find(selected);
+  const managed = Managed.find(selected);
   const ceiling = managed ? managed.maxOutputTokens : tariff ? Math.min(config.maxOutput, tariff.maxOutputTokens) : config.maxOutput;
-  const maxOutput = value.max_tokens === undefined ? managed ? Math.min(2048, ceiling) : ceiling : P.integer(value.max_tokens, 1, ceiling);
+  const maxOutput = value.max_tokens === undefined ? managed ? defaultManagedOutput(selected, messages, ceiling, config.limits?.perJob) : ceiling : P.integer(value.max_tokens, 1, ceiling);
   return { messages, model: selected, maxOutput, ...(value.freeOnly !== undefined ? { freeOnly: value.freeOnly } : {}), ...(value.paidFirst === true ? { paidFirst: true } : {}), ...(value.runId ? { runId: value.runId } : {}) };
 }
 class ChatFlow {

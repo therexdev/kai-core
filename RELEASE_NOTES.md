@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.36
+# KAI Core Beta 0.7.37
+
+Fixes short Assistant messages being rejected by the saved per-request credit limit when using Kimi K3.1 Pro or GLM 5.3. When no reply length is specified, Core now fits the reply allowance to the selected model's approved price and the existing credit limit. It includes the full conversation's input reservation and never raises the spending cap or removes messages. Higher-priced models may provide shorter replies under the same limit.
+
+All six hosted models are covered by default-request, price-boundary, signed-reply and recovery checks. Requests with an explicit reply length keep that limit; if their reservation is too high, the error now shows the required credits and saved cap.
+
+Update through **Settings → Application updates → Download update → Restart and install**, then resend the message. No separate Assistant plugin update is required. Existing chats, credit records, wallets and model files are retained.
+
+## Previous release: KAI Core Beta 0.7.36
 
 Fixes "Choose the approved network model" when selecting GPT OSS 120B or another newly added network model after an earlier chat. Core now checks new requests against the current approved model list while preserving the original prices and request identity when recovering a saved reply.
 

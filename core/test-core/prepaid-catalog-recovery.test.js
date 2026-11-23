@@ -84,6 +84,48 @@ test("all six managed models work after an acknowledged reply saved the pre-upgr
   });
 });
 
+test("all six managed models accept the Assistant's default reply within the saved credit cap and recover without another generation", async t => {
+  for (const model of M.models) await t.test(model.model, async t => {
+    const f = fixture(t); await f.prior("delivered"); f.state.managed = true;
+    const input = { model: "koinos-network:" + model.model, stream: true,
+      messages: [{ role: "user", content: "What is a good diet plan for weight loss" }] };
+    const result = await f.flow.chat(null, input, f.signal());
+    assert.equal(result.servedModel, model.model);
+    assert.ok(BigInt(result.koin.quote.maxCharge) <= BigInt(f.flow.config.limits.perJob));
+    const estimate = f.state.calls.filter(c => c.action === "estimate").at(-1), chat = f.state.calls.filter(c => c.action === "chat").at(-1);
+    assert.equal(estimate.body.max_tokens, result.koin.quote.maxOutput);
+    assert.equal(chat.body.max_tokens, result.koin.quote.maxOutput);
+    assert.equal(f.flow.config.limits.perJob, "1000000", "the saved 10-credit cap is unchanged");
+    f.state.catalogError = Error("Catalog offline");
+    assert.equal((await f.flow.recover(null, f.signal())).completion.id, result.id);
+    assert.equal(f.state.calls.filter(c => c.action === "chat").length, 2);
+  });
+});
+
+test("a conversation with no affordable reply preserves the previous answer and makes no spending request", async t => {
+  const f = fixture(t), old = await f.prior("answered"); f.state.managed = true;
+  const before = f.state.calls.length;
+  await assert.rejects(f.flow.chat(null, { model: "koinos-network:akash-kimi-k31-pro",
+    messages: [{ role: "user", content: "x".repeat(6000) }] }, f.signal()), /no reply allowance.*saved per-request credit limit/);
+  assert.deepEqual(f.flow.read(), old);
+  assert.ok(f.state.calls.slice(before).every(c => c.action === "models"));
+});
+
+test("explicit over-budget replies fail with the credit amounts before any generation or new journal", async t => {
+  for (const model of M.models) await t.test(model.model, async t => {
+    const f = fixture(t); f.state.managed = true;
+    const input = { model: "koinos-network:" + model.model, messages: [{ role: "user", content: "Hello" }], max_tokens: 8192 };
+    const q = M.quote(f.flow.target.domain, model.model, input.messages, input.max_tokens, Date.now());
+    if (BigInt(q.maxCharge) <= BigInt(f.flow.config.limits.perJob)) {
+      const result = await f.flow.chat(null, input, f.signal());
+      assert.equal(result.koin.quote.maxOutput, 8192); return;
+    }
+    await assert.rejects(f.flow.chat(null, input, f.signal()), /reserves up to.*saved per-request credit limit of 10 credits/);
+    assert.equal(f.flow.read(), null);
+    assert.equal(f.state.calls.some(c => ["chat", "cancel"].includes(c.action)), false);
+  });
+});
+
 test("a different approved model can replace pending or answered requests and follow cancelled records", async t => {
   for (const savedState of ["pending", "answered", "cancelled"]) await t.test(savedState, async t => {
     const f = fixture(t), old = await f.prior(savedState); f.state.managed = true;

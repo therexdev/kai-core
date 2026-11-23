@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.36",
+  "version": "0.7.37",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
@@ -22,7 +22,7 @@
     "test:apps": "node scripts/foundation/apps-smoke.js",
     "build:manifest": "node scripts/foundation/build-manifest.js",
     "prepack": "npm run build:manifest",
-    "test:services": "node --test --test-concurrency=2 core/test/wallet-session-secret.test.js core/test/wallet-credential-vault.test.js core/test/wallet-first-integration.test.js core/test/koin-credit-service.test.js core/test/credit-account.test.js core/test/model-manager.test.js core/test/gateway.test.js",
+    "test:services": "node --test --test-concurrency=2 core/test/wallet-session-secret.test.js core/test/wallet-credential-vault.test.js core/test/wallet-first-integration.test.js core/test/managed-budget-integration.test.js core/test/koin-credit-service.test.js core/test/credit-account.test.js core/test/model-manager.test.js core/test/gateway.test.js",
     "test:foundation-native": "node scripts/foundation/native-smoke.js",
     "test:alpha-migration": "node scripts/foundation/alpha-migration-smoke.js",
     "test:credit-reconnect": "node scripts/foundation/credit-reconnect-smoke.js",

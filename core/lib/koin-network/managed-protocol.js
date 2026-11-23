@@ -31,12 +31,16 @@ function amount(model, input, output, cached, snapshot) {
   return String((cost * BigInt(10000 + m.markupBps) * BigInt(10000 - r.discountBps) + divisor - 1n) / divisor);
 }
 function ceiling(model, input, output) { const m = find(model); return amount(model, input, output, 0, { input: m.input, output: m.output, cache: m.cache, discountBps: 0 }); }
+function reservationTokens(messages) {
+  const clean = P.messages(messages);
+  return Buffer.byteLength(JSON.stringify(clean)) + clean.length * 256 + 1024;
+}
 function quote(domain, model, messages, maxOutput, at) {
   const m = find(model), t = tariff(model), clean = P.messages(messages), prompt = JSON.stringify(clean);
   P.integer(maxOutput, 1, m.maxOutputTokens); P.integer(at);
   // A deliberately conservative reservation estimate, NOT a billed token count.
   // The upstream authoritative count must fit it; an overrun is never charged.
-  const inputTokens = Buffer.byteLength(prompt) + clean.length * 256 + 1024;
+  const inputTokens = reservationTokens(clean);
   if (inputTokens + maxOutput > m.contextTokens) throw Error("Context limit exceeded");
   const q = { schema: 2, mode: "shadow", domain, policyHash, tariff: t, requestHash: P.hash(prompt), promptHash: P.hash(prompt),
     inputIdsHash: P.hash("upstream-usage-reservation:" + prompt), inputTokens, maxOutput,
@@ -83,4 +87,4 @@ function verifyAnswer(result, input, id, config, target, now) {
     koin: { product: k.product, state: k.state, target: expectedTarget, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
 }
 
-module.exports = { models, find, policyHash, tariff, marked, rates, amount, ceiling, quote, verifyQuote, usage, receiptHash, verifyAnswer };
+module.exports = { models, find, policyHash, tariff, marked, rates, amount, ceiling, reservationTokens, quote, verifyQuote, usage, receiptHash, verifyAnswer };
