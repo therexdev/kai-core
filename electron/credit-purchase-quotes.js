@@ -1,6 +1,7 @@
 "use strict";
 const { utils } = require("koilib"), P = require("../core/lib/koin-network/job-protocol");
 const USD = require("../core/lib/koin-network/purchase-quote");
+const PurchaseLimits = require("../core/lib/koin-network/purchase-limits");
 const Provenance = require("../core/lib/koin-network/purchase-provenance");
 const crypto = require("node:crypto");
 const MarketEstimate = require("../core/lib/koin-network/purchase-market-estimate");
@@ -35,7 +36,7 @@ class CreditPurchaseQuotes {
   // consumes a quote authorization budget, or changes the approval cache.
   async estimate(c, input, signal) {
     if (!input || Object.keys(input).join() !== "usd") throw Error("Select a USD credit amount");
-    USD.nativeForDollars(input.usd, "100000000");
+    PurchaseLimits.assertDollars(input.usd);
     if (typeof c.config.pricingPolicyHash !== "string" || !/^[0-9a-f]{64}$/.test(c.config.pricingPolicyHash)) throw Error("Purchasing needs the approved pricing configuration");
     const capability = await this.capabilities(c, signal);
     let price, independent = false;
@@ -52,16 +53,17 @@ class CreditPurchaseQuotes {
           !Number.isSafeInteger(price.expiresAt) || price.expiresAt <= this.clock() || price.expiresAt > this.clock() + 60000 || !/^0x[0-9a-f]{64}$/.test(price.anchorHash)) throw Error("The market estimate could not be verified");
     }
     const amount = USD.nativeForDollars(input.usd, price.usdPerKoinAtoms), credited = String(BigInt(amount) * BigInt(price.usdPerKoinAtoms) / USD.USD_ATOMS);
-    const withinPaymentLimit = BigInt(amount) <= BigInt(c.config.limits.amount);
-    if (!independent && (BigInt(amount) > BigInt(price.maxPurchaseKoinAtoms) || BigInt(credited) > BigInt(price.maxPurchaseUsdAtoms))) throw Error("Choose a smaller amount for the currently available purchase liquidity");
-    return { estimate: { koin: USD.dollars(amount), credits: USD.credits(credited), usd: USD.dollars(credited), withinPaymentLimit, paymentLimitKoin: USD.dollars(c.config.limits.amount), observedAt: independent ? price.observedAt : price.marketObservedAt, expiresAt: price.expiresAt,
+    const paymentLimit = PurchaseLimits.limits(price.usdPerKoinAtoms);
+    const withinPaymentLimit = BigInt(amount) <= BigInt(paymentLimit.maxPurchaseKoinAtoms);
+    if (!independent && (BigInt(amount) > BigInt(price.maxPurchaseKoinAtoms) || BigInt(credited) > BigInt(price.maxPurchaseUsdAtoms))) throw Error(`The server currently supports purchases up to $${USD.dollars(price.maxPurchaseUsdAtoms)}. Refresh pricing or choose a smaller amount.`);
+    return { estimate: { koin: USD.dollars(amount), credits: USD.credits(credited), usd: USD.dollars(credited), withinPaymentLimit, paymentLimitUsd: PurchaseLimits.MAX_DOLLARS, paymentLimitKoin: USD.dollars(paymentLimit.maxPurchaseKoinAtoms), observedAt: independent ? price.observedAt : price.marketObservedAt, expiresAt: price.expiresAt,
       priceDetails: { usdPerKoin: USD.dollars(price.usdPerKoinAtoms), windowSeconds: price.windowSeconds, referenceKind: price.referenceKind,
         ...(independent ? { source: price.source, anchorHash: price.anchorHash } : {}) } } };
   }
   async preview(c, input, signal, { fresh = false } = {}) {
     if (!input || Object.keys(input).join() !== "usd") throw Error("Select a USD credit amount");
     // Validate decimal syntax before making a network request.
-    USD.nativeForDollars(input.usd, "100000000");
+    PurchaseLimits.assertDollars(input.usd);
     let wallet = false; try { wallet = utils.isChecksumAddress(c.config.owner); } catch {}
     if (!wallet) throw Error("Connect a payment wallet to buy credits. Free credits do not require a wallet.");
     if (typeof c.config.pricingPolicyHash !== "string" || !/^[0-9a-f]{64}$/.test(c.config.pricingPolicyHash)) throw Error("Purchasing needs the approved pricing configuration. Existing credits remain usable.");
@@ -73,7 +75,7 @@ class CreditPurchaseQuotes {
     const args = response.args, q = await USD.verify(c.config.deployment, args, { now: this.clock(), version: c.config.version });
     const provenance = Provenance.verify(q, response.priceDetails, { expectedPricingPolicyHash: c.config.pricingPolicyHash }), price = provenance.summary;
     if (q.account !== utils.encodeBase64url(utils.decodeBase58(c.config.owner)) || q.amount !== USD.nativeForDollars(input.usd, q.usd_per_koin)) throw Error("The quote does not match the selected account and USD amount");
-    if (BigInt(q.amount) > BigInt(c.config.limits.amount)) throw Error("This purchase exceeds the configured payment limit");
+    PurchaseLimits.assertNative(q.amount, q.usd_per_koin);
     signal?.throwIfAborted();
     const id = Buffer.from(q.id, "base64url").toString("hex");
     for (const [key, saved] of this.quotes) if (saved.scope !== scope || Number(saved.args.purchase_quote.expires_at) <= this.clock()) this.quotes.delete(key);

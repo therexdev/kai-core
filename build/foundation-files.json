@@ -34,6 +34,7 @@
     "core/lib/koin-network/product.js",
     "core/lib/koin-network/provider-device-protocol.js",
     "core/lib/koin-network/provider-diagnostics.js",
+    "core/lib/koin-network/purchase-limits.js",
     "core/lib/koin-network/purchase-mana.js",
     "core/lib/koin-network/purchase-market-estimate.js",
     "core/lib/koin-network/purchase-market.js",
