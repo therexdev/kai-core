@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.38
+# KAI Core Beta 0.7.39
+
+Buy up to **$1,000 in credits per transaction** using KOIN. Core now checks the purchase against its USD value at the verified exchange rate, fixing the older 100-KOIN deposit cap that blocked larger purchases. The amount field displays the $1,000 maximum, and requests above it are rejected before wallet signing.
+
+This requires the matching [credits-server update](https://github.com/therexdev/kai/blob/fix/credit-purchase-limit-1000/deploy/koin-mainnet/PURCHASE_LIMIT.md). That update separates the merchant's $1,000 credit-sales limit from the small exchange-price validation probe that previously capped purchases just below $10. Fresh pricing, signed quotes, exact payment review, and wallet approval still apply.
+
+Update through **Settings → Application updates → Download update → Restart and install**. No plugin update is required. Existing credit balances, wallets, and pending payment recovery records are preserved.
+
+## Previous release: KAI Core Beta 0.7.38
 
 Connect Core to the same login used by website Chat, Build and Credits/API. **Settings → KAI account & credits → Connect to my KAI account** now opens your browser with the approval code filled in, matching the Android flow. Approve there and return to Core. A backup code and Retry connection remain available if the browser or connection fails.
 

@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.38",
+  "version": "0.7.39",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
@@ -81,6 +81,7 @@
       "core/lib/koin-network/product.js",
       "core/lib/koin-network/provider-device-protocol.js",
       "core/lib/koin-network/provider-diagnostics.js",
+      "core/lib/koin-network/purchase-limits.js",
       "core/lib/koin-network/purchase-mana.js",
       "core/lib/koin-network/purchase-market-estimate.js",
       "core/lib/koin-network/purchase-market.js",

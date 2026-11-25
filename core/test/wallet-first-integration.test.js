@@ -38,7 +38,7 @@ function desktopWallet(signer) {
     signHash: async value => { if (!unlocked) throw Error("Wallet locked"); hashes++; return Buffer.from(await signer.signHash(value)).toString("base64"); },
     hashes: () => hashes };
 }
-async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", multiModel = false, runtimeReadiness = false, additiveCatalog = false, qualificationCases = 1, irreversiblePurchase = true, quoteTtlMs = USD.MAX_QUOTE_MS } = {}) {
+async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", multiModel = false, runtimeReadiness = false, additiveCatalog = false, qualificationCases = 1, irreversiblePurchase = true, quoteTtlMs = USD.MAX_QUOTE_MS, largePurchase = false } = {}) {
   const cleanup = cleanupStack(t);
   const backend = createRequire(path.join(path.resolve(BACKEND), "package.json"));
   const f = require("./helpers/koin-funding-recovery-fixture").fixture({ after: cleanup }, { usd: true, mainnet: true });
@@ -92,7 +92,7 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
     koinPrepaid: { client: chain, target, meter, clock, providerDevices: devices, encryptionKey: Buffer.alloc(32, 53), publicAccounts: true, waitMs: 30000,
       freePolicy: { version: 1, accountDaily: freeAllowance, networkDaily: "10000000", originDaily: "10000000", accountConcurrent: 4, eligibleModels: tariffs.map(t => t.model) },
       networkOverview, qualify: (...args) => multiModel ? runtime.qualified(...args) : true, accept: () => true,
-      purchaseQuote: (owner, amount, denomination) => { assert.equal(denomination, "USD"); return Prices.issue({ deployment: f.d, signer: Signer.fromSeed("funding-recovery-verifier"), account: owner, amount: USD.nativeForDollars(amount, "25000000"), usdPerKoin: "25000000", version: 1, now: clock(), ttlMs: quoteTtlMs }); } } });
+      purchaseQuote: (owner, amount, denomination) => { assert.equal(denomination, "USD"); return Prices.issue({ deployment: f.d, signer: Signer.fromSeed("funding-recovery-verifier"), account: owner, amount: USD.nativeForDollars(amount, "25000000"), usdPerKoin: "25000000", version: 1, now: clock(), ttlMs: quoteTtlMs, ...(largePurchase ? { purchaseLimits: require("../lib/koin-network/purchase-limits").limits("25000000") } : {}) }); } } });
   cleanup(() => scheduler.close());
   const hosts = new (backend("./lib/koin-network/test-hosts").TestHosts)(path.join(dir, "hosts"), f.d.chainId);
   cleanup(() => hosts.close());
@@ -264,6 +264,29 @@ test("buffered network replies cross the real streaming scheduler and charge onl
   assert.equal(finished.value.koin.receipt.sequence, undefined, "only the provider's final proof completes a buffered answer");
   const status = await f.service.run("credit-status", undefined, signal);
   assert.equal(status.usage.length, 1); assert.equal(status.usage[0].id, job.id);
+});
+
+test("USD credit purchases over 100 KOIN reach wallet approval through $1,000; excess is rejected before signing", options, async t => {
+  for (const dollars of ["40", "1000"]) await t.test(dollars, async t => {
+    const f = await fixture(t, { largePurchase: true }), signal = AbortSignal.timeout(45000);
+    await f.service.connectWallet(f.window, {}, signal);
+    const preview = await f.service.run("purchase-preview", { usd: dollars }, signal);
+    assert.ok(BigInt(USD.nativeForDollars(dollars, "25000000")) > BigInt(f.config.limits.amount));
+    f.approval.response = 0;
+    assert.equal((await f.service.run("purchase-approve", preview.quote.id, signal, f.window)).state, "cancelled");
+    assert.equal(f.transactionSigns(), 0, "cancel never signs a payment");
+    const reviewed = f.approvals.filter(a => a.title === "Buy AI credits");
+    assert.equal(reviewed.length, 1);
+    await assert.rejects(f.service.run("purchase-preview", { usd: "1000.01" }, signal), { code: "PURCHASE_LIMIT_EXCEEDED" });
+    assert.equal(f.transactionSigns(), 0);
+    f.approval.response = 1;
+    const accepted = await f.service.run("purchase-preview", { usd: dollars }, signal);
+    const result = await f.service.run("purchase-approve", accepted.quote.id, signal, f.window);
+    assert.ok(result.purchase?.txId);
+    assert.equal(f.transactionSigns(), 1);
+    const status = await f.service.run("credit-status", undefined, signal);
+    assert.equal(status.credits.purchased.available, String(BigInt(dollars) * USD.USD_ATOMS));
+  });
 });
 
 test("real HTTP wallet-only enrollment, free balance, purchase finality and locked-wallet assigned replies work together", options, async t => {

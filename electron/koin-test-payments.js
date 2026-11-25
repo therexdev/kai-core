@@ -174,7 +174,7 @@ class TestPayments {
     digest(id);
     const journal = this.#journal, nonces = journal.nonceCoordinator, saved = journal.saved(id);
     if (!saved?.signed || saved.intent.kind !== "credits" || saved.intent.method !== "purchase" ||
-        saved.intent.actor !== this.#owner() || BigInt(saved.intent.args.amount) > BigInt(this.#config.limits.amount))
+        saved.intent.actor !== this.#owner() || (!isUsd(this.#client.d) && BigInt(saved.intent.args.amount) > BigInt(this.#config.limits.amount)))
       throw Error("Select the saved credit deposit owned by this wallet");
     const result = (state, extra = {}) => ({ ...nonces.status(id), ...(state ? { state } : {}),
       funding: { state: journal.status(id).state, attempts: journal.status(id).attempts }, ...extra });
@@ -354,7 +354,9 @@ class TestPayments {
       }
       if (action === "purchase" || action === "fund-rewards") {
         const amount = atoms(input), kind = action === "purchase" ? "credits" : "rewards";
-        if (BigInt(amount) > BigInt(this.#config.limits.amount)) throw Error("Deposit exceeds the configured Test limit");
+        // USD credits are bounded at their verified quote rate below. The old
+        // native deposit ceiling still applies to rewards and non-USD funding.
+        if (!(kind === "credits" && isUsd(this.#client.d)) && BigInt(amount) > BigInt(this.#config.limits.amount)) throw Error("Deposit exceeds the configured Test limit");
         let maxRc = this.#config.maxRcPerTransaction, purchaseMana;
         if (action === "purchase" && isPrepaid(this.#client.d) && this.#config.mode === "mainnet-pilot") {
           this.#report("checking-network");
@@ -378,8 +380,11 @@ class TestPayments {
           this.#report("getting-price");
           args = await this.#purchaseQuote(amount, this.#owner(), task.abort.signal, { fresh }); guard();
           const expected = dollars === undefined || dollars === null ? amount : require("../core/lib/koin-network/purchase-quote").nativeForDollars(dollars, args?.purchase_quote?.usd_per_koin);
-          if (args?.account !== encodedAddress(this.#owner()) || args?.amount !== expected || BigInt(args.amount) > BigInt(this.#config.limits.amount)) throw Error("Purchase price does not match your request");
+          if (args?.account !== encodedAddress(this.#owner()) || args?.amount !== expected) throw Error("Purchase price does not match your request");
           await require("../core/lib/koin-network/purchase-quote").verify(this.#client.d, args, { now: this.#clock(), version: this.#config.version });
+          const limits = require("../core/lib/koin-network/purchase-limits");
+          if (dollars !== undefined && dollars !== null) limits.assertDollars(dollars);
+          limits.assertNative(args.amount, args.purchase_quote.usd_per_koin);
           guard();
         };
         if (usdPurchase) await getPrice();
