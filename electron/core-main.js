@@ -1,4 +1,9 @@
 "use strict";
+// The bounded recovery helper never starts Core, a wallet, or Alpha services.
+if (process.argv.includes(require("./credit-purchase-native-recovery").FLAG)) {
+  require("./credit-purchase-native-recovery").runHelper(require("electron"));
+  return;
+}
 // Foundation has its own profile; legacy installations remain untouched.
 process.env.KAI_CHANNEL = "core";
 const path = require("node:path"), fs = require("node:fs");

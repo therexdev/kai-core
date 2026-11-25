@@ -21,6 +21,9 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: node node_modules/electron/install.js
+      - name: Verify recovery across real Windows protected profiles
+        if: runner.os == 'Windows'
+        run: node scripts/foundation/credit-source-storage-smoke.js
       - run: npm run build:manifest
       - run: npm test
       - run: npm run test:services

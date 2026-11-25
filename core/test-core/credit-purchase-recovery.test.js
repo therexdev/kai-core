@@ -98,3 +98,23 @@ test("unresolved current-profile transactions block switching to the old connect
   db.prepare("INSERT INTO identity VALUES(1,?)").run(JSON.stringify({ chainId: f.d.chainId })); db.prepare("INSERT INTO reservations VALUES(?,'signed')").run(f.c.config.owner); db.close();
   await assert.rejects(f.recover(), /earlier wallet transaction is unresolved/); assert.deepEqual(f.calls, []); assert.equal(f.resolve(), null);
 });
+test("a separately encrypted source is opened only after review and pinned under Core's own protection", async t => {
+  const f = fixture(t), original = f.storage.decryptString(fs.readFileSync(f.record));
+  const key = crypto.randomBytes(32), iv = crypto.randomBytes(12), cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([iv, cipher.update(original), cipher.final(), cipher.getAuthTag()]); fs.writeFileSync(f.record, encrypted);
+  let calls = 0;
+  f.opts.sourceReader = async ({ ciphertext, identity }) => {
+    calls++; assert.equal(f.reviews.length, 2); assert.equal(f.calls.length, 0);
+    assert.equal(identity, JSON.parse(original).identity); assert.deepEqual(ciphertext, encrypted);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, ciphertext.subarray(0, 12)); decipher.setAuthTag(ciphertext.subarray(-16));
+    return JSON.parse(Buffer.concat([decipher.update(ciphertext.subarray(12, -16)), decipher.final()]));
+  };
+  f.approve(false); assert.equal((await f.recover()).state, "cancelled"); assert.equal(calls, 0);
+  f.approve(true); await f.recover(); assert.equal(calls, 1); assert.equal(f.resolve().installation, f.installation);
+  assert.deepEqual(fs.readFileSync(f.record), encrypted); assert.equal(calls, 1, "ordinary use does not reopen the source key store");
+});
+test("failed native source decryption never resets a signing identity or journal", async t => {
+  const f = fixture(t); fs.writeFileSync(f.record, "unreadable source"); const before = fs.readFileSync(f.record);
+  f.opts.sourceReader = async () => { throw Error("Original key unavailable"); };
+  await assert.rejects(f.recover(), /Original key unavailable/); assert.equal(f.resolve(), null); assert.deepEqual(f.calls, []); assert.deepEqual(fs.readFileSync(f.record), before);
+});

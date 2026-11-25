@@ -2,7 +2,7 @@
 
 Recover KOIN credit purchases when the wallet is still connected to an older Koinos AI Alpha installation on the same computer. In **Buy credits → Recover Alpha purchase connection**, select the original Alpha profile folder and review the connection. On Windows, the usual folder is `%APPDATA%\Koinos AI\core`.
 
-Core verifies the saved signing identity with the server and continues using the original payment journal in its original folder. Completed purchases and pending-payment recovery stay together. Keep that folder available; moving or deleting it blocks further purchases until its records are recovered.
+Windows recovery opens the selected Alpha profile’s original protected connection without changing Core’s credential store. Core verifies the saved signing identity with the server and continues using the original payment journal in its original folder. Completed purchases and pending-payment recovery stay together. Keep that folder available; moving or deleting it blocks further purchases until its records are recovered.
 
 The recovery action does not sign a payment or reset the server's wallet binding. Selecting a folder and confirming the connection are required; Core never automatically imports an Alpha profile. Each new purchase still requires its own approval. Unresolved transactions in other payment journals, damaged records, mismatched configurations, and another computer's recovery anchor remain blocked.
 

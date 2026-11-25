@@ -73,6 +73,9 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       - run: node node_modules/electron/install.js
+      - name: Verify recovery across real Windows protected profiles
+        if: runner.os == 'Windows'
+        run: node scripts/foundation/credit-source-storage-smoke.js
       - run: npm test
       - run: npm run test:services
       - name: Checkout the reviewed Compare Models stream regression

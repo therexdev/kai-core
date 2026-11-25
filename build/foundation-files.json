@@ -123,6 +123,7 @@
     "electron/credit-provider.js",
     "electron/credit-purchase-access.js",
     "electron/credit-purchase-journals.js",
+    "electron/credit-purchase-native-recovery.js",
     "electron/credit-purchase-progress.js",
     "electron/credit-purchase-quotes.js",
     "electron/credit-purchase-recovery.js",
