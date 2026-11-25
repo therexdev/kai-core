@@ -2,7 +2,7 @@
 const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), os = require("node:os");
 const yaml = require("js-yaml");
 const { PUBLISHER, REQUIRED_ENV, publisherMatches, configureSigning, assertSignature, versionNames, hash, readVerifiedArtifacts } = require("../../scripts/foundation/windows-signing");
-const { releaseFiles, publish } = require("../../scripts/foundation/publish-core-release");
+const { releaseFiles, findRelease, runGh, publish } = require("../../scripts/foundation/publish-core-release");
 const { verifyUpdater, verifyRejection } = require("../../scripts/foundation/verify-windows-signatures");
 const currentVersion = require("../../package.json").version;
 const identity = { version: currentVersion, commit: "a".repeat(40), workflowRun: "12345" };
@@ -252,6 +252,13 @@ test("publication rejects public, foreign, ambiguous or changed-identity release
     return args[0] === "api" && args[1] === "repos/therexdev/kai-core/releases/42" ? JSON.stringify({ ...race.draft, tag_name: "v9.0.0" }) : output;
   }), /identity/);
   assert.equal(race.calls.some(args => args.includes("PATCH")), false);
+});
+
+test("release discovery reads history larger than the default subprocess buffer", () => {
+  const tag = `v${currentVersion}`, execute = (_command, _args, options) => require("node:child_process").execFileSync(process.execPath, ["-e",
+    'process.stdout.write(JSON.stringify([[{id:1,tag_name:"v0.1.0",body:"x".repeat(2*1024*1024)}],[{id:42,tag_name:process.argv[1],draft:true}]]))', tag], options);
+  const found = findRelease(args => runGh(args, undefined, execute), "therexdev/kai-core", tag);
+  assert.deepEqual(found, { id: 42, tag_name: tag, draft: true });
 });
 
 test("release discovery errors never create a replacement draft", t => {

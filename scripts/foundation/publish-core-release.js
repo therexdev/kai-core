@@ -40,7 +40,13 @@ function assertReleaseAssets(release, dir, names) {
   }
 }
 
-function publish(dir, env = process.env, run = (args, options) => execFileSync("gh", args, { encoding: "utf8", ...options }), expectedDraftId = null) {
+function runGh(args, options, execute = execFileSync) {
+  // GitHub's paginated release history includes every body and asset. It now
+  // exceeds Node's default 1 MiB buffer; retain a finite bound and fail closed.
+  return execute("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, ...options });
+}
+
+function publish(dir, env = process.env, run = runGh, expectedDraftId = null) {
   const version = require("../../package.json").version;
   const identity = { version, commit: env.GITHUB_SHA, workflowRun: env.GITHUB_RUN_ID };
   const names = releaseFiles(dir, identity), tag = `v${version}`;
@@ -70,4 +76,4 @@ function publish(dir, env = process.env, run = (args, options) => execFileSync("
   console.log(`Published ${tag} from verified release ${found.id}.`);
 }
 if (require.main === module) publish(path.resolve(process.argv[2] || "release-assets/dist"));
-module.exports = { releaseFiles, findRelease, assertReleaseIdentity, assertReleaseAssets, publish };
+module.exports = { releaseFiles, findRelease, assertReleaseIdentity, assertReleaseAssets, runGh, publish };
