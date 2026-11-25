@@ -66,12 +66,13 @@ class CreditPurchases {
       const observation = p.confirmation || (last && Number.isSafeInteger(last.checkedAt) && this.clock() >= last.checkedAt && this.clock() - last.checkedAt <= 30000 ? last : null);
       const credited = this.purchaseOperation?.key === this.key(c) && this.purchaseOperation.value.txId === p.txId && this.purchaseOperation.value.outcome === "credited";
       const included = credited || observation?.state === "included" || observation?.state === "finalized";
-      const detail = credited ? "Your credits have been added. Finishing the saved payment confirmation." : included ? "Your payment is included in a block. Waiting for irreversible confirmation before adding credits." : p.cancellation ? (["funding_insufficient_rc", "funding_simulation_failed"].includes(issue) ? "The cancellation stopped during its pre-submission check. Its signature is saved; use Continue payment to retry it." : p.cancellation.attempts === 0 ? "The zero-transfer cancellation is signed but has not been submitted. Use Continue payment to finish sending it." : "The cancellation submission is unconfirmed. Confirmation is checked automatically. A new purchase becomes available when this finishes.") : quoteExpired && p.attempts > 0 ? "Checking confirmation of the saved payment. Quote expiry does not cancel a payment already included in a block." : quoteExpired ? "This payment quote expired before submission. Use Continue payment to recover the saved transaction. Confirmation is checked automatically." :
+      const detail = credited ? "Your credits have been added. Finishing the saved payment confirmation." : included ? "Your payment is included in a block. Waiting for irreversible confirmation before adding credits." : p.cancellation ? (["funding_insufficient_rc", "funding_simulation_failed"].includes(issue) ? "The cancellation stopped during its pre-submission check. Its signature is saved; use Recover pending purchase to retry it." : p.cancellation.attempts === 0 ? "The zero-transfer cancellation is signed but has not been submitted. Use Recover pending purchase to finish sending it." : "The cancellation submission is unconfirmed. Confirmation is checked automatically. A new purchase becomes available when this finishes.") : quoteExpired && p.attempts > 0 ? "Checking confirmation of the saved payment. Quote expiry does not cancel a payment already included in a block." : quoteExpired ? "The saved quote expired and no submission is recorded. Recover pending purchase will check the original payment before offering cancellation." :
         issue === "funding_insufficient_rc" ? "The last payment attempt reported insufficient Mana for its transaction limit. The saved payment needs review." :
         issue === "funding_simulation_failed" ? "The last payment attempt stopped during its pre-submission check. The saved payment needs review." :
         issue === "funding_submission_uncertain" ? "The last submission response was unavailable. This payment has not been confirmed; keep its original transaction." :
-        "This saved payment has not been confirmed. Check its status before starting another purchase.";
-      return { state: "pending", ...(busy ? { busy: true } : {}), txId: p.txId, paymentState: p.state, issue: issue || null, quoteExpired, cancellation: p.cancellation || null, confirmation: observation, recovery: included ? null : p.cancellation ? "resume-cancellation" : quoteExpired && p.attempts === 0 ? "cancel-expired" : issue === "funding_insufficient_rc" ? "correct-mana" : "retry", detail };
+        p.attempts === 0 ? "The payment is saved, but no submission is recorded. Use Recover pending purchase to check and continue this same payment." :
+        "Checking the saved payment automatically. Credits will be added after confirmation; do not start another purchase.";
+      return { state: "pending", ...(busy ? { busy: true } : {}), txId: p.txId, paymentState: p.state, submissionAttempts: p.attempts, issue: issue || null, quoteExpired, cancellation: p.cancellation || null, confirmation: observation, recovery: included ? null : p.cancellation ? "resume-cancellation" : quoteExpired && p.attempts === 0 ? "cancel-expired" : issue === "funding_insufficient_rc" ? "correct-mana" : "retry", detail };
     }) ?? null;
   }
   async cancelled(c, signal) {
@@ -178,11 +179,17 @@ class CreditPurchases {
     if (this.background) return this.background.promise;
     const pending = this.background = { abort: new AbortController(), promise: null };
     const combined = AbortSignal.any([pending.abort.signal, ...(signal ? [signal] : []), AbortSignal.timeout(30000)]);
+    let op;
     pending.promise = Promise.resolve().then(() => {
       combined.throwIfAborted();
       const pendingPurchase = this.read(c, combined, payments => payments.pendingPurchase());
-      const op = pendingPurchase ? (this.purchaseOperation?.key === this.key(c) && (!this.purchaseOperation.closed || this.purchaseOperation.value.txId === pendingPurchase.txId && this.purchaseOperation.value.outcome === "credited") ? this.purchaseOperation : this.beginProgress(c, "awaiting-confirmation")) : null;
+      op = pendingPurchase ? (this.purchaseOperation?.key === this.key(c) && (!this.purchaseOperation.closed || this.purchaseOperation.value.txId === pendingPurchase.txId && this.purchaseOperation.value.outcome === "credited") ? this.purchaseOperation : this.beginProgress(c, "awaiting-confirmation")) : null;
       return this.use(c, combined, payments => payments.syncPurchases((txId, nextSignal) => c.flow.call("purchase", { txId }, nextSignal), combined), false, "sync", op);
+    }).catch(error => {
+      // A failed observation is not a failed payment. Keep its signed record,
+      // expose the interrupted check, and let the existing read-only timer retry.
+      if (!pending.abort.signal.aborted && (!signal?.aborted || signal.reason?.name === "TimeoutError")) this.report(op, "confirmation-unavailable");
+      throw error;
     }).finally(() => { if (this.background === pending) this.background = null; });
     return pending.promise;
   }
