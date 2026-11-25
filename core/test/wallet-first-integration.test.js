@@ -266,6 +266,32 @@ test("buffered network replies cross the real streaming scheduler and charge onl
   assert.equal(status.usage.length, 1); assert.equal(status.usage[0].id, job.id);
 });
 
+test("a prior local account signing identity survives a rejected replacement and allows one reviewed USD purchase", options, async t => {
+  const f = await fixture(t, { largePurchase: true }), signal = AbortSignal.timeout(45000);
+  await f.service.connectWallet(f.window, {}, signal);
+  const c = await f.service.context(signal), original = P.hash("earlier local account installation"), rejected = P.hash("new context installation");
+  const old = path.join(f.serviceOptions.dataDir, "credit-account-v2", P.hash("earlier-account"), P.hash(JSON.stringify(c.config)));
+  fs.mkdirSync(old, { recursive: true }); fs.writeFileSync(path.join(old, "context.json"), JSON.stringify({ accountId: "earlier-account", config: c.config }));
+  const identity = P.hash(JSON.stringify([c.config.owner, c.config.schedulerUrl, c.config.deployment.chainId]));
+  const files = [path.join(old, "purchase-installation.enc"), path.join(c.directory, "purchase-installation.enc")];
+  files.forEach((file, i) => fs.writeFileSync(file, f.service.purchases.storage.encryptString(JSON.stringify({ identity, installation: i ? rejected : original }))));
+  const bytes = files.map(file => fs.readFileSync(file));
+  f.runtime.hosts.claim(c.config.owner, original);
+  f.approval.response = 0;
+  let preview = await f.service.run("purchase-preview", { usd: "40" }, signal);
+  assert.equal((await f.service.run("purchase-approve", preview.quote.id, signal, f.window)).state, "cancelled");
+  assert.equal(f.transactionSigns(), 0);
+  assert.equal(f.approvals.filter(a => a.title === "Buy AI credits").length, 1);
+  files.forEach((file, i) => assert.deepEqual(fs.readFileSync(file), bytes[i]));
+  assert.equal(f.runtime.hosts.claim(c.config.owner, original).granted, true);
+  assert.throws(() => f.runtime.hosts.claim(c.config.owner, rejected), /another installation/);
+  f.approval.response = 1;
+  preview = await f.service.run("purchase-preview", { usd: "40" }, signal);
+  assert.ok((await f.service.run("purchase-approve", preview.quote.id, signal, f.window)).purchase.txId);
+  assert.equal(f.transactionSigns(), 1);
+  assert.equal((await f.service.run("credit-status", undefined, signal)).credits.purchased.available, String(40n * USD.USD_ATOMS));
+});
+
 test("USD credit purchases over 100 KOIN reach wallet approval through $1,000; excess is rejected before signing", options, async t => {
   for (const dollars of ["40", "1000"]) await t.test(dollars, async t => {
     const f = await fixture(t, { largePurchase: true }), signal = AbortSignal.timeout(45000);

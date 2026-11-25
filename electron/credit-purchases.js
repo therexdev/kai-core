@@ -98,7 +98,7 @@ class CreditPurchases {
     try {
       const payments = new (require("./koin-test-payments").TestPayments)({ config: c.config, client, journal, wallet, dialog: this.dialog, clock: this.clock, progress: (stage, detail) => this.report(op, stage, detail),
         purchaseDollars: () => purchaseUsd,
-        authorizeHost: () => Access.claimHost({ c, account: this.account, wallet, signal, fetchImpl: this.fetchImpl,
+        authorizeHost: () => Access.claimHost({ c, account: this.account, wallet, signal, fetchImpl: this.fetchImpl, dataDir: this.dataDir, storage: this.storage,
           installation: Access.installation({ dataDir: this.dataDir, directory: c.directory, config: c.config, storage: this.storage }) }),
         purchaseQuote: async (amount, owner, quoteSignal, { fresh = false } = {}) => {
           quoteSignal.throwIfAborted(); this.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl);

@@ -258,7 +258,7 @@ class CreditProvider {
       // The host lease coordinates the existing wallet; it creates no credential.
       if (!this.device) {
       const access = require("./credit-purchase-access"), id = access.installation({ dataDir: this.service.dataDir, directory: c.directory, config: c.config, storage: this.service.purchases.storage });
-      await access.claimHost({ c, account: this.service.account, wallet: this.core.account.wallet, installation: id, fetchImpl: this.service.fetchImpl, signal }); current(); this.guard(c, signal);
+      await access.claimHost({ c, account: this.service.account, wallet: this.core.account.wallet, installation: id, dataDir: this.service.dataDir, storage: this.service.purchases.storage, fetchImpl: this.service.fetchImpl, signal }); current(); this.guard(c, signal);
       }
       await this.core.gateway.earn?.stop?.({ userIntent: true });
       current();
