@@ -1,0 +1,64 @@
+name: Recover verified Core 0.7.39 publication
+on:
+  push:
+    branches: [release/recover-core-0739]
+    paths: [.github/workflows/core-release-0739-recovery.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: kai-core-publish-0739
+  cancel-in-progress: false
+jobs:
+  publish-verified-draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Require the completed original installer and native verification jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { execFileSync } = require('node:child_process');
+          const api = route => JSON.parse(execFileSync('gh', ['api', `repos/therexdev/kai-core/${route}`], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
+          const run = api('actions/runs/45554052496');
+          assert.equal(run.head_sha, 'fe7c92df4f7e0c6b21f7655ab07c00246941a9c7');
+          assert.equal(run.head_branch, 'main');
+          assert.equal(run.path, '.github/workflows/core-build.yml');
+          assert.equal(run.event, 'push');
+          assert.equal(run.status, 'completed');
+          assert.equal(run.conclusion, 'failure');
+          const { jobs } = api('actions/runs/45554052496/jobs?per_page=100');
+          const required = ['model-cache', 'build (ubuntu-latest, --linux --x64 --arm64)', 'build (windows-latest, --win --x64)', 'build (macos-latest, --mac --x64 --arm64)', 'appimage-arm64'];
+          for (const name of required) {
+            assert.equal(jobs.filter(job => job.name === name).length, 1, name);
+            assert.equal(jobs.find(job => job.name === name).conclusion, 'success', name);
+          }
+          assert.deepEqual(jobs.filter(job => job.conclusion !== 'success').map(job => job.name), ['release']);
+          assert.deepEqual(jobs.find(job => job.name === 'release').steps.filter(step => step.conclusion === 'failure').map(step => step.name), ['Publish signed Windows installers and verified update feed']);
+          NODE
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kai-core-foundation-*
+          path: release-assets
+          merge-multiple: true
+          run-id: 45554052496
+          github-token: ${{ github.token }}
+      - name: Verify original signed artifacts and publish only the exact existing draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node <<'NODE'
+          require('./scripts/foundation/publish-core-release').publish('release-assets/dist', {
+            ...process.env,
+            GITHUB_SHA: 'fe7c92df4f7e0c6b21f7655ab07c00246941a9c7',
+            GITHUB_RUN_ID: '45554052496'
+          }, undefined, 457696642);
+          NODE
