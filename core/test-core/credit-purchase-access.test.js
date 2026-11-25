@@ -41,6 +41,21 @@ test("another profile without the original record cannot take the server binding
   await assert.rejects(Access.claimHost(f.options(c)), /signing lease is unavailable/);
   assert.deepEqual(f.seen, [f.current]); assert.equal(fs.existsSync(path.join(f.dataDir, "credit-wallet-hosts")), false);
 });
+test("recovering the signing identity cannot bypass an earlier unfinished wallet transaction", async t => {
+  const f = fixture(t), old = f.context("old-account"), current = f.context("current-account"); f.save(old, f.original); f.save(current, f.current);
+  const dir = path.join(old.directory, "journals"); fs.mkdirSync(dir);
+  const file = path.join(dir, "wallet-nonces.sqlite"), { DatabaseSync } = require("node:sqlite"), { sqlitePath } = require("../lib/sqlite-path");
+  const db = new DatabaseSync(sqlitePath(file));
+  try {
+    db.exec("CREATE TABLE identity(id INTEGER PRIMARY KEY, data TEXT); CREATE TABLE reservations(owner TEXT, state TEXT)");
+    db.prepare("INSERT INTO identity VALUES(1,?)").run(JSON.stringify({ chainId: f.config.deployment.chainId }));
+    db.prepare("INSERT INTO reservations VALUES(?,?)").run(f.config.owner, "signed");
+  } finally { db.close(); }
+  const before = fs.readFileSync(file);
+  await Access.claimHost(f.options(current));
+  assert.throws(() => require("../../electron/credit-purchase-journals").guardOtherJournals(f.dataDir, path.join(current.directory, "journals"), f.config), /earlier wallet transaction is unresolved/);
+  assert.deepEqual(fs.readFileSync(file), before);
+});
 test("records for another wallet, chain or service cannot supply a signing ID", async t => {
   const f = fixture(t), c = f.context("current"); f.save(c, f.current);
   for (const config of [{ ...f.config, owner: "other-wallet" }, { ...f.config, schedulerUrl: "https://other.invalid/scheduler" }, { ...f.config, deployment: { chainId: "other-chain" } }]) f.save(f.context("other", config), f.original);
