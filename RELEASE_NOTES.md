@@ -1,4 +1,14 @@
-# KAI Core Beta 0.7.41
+# KAI Core Beta 0.7.42
+
+Credit purchases now show their current stage in **Buy credits** and **Credits and Usage**, with elapsed time, the last update, and the transaction ID when available. Approval, sending, confirmation, adding credits, and cancellation have separate status messages.
+
+An expired quote or a saved payment needing review shows recovery guidance instead of an endless processing indicator. A delayed confirmation check is identified separately from a failed payment. **Buy credits** stays disabled while a saved purchase is unresolved; use **Recover pending purchase** to review that same payment. Status returns when you reopen the page or app.
+
+Fixes an older completed purchase incorrectly completing the progress display for a newer pending purchase. Existing payment approvals, confirmation rules, credit balances, wallets, and recovery journals are preserved. This update improves reporting and does not automatically resubmit a payment or establish why a particular submission stalled.
+
+Update through **Settings → Application updates → Download update → Restart and install**. No server or plugin update is required.
+
+## Previous release: KAI Core Beta 0.7.41
 
 Recover KOIN credit purchases when the wallet is still connected to an older Koinos AI Alpha installation on the same computer. In **Buy credits → Recover Alpha purchase connection**, select the original Alpha profile folder and review the connection. On Windows, the usual folder is `%APPDATA%\Koinos AI\core`.
 
