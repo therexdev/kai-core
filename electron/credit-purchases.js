@@ -4,6 +4,7 @@ const USD = require("../core/lib/koin-network/purchase-quote");
 const { CreditPurchaseQuotes } = require("./credit-purchase-quotes");
 const { guardOtherJournals, purchaseDirectory } = require("./credit-purchase-journals");
 const Access = require("./credit-purchase-access");
+const Recovery = require("./credit-purchase-recovery");
 const { purchaseFailureMessage } = require("./koin-funding-failure");
 function purchaseClient(d) {
   const { KoinChain } = require("../core/lib/koin-network/chain");
@@ -39,6 +40,13 @@ class CreditPurchases {
   async pauseSync() {
     const pending = this.background;
     if (pending) { pending.abort.abort(); await pending.promise.catch(() => {}); }
+  }
+  async recoverConnection(c, window, signal) {
+    if (this.active) throw Error("Finish or cancel the open payment review first");
+    await this.pauseSync();
+    this.quotes.clear();
+    return Recovery.recover({ dataDir: this.dataDir, c, window, signal, storage: this.storage, account: this.account,
+      dialog: this.dialog, fetchImpl: this.fetchImpl, clientFactory: this.clientFactory });
   }
   async estimateCapabilities(c, signal) { return this.quotes.capabilities(c, signal); }
   async estimate(c, input, signal) { return this.quotes.estimate(c, input, signal); }
@@ -83,9 +91,11 @@ class CreditPurchases {
     const wallet = this.account.wallet;
     if (!wallet || wallet.address !== c.config.owner) throw Error("Unlock the payment wallet linked to this account");
     signal?.throwIfAborted(); this.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl);
-    const directory = purchaseDirectory(this.dataDir, c.directory, c.config);
+    const recovered = Recovery.resolve({ dataDir: this.dataDir, c, storage: this.storage });
+    const directory = recovered?.directory || purchaseDirectory(this.dataDir, c.directory, c.config);
+    const guardJournals = () => recovered ? Recovery.guard(this.dataDir, recovered, c.config) : guardOtherJournals(this.dataDir, directory, c.config);
     if (!create && !fs.existsSync(path.join(directory, "funding-recovery.sqlite"))) return;
-    if (create) guardOtherJournals(this.dataDir, directory, c.config);
+    if (create) guardJournals();
     // Keep the working RPC fallback across confirmation polls. Recreating the
     // provider on every read repeatedly spends the whole timeout on an outage.
     const deployment = JSON.stringify(c.config.deployment);
@@ -98,11 +108,11 @@ class CreditPurchases {
     try {
       const payments = new (require("./koin-test-payments").TestPayments)({ config: c.config, client, journal, wallet, dialog: this.dialog, clock: this.clock, progress: (stage, detail) => this.report(op, stage, detail),
         purchaseDollars: () => purchaseUsd,
-        authorizeHost: () => Access.claimHost({ c, account: this.account, wallet, signal, fetchImpl: this.fetchImpl, dataDir: this.dataDir, storage: this.storage,
-          installation: Access.installation({ dataDir: this.dataDir, directory: c.directory, config: c.config, storage: this.storage }) }),
+        authorizeHost: () => Access.claimHost({ c, account: this.account, wallet, signal, fetchImpl: this.fetchImpl, dataDir: recovered ? undefined : this.dataDir, storage: this.storage,
+          installation: recovered?.installation || Access.installation({ dataDir: this.dataDir, directory: c.directory, config: c.config, storage: this.storage }) }),
         purchaseQuote: async (amount, owner, quoteSignal, { fresh = false } = {}) => {
           quoteSignal.throwIfAborted(); this.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl);
-          guardOtherJournals(this.dataDir, directory, c.config);
+          guardJournals();
           if (!approved || owner !== c.config.owner || (!purchaseUsd && approved.amount !== amount)) throw Error("A reviewed exchange quote is required");
           // Refresh only an unused quote, before opening wallet approval. A
           // signed saved payment never enters this branch or changes its price.

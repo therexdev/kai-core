@@ -79,6 +79,21 @@ async function main() {
     assert.match(await page.locator("#credit-activity").textContent(), /Purchased credits/); assert.match(await page.locator("#credit-activity").textContent(), /Qwen 2\.5 1\.5B/); await capture("restored-credits-and-activity");
     const fixtureState = await app.evaluate(() => global.__creditReconnectFixture); assert.equal(fixtureState.proofCount, 1); assert.ok(!fixtureState.requests.some(route => /quote|purchase$/.test(route)));
     report.checks.push("Accepted wallet proof restores purchased balance and both remote activity types without purchase");
+    await app.evaluate(({ dialog }) => {
+      const original = dialog.showOpenDialog;
+      dialog.showOpenDialog = async (parent, options) => {
+        if (options?.title !== "Choose the old Koinos AI profile folder") return original(parent, options);
+        global.__creditReconnectFixture.recoveryFolderOpened = true;
+        return { canceled: true, filePaths: [] };
+      };
+    });
+    await page.locator('[data-panel="credits"] [data-go="buy-credits"]').click();
+    await page.locator("#purchase-recover-connection").click();
+    await until(async () => /recovery cancelled/.test(await page.locator("#purchase-state").textContent()), "Cancelled profile chooser did not finish recovery");
+    assert.equal(await app.evaluate(() => global.__creditReconnectFixture.recoveryFolderOpened), true);
+    assert.equal(fs.existsSync(path.join(profile, "credit-purchase-recovery")), false);
+    assert.equal(await app.evaluate(() => global.__creditReconnectFixture.proofCount), 1);
+    report.checks.push("Core-only Alpha recovery reaches the native folder chooser; cancel persists no recovery connection");
     assert.deepEqual(fs.readFileSync(wallet.keystorePath), originalWallet); assert.deepEqual(errors, []); assert.deepEqual((await app.evaluate(() => global.__foundationSmoke)).errors, []);
     const process = app.process(), ended = new Promise((resolve, reject) => { const timer = setTimeout(() => reject(Error("Core quit timed out")), 30000); process.once("exit", code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error("Core exit " + code)); }); });
     await app.evaluate(() => setTimeout(() => global.__foundationTrayMenu.find(row => row.label === "Quit KAI Core Beta").click(), 0)); await ended; app = null;
