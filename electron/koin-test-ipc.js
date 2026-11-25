@@ -13,7 +13,7 @@ const crypto = require("crypto");
 // Current USD credits use the same reviewed service on both release channels.
 // Historical custody, funding and imported pilot controls remain Test-only.
 const PUBLIC_CREDIT_ACTIONS = new Set([
-  "wallet-info", "wallet-connect", "purchase-connect", "purchase-info", "purchase-capabilities", "model-pricing",
+  "wallet-info", "wallet-connect", "purchase-connect", "purchase-recover-connection", "purchase-info", "purchase-capabilities", "model-pricing",
   "purchase-estimate", "purchase-preview", "purchase-approve", "credit-purchase-retry", "purchase-stop",
   "chat-info", "credit-status", "chat-estimate", "chat-completion", "chat-recover", "chat-ack",
   "run-open", "run-chat", "run-list", "run-status", "run-stop", "stop",
@@ -161,7 +161,8 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       try { return await withChatSignal(window, signal => callerCreditService.connectWallet(window, input || {}, signal), true); }
       finally { busy = false; }
     }
-    if (action === "purchase-connect") {
+    if (action === "purchase-recover-connection" && pluginCaller) throw Error("Open Core to recover the original purchase connection");
+    if (["purchase-connect", "purchase-recover-connection"].includes(action)) {
       if (input !== undefined || disposed) throw Error("Purchase connection takes no arguments and requires an open app");
       if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to buy credits");
       if (busy) throw Error("Finish or cancel the open wallet or payment review first");
@@ -170,7 +171,9 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         const checking = purchaseSync; checking?.abort.abort();
         if (checking) await checking.promise;
         signal.throwIfAborted();
-        return callerCreditService.preparePurchase(window, signal);
+        if (action === "purchase-connect") return callerCreditService.preparePurchase(window, signal);
+        const c = await callerCreditService.context(signal);
+        return callerCreditService.purchases.recoverConnection(c, window, signal);
       }, true); }
       finally { busy = false; }
     }

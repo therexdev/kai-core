@@ -125,6 +125,7 @@
     "electron/credit-purchase-journals.js",
     "electron/credit-purchase-progress.js",
     "electron/credit-purchase-quotes.js",
+    "electron/credit-purchase-recovery.js",
     "electron/credit-purchases.js",
     "electron/credit-runs.js",
     "electron/credit-service.js",

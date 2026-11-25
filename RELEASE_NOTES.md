@@ -1,4 +1,14 @@
-# KAI Core Beta 0.7.40
+# KAI Core Beta 0.7.41
+
+Recover KOIN credit purchases when the wallet is still connected to an older Koinos AI Alpha installation on the same computer. In **Buy credits → Recover Alpha purchase connection**, select the original Alpha profile folder and review the connection. On Windows, the usual folder is `%APPDATA%\Koinos AI\core`.
+
+Core verifies the saved signing identity with the server and continues using the original payment journal in its original folder. Completed purchases and pending-payment recovery stay together. Keep that folder available; moving or deleting it blocks further purchases until its records are recovered.
+
+The recovery action does not sign a payment or reset the server's wallet binding. Selecting a folder and confirming the connection are required; Core never automatically imports an Alpha profile. Each new purchase still requires its own approval. Unresolved transactions in other payment journals, damaged records, mismatched configurations, and another computer's recovery anchor remain blocked.
+
+Update through **Settings → Application updates → Download update → Restart and install**. No additional server or plugin update is required.
+
+## Previous release: KAI Core Beta 0.7.40
 
 Fixes credit purchases blocked by a signing-lease error after an account or credit configuration change on the same Core profile. Core can reuse the original encrypted signing identity already saved for that wallet, service and chain, and remembers it independently of the selected account. A replacement identity from an unsuccessful attempt no longer hides the original record.
 

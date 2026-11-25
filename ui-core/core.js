@@ -291,6 +291,14 @@ $("purchase-retry").onclick = e => action(e.currentTarget, async () => {
   try { const r = await bridge.credit("credit-purchase-retry"); text("purchase-state", r.detail || r.state); await window.KaiCredits.refresh(); }
   catch (error) { text("purchase-state", error.message); throw error; }
 });
+$("purchase-recover-connection").onclick = e => action(e.currentTarget, async () => {
+  notices["purchase-state"].show("Checking the original purchase connection…", { dismissible: false });
+  try {
+    const result = await bridge.credit("purchase-recover-connection");
+    text("purchase-state", result.detail || "Purchase connection recovery cancelled.");
+    priceGeneration++; purchaseInfoGeneration++; await window.KaiCredits.refresh();
+  } catch (error) { text("purchase-state", error.message); throw error; }
+});
 async function refreshCreditActivity() {
   await window.KaiCredits.refresh();
   if (!bridge || !window.KaiCreditPresentation(creditState || {}).usd || knownPrivacy === "local-only") return;

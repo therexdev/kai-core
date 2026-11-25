@@ -292,6 +292,51 @@ test("a prior local account signing identity survives a rejected replacement and
   assert.equal((await f.service.run("credit-status", undefined, signal)).credits.purchased.available, String(40n * USD.USD_ATOMS));
 });
 
+test("explicit Alpha purchase recovery preserves two finalized payments and buys once through the original journal", options, async t => {
+  const f = await fixture(t, { largePurchase: true }), signal = AbortSignal.timeout(45000);
+  await f.service.connectWallet(f.window, {}, signal);
+  const alphaDir = path.join(f.dir, "alpha-profile"), alpha = new CreditService({ ...f.serviceOptions, dataDir: alphaDir });
+  alpha.purchases.clientFactory = () => f.client; f.cleanup(() => alpha.dispose());
+  for (const usd of ["1", "2"]) {
+    const preview = await alpha.run("purchase-preview", { usd }, signal);
+    assert.ok((await alpha.run("purchase-approve", preview.quote.id, signal, f.window)).purchase?.txId);
+    await alpha.run("purchase-sync", undefined, signal);
+    await alpha.run("purchase-sync", undefined, signal);
+    assert.equal((await alpha.purchaseInfo(signal)).localPurchase, null);
+  }
+  f.state.nonce = "KAM=";
+  const old = await alpha.context(signal), current = await f.service.context(signal);
+  const { DatabaseSync } = require("node:sqlite"), { sqlitePath } = require("../lib/sqlite-path");
+  const rows = directory => {
+    const db = new DatabaseSync(sqlitePath(path.join(directory, "journals", "funding-recovery.sqlite")), { readOnly: true });
+    try { return db.prepare("SELECT id,state,data,hash FROM deposits ORDER BY id").all(); } finally { db.close(); }
+  };
+  const history = rows(old.directory); assert.equal(history.length, 2); assert.ok(history.every(row => row.state === "funded"));
+  const originalFile = path.join(old.directory, "purchase-installation.enc"), originalBytes = fs.readFileSync(originalFile);
+  let preview = await f.service.run("purchase-preview", { usd: "40" }, signal);
+  await assert.rejects(f.service.run("purchase-approve", preview.quote.id, signal, f.window), /signing lease is unavailable/);
+  assert.equal(f.transactionSigns(), 2); assert.deepEqual(rows(current.directory), []);
+  const failedFile = path.join(current.directory, "purchase-installation.enc"), failedBytes = fs.readFileSync(failedFile);
+  f.service.purchases.dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [alphaDir] });
+  f.approval.response = 0;
+  assert.equal((await f.service.purchases.recoverConnection(current, f.window, signal)).state, "cancelled");
+  assert.equal(fs.existsSync(path.join(f.serviceOptions.dataDir, "credit-purchase-recovery")), false);
+  f.approval.response = 1;
+  assert.equal((await f.service.purchases.recoverConnection(current, f.window, signal)).state, "connected");
+  assert.equal(f.transactionSigns(), 2); assert.deepEqual(rows(old.directory), history);
+  f.approval.response = 0; preview = await f.service.run("purchase-preview", { usd: "40" }, signal);
+  assert.equal((await f.service.run("purchase-approve", preview.quote.id, signal, f.window)).state, "cancelled");
+  assert.equal(f.transactionSigns(), 2);
+  f.approval.response = 1; preview = await f.service.run("purchase-preview", { usd: "40" }, signal);
+  assert.ok((await f.service.run("purchase-approve", preview.quote.id, signal, f.window)).purchase?.txId);
+  await f.service.run("purchase-sync", undefined, signal);
+  await f.service.run("purchase-sync", undefined, signal);
+  assert.equal(f.transactionSigns(), 3); assert.equal(rows(old.directory).length, 3); assert.deepEqual(rows(current.directory), []);
+  assert.deepEqual(rows(old.directory).filter(row => history.some(old => old.id === row.id)), history);
+  assert.deepEqual(fs.readFileSync(originalFile), originalBytes); assert.deepEqual(fs.readFileSync(failedFile), failedBytes);
+  assert.equal((await f.service.run("credit-status", undefined, signal)).credits.purchased.available, String(43n * USD.USD_ATOMS));
+});
+
 test("USD credit purchases over 100 KOIN reach wallet approval through $1,000; excess is rejected before signing", options, async t => {
   for (const dollars of ["40", "1000"]) await t.test(dollars, async t => {
     const f = await fixture(t, { largePurchase: true }), signal = AbortSignal.timeout(45000);

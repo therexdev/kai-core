@@ -1,7 +1,7 @@
 {
   "name": "kai-core-desktop",
   "productName": "KAI Core Beta",
-  "version": "0.7.40",
+  "version": "0.7.41",
   "private": true,
   "description": "KAI Core Beta: a documented foundation for independent plugins",
   "license": "MIT",
@@ -172,6 +172,7 @@
       "electron/credit-purchase-journals.js",
       "electron/credit-purchase-progress.js",
       "electron/credit-purchase-quotes.js",
+      "electron/credit-purchase-recovery.js",
       "electron/credit-purchases.js",
       "electron/credit-runs.js",
       "electron/credit-service.js",
