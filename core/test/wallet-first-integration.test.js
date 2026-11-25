@@ -266,6 +266,32 @@ test("buffered network replies cross the real streaming scheduler and charge onl
   assert.equal(status.usage.length, 1); assert.equal(status.usage[0].id, job.id);
 });
 
+test("linking a wallet-only Core account to a website login retains the signing lease through a real reviewed purchase", options, async t => {
+  const f = await fixture(t, { largePurchase: true }), signal = AbortSignal.timeout(45000);
+  await f.service.connectWallet(f.window, {}, signal);
+  const before = await f.service.context(signal), Access = require("../../electron/credit-purchase-access");
+  const installation = Access.installation({ dataDir: f.serviceOptions.dataDir, directory: before.directory, config: before.config, storage: f.service.purchases.storage });
+  await Access.claimHost({ c: before, account: f.account, wallet: f.wallet, installation, dataDir: f.serviceOptions.dataDir,
+    storage: f.service.purchases.storage, fetchImpl: f.serviceOptions.fetchImpl, signal });
+  const web = f.runtime.accounts._newAccount({ email: "linked-core@example.test" });
+  f.account._saveToken(f.runtime.accounts._issueSession(web.id, "fixture website login"));
+  await f.account.linkWallet({ accountId: web.id, address: f.wallet.address });
+  const after = await f.service.context(signal);
+  assert.equal(after.auth.accountId, before.auth.accountId);
+  assert.equal(after.directory, before.directory);
+  assert.equal(f.runtime.accounts.accountView(web).wallets.length, 0, "credit sharing does not transfer wallet ownership");
+  f.approval.response = 0;
+  let preview = await f.service.run("purchase-preview", { usd: "40" }, signal);
+  assert.equal((await f.service.run("purchase-approve", preview.quote.id, signal, f.window)).state, "cancelled");
+  assert.equal(f.transactionSigns(), 0);
+  f.approval.response = 1;
+  preview = await f.service.run("purchase-preview", { usd: "40" }, signal);
+  assert.ok((await f.service.run("purchase-approve", preview.quote.id, signal, f.window)).purchase.txId);
+  assert.equal(f.transactionSigns(), 1);
+  assert.equal(f.runtime.hosts.claim(f.wallet.address, installation).granted, true);
+  assert.equal((await f.service.run("credit-status", undefined, signal)).credits.purchased.available, String(40n * USD.USD_ATOMS));
+});
+
 test("a prior local account signing identity survives a rejected replacement and allows one reviewed USD purchase", options, async t => {
   const f = await fixture(t, { largePurchase: true }), signal = AbortSignal.timeout(45000);
   await f.service.connectWallet(f.window, {}, signal);
