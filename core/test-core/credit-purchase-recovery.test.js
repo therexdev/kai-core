@@ -43,7 +43,7 @@ test("explicit recovery verifies the old server ID and keeps the original coordi
   const f = fixture(t), before = fs.readFileSync(f.record);
   assert.equal(f.resolve(), null); const result = await f.recover(); assert.equal(result.state, "connected");
   assert.equal(f.calls.length, 1); assert.equal(f.reviews.length, 1);
-  assert.equal(f.resolve().directory, f.directory); assert.equal(f.resolve().installation, f.installation);
+  assert.equal(f.resolve().directory, fs.realpathSync(f.directory)); assert.equal(f.resolve().installation, f.installation);
   assert.deepEqual(fs.readFileSync(f.record), before); assert.equal(f.state.signed, 0); assert.deepEqual(f.state.submissions, []);
   const root = path.join(f.dataDir, "credit-purchase-recovery"), encrypted = fs.readFileSync(path.join(root, fs.readdirSync(root)[0]));
   assert.equal(encrypted.includes(f.installation), false); assert.equal(fs.existsSync(path.join(f.c.directory, "journals")), false);

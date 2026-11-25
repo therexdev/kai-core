@@ -97,7 +97,7 @@ async function recover({ dataDir, c, storage, account, window, dialog, fetchImpl
   const choice = await dialog.showOpenDialog(window, { title: "Choose the old Koinos AI profile folder", buttonLabel: "Select profile", properties: ["openDirectory"] });
   check(); if (choice.canceled || choice.filePaths.length !== 1) return { state: "cancelled" };
   const selected = findSource(choice.filePaths[0], c, storage);
-  if (path.resolve(selected.profile) === path.resolve(dataDir)) throw Error("Choose the older app's profile folder");
+  if (selected.profile === fs.realpathSync(dataDir)) throw Error("Choose the older app's profile folder");
   guard(dataDir, selected, c.config);
   const reviewed = await dialog.showMessageBox(window, { type: "question", title: "Recover purchase connection", message: "Use this wallet's original purchase connection?",
     detail: `Wallet: ${c.config.owner}\nOriginal profile: ${selected.profile}\n\nCore will use the payment history in this original folder. Keep the folder available for future purchases and payment recovery. Existing records stay in place. New purchases still require a separate approval.`,
