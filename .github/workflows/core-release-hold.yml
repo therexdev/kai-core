@@ -1,0 +1,19 @@
+name: Hold Core 0.7.41 for Windows profile recovery
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/core-release-hold.yml]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  hold:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop the superseded installer before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/therexdev/kai-core/actions/runs/45573661270 --jq '.head_sha' > reviewed-source.txt
+          test "$(cat reviewed-source.txt)" = "758213c73f70483050058e792d7cf15e66f0c7f4"
+          gh api --method POST repos/therexdev/kai-core/actions/runs/45573661270/cancel

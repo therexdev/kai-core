@@ -10,6 +10,7 @@ on:
       - core/test-core/windows-release-signing.test.js
       - .github/workflows/core-release-078-recovery.yml
       - .github/workflows/core-build.yml
+      - .github/workflows/core-release-hold.yml
       - .github/workflows/core-release-notes.yml
       # App-smoke tooling has its own CI; test-only changes do not replace
       # already-published installers for the same application version.
