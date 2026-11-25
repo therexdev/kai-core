@@ -65,6 +65,7 @@ function showPage(next, app) {
     if (page === "app") void bridge.call("plugins.hide").catch(error => notify(error.message, true));
     priceGeneration++;
   }
+  if (["credits", "buy-credits"].includes(next)) void window.KaiPurchaseStatus?.enter(); else window.KaiPurchaseStatus?.leave();
   page = next;
   activeAppId = next === "app" ? app?.id || activeAppId : null;
   apps?.select(activeAppId);
@@ -123,6 +124,7 @@ async function refresh() {
     window.KaiCoreEarning?.observe(s.wallet, s.network.privacyMode);
     window.KaiCoreNetwork?.observe(s.wallet, s.network.privacyMode);
     window.KaiCreditConnection?.observe(s.wallet, s.network.privacyMode);
+    window.KaiPurchaseStatus?.observe(s.wallet, s.network.privacyMode);
     if (document.activeElement !== $("privacy")) $("privacy").value = s.network.privacyMode;
     notices["model-message"].show(s.importing ? `Importing model · ${Math.round(s.importing.pct || 0)}%` : s.importError || "",
       { error: !s.importing && !!s.importError, dismissible: !s.importing });
@@ -269,28 +271,34 @@ $("import-model").onclick = e => action(e.currentTarget, async () => { const r =
 let priceBusy = false;
 async function price() { if (!bridge || priceBusy || page !== "buy-credits" || snapshot?.network.privacyMode === "local-only") return; priceBusy = true; const generation = ++priceGeneration, usd = $("usd").value; try { const r = await bridge.credit("purchase-estimate", { usd }); if (generation === priceGeneration) text("price", KaiLocale.message`Estimated payment: ${r.estimate.koin} KOIN · ${r.estimate.credits} credits`); } catch (e) { if (generation === priceGeneration) text("price", e.message); } finally { priceBusy = false; } }
 $("usd").oninput = () => { priceGeneration++; text("price", KaiLocale.message(["The exact KOIN payment will be shown before approval."])); };
-$("buy-credits").onsubmit = e => { e.preventDefault(); const usd = $("usd").value; void action(e.submitter, async () => {
-  notices["purchase-state"].show("Preparing purchase…", { dismissible: false });
+$("buy-credits").onsubmit = async e => {
+  e.preventDefault(); const usd = $("usd").value, token = window.KaiPurchaseStatus.begin("buy"); if (!token) return;
+  notices["purchase-state"].clear();
   try {
     const connected = await bridge.credit("purchase-connect");
-    if (connected.state === "cancelled") { text("purchase-state", KaiLocale.message(["Purchase cancelled. No payment was approved."])); return; }
+    if (!window.KaiPurchaseStatus.current(token)) return;
+    if (connected.state === "cancelled") { text("purchase-state", "Purchase cancelled. No payment was approved."); return; }
     if (connected.state && !["ready", "connected"].includes(connected.state)) throw Error(connected.detail || "Unlock and connect your wallet to continue");
     const r = await bridge.credit("purchase-preview", { usd });
+    if (!window.KaiPurchaseStatus.current(token)) return;
     if ($("usd").value !== usd) throw Error("Amount changed. Review a new quote.");
     text("price", KaiLocale.message`${r.quote.koin} KOIN · ${r.quote.credits} credits`);
     const done = await bridge.credit("purchase-approve", r.quote.id);
-    text("purchase-state", ((_value) => _value ? KaiLocale.literal(_value) : KaiLocale.message(["Purchase submitted; confirmation may take a moment."]))(done.detail || (done.state === "cancelled" ? "Purchase cancelled." : done.state)));
+    window.KaiPurchaseStatus.result(token, done);
+    if (done.state === "cancelled") text("purchase-state", "Purchase cancelled.");
     await window.KaiCredits.refresh();
   } catch (error) {
-    text("purchase-state", error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""));
-    text("price", KaiLocale.message(["Review a fresh quote before trying again."])); throw error;
-  }
-}); };
-$("purchase-retry").onclick = e => action(e.currentTarget, async () => {
-  notices["purchase-state"].show("Checking saved purchase…", { dismissible: false });
-  try { const r = await bridge.credit("credit-purchase-retry"); text("purchase-state", r.detail || r.state); await window.KaiCredits.refresh(); }
-  catch (error) { text("purchase-state", error.message); throw error; }
-});
+    window.KaiPurchaseStatus.fail(token, error);
+    if (window.KaiPurchaseStatus.current(token)) { text("purchase-state", error.message); notify(error.message, true); }
+  } finally { await window.KaiPurchaseStatus.end(token); await refresh(); }
+};
+$("purchase-retry").onclick = async () => {
+  const token = window.KaiPurchaseStatus.begin("retry"); if (!token) return;
+  notices["purchase-state"].clear();
+  try { const r = await bridge.credit("credit-purchase-retry"); window.KaiPurchaseStatus.result(token, r); await window.KaiCredits.refresh(); }
+  catch (error) { window.KaiPurchaseStatus.fail(token, error); if (window.KaiPurchaseStatus.current(token)) { text("purchase-state", error.message); notify(error.message, true); } }
+  finally { await window.KaiPurchaseStatus.end(token); await refresh(); }
+};
 $("purchase-recover-connection").onclick = e => action(e.currentTarget, async () => {
   notices["purchase-state"].show("Checking the original purchase connection…", { dismissible: false });
   try {

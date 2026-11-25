@@ -266,15 +266,19 @@ class TestPayments {
     const combined = AbortSignal.any([signal, this.#syncAbort.signal]);
     const run = async () => {
       this.#owner();
+      const tracked = this.pendingPurchase()?.id;
       for (let p of this.#journal.list().filter(p => p.kind === "credits" && !["reverted", "conflicted"].includes(p.state))) {
+        // Re-registering an older receipt must not complete the visible progress
+        // for the current pending purchase. Registration remains unchanged.
+        const report = (stage, detail) => { if (p.id === tracked) this.#report(stage, detail); };
         combined.throwIfAborted();
         // Discover the winning envelope before consuming any registration slot.
         // This is read-only recovery: no signing or background broadcast.
         if (p.state !== "funded") {
-          this.#report(p.cancellation ? "cancellation-confirmation" : "awaiting-confirmation", { txId: p.txId });
+          report(p.cancellation ? "cancellation-confirmation" : "awaiting-confirmation", { txId: p.txId });
           await this.#journal.nonceCoordinator.reconcile(p.id); combined.throwIfAborted();
           const confirmation = this.#journal.nonceCoordinator.confirmation?.(p.id);
-          if (confirmation) this.#report(p.cancellation ? "cancellation-confirmation" : "awaiting-confirmation", confirmation);
+          if (confirmation) report(p.cancellation ? "cancellation-confirmation" : "awaiting-confirmation", confirmation);
           // Pending envelopes only need nonce/receipt observation. Full funding
           // proof is required after finality; rereading every contract while
           // waiting cannot confirm a payment and floods public RPC endpoints.
@@ -291,10 +295,10 @@ class TestPayments {
         const txId = p.finality?.state === "finalized" ? p.finality.txId
           : correction?.state === "superseded" ? p.txId : correction?.transaction?.id || p.txId;
         if (!this.#registeredPurchases.has(txId)) {
-          this.#report("updating-credits", { txId });
+          report("updating-credits", { txId });
           const registration = await register(txId, combined); this.#registeredPurchases.add(txId);
-          if (registration?.purchase?.state === "confirmed") this.#report("complete", { txId, outcome: "credited" });
-          else this.#report("awaiting-confirmation", { txId });
+          if (registration?.purchase?.state === "confirmed") report("complete", { txId, outcome: "credited" });
+          else report("awaiting-confirmation", { txId });
         }
         combined.throwIfAborted();
 

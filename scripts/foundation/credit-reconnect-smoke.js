@@ -4,6 +4,7 @@
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), crypto = require("node:crypto"), assert = require("node:assert/strict");
 const appRoot = path.resolve(process.env.KAI_SMOKE_SOURCE_ROOT || path.join(__dirname, "../.."));
 function installNetworkFixture({ runtimeRoot, address }) {
+  global.__installPurchaseProgressFixture = () => require("./purchase-progress-fixture").install(runtimeRoot);
   const { Signer } = require(path.join(appRoot, "node_modules/koilib"));
   const Protocol = require(path.join(runtimeRoot, "core/lib/wallet-credit-account"));
   const config = require(path.join(runtimeRoot, "core/lib/koin-network/credit-service.json")).config, origin = new URL(config.schedulerUrl).origin, pin = Protocol.pin(config, origin);
@@ -94,6 +95,7 @@ async function main() {
     assert.equal(fs.existsSync(path.join(profile, "credit-purchase-recovery")), false);
     assert.equal(await app.evaluate(() => global.__creditReconnectFixture.proofCount), 1);
     report.checks.push("Core-only Alpha recovery reaches the native folder chooser; cancel persists no recovery connection");
+    await require("./purchase-progress-fixture").check({ app, page, runtimeRoot, report, capture, until });
     assert.deepEqual(fs.readFileSync(wallet.keystorePath), originalWallet); assert.deepEqual(errors, []); assert.deepEqual((await app.evaluate(() => global.__foundationSmoke)).errors, []);
     const process = app.process(), ended = new Promise((resolve, reject) => { const timer = setTimeout(() => reject(Error("Core quit timed out")), 30000); process.once("exit", code => { clearTimeout(timer); code === 0 ? resolve() : reject(Error("Core exit " + code)); }); });
     await app.evaluate(() => setTimeout(() => global.__foundationTrayMenu.find(row => row.label === "Quit KAI Core Beta").click(), 0)); await ended; app = null;

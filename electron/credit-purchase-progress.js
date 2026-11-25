@@ -4,7 +4,7 @@
 // forward raw RPC errors, account credentials or transaction envelopes.
 const STAGES = new Set(["checking-payment", "checking-network", "getting-price", "preparing-payment", "wallet-approval",
   "rechecking-payment", "signing", "checking-mana", "submitting", "awaiting-confirmation", "updating-credits",
-  "cancellation-approval", "cancellation-signing", "cancellation-submitting", "cancellation-confirmation", "complete", "stopped", "failed"]);
+  "confirmation-unavailable", "cancellation-approval", "cancellation-signing", "cancellation-submitting", "cancellation-confirmation", "complete", "stopped", "failed"]);
 function purchaseProgress(value) {
   if (!value || typeof value !== "object" || !STAGES.has(value.stage) ||
       typeof value.operationId !== "string" || !/^(?:[a-f0-9]{64}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.test(value.operationId) ||
