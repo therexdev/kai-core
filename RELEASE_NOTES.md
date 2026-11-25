@@ -1,4 +1,12 @@
-# KAI Core Beta 0.7.39
+# KAI Core Beta 0.7.40
+
+Fixes credit purchases blocked by a signing-lease error after an account or credit configuration change on the same Core profile. Core can reuse the original encrypted signing identity already saved for that wallet, service and chain, and remembers it independently of the selected account. A replacement identity from an unsuccessful attempt no longer hides the original record.
+
+The server must confirm the existing identity before payment review. This does not reset its wallet binding, transfer signing to another computer, overwrite payment journals or clear pending transactions. Wallet approval is still required for every purchase.
+
+Update through **Settings → Application updates → Download update → Restart and install**, then retry the purchase. The previously deployed $1,000 credits-server update remains required; this release needs no additional server update.
+
+## Previous release: KAI Core Beta 0.7.39
 
 Buy up to **$1,000 in credits per transaction** using KOIN. Core now checks the purchase against its USD value at the verified exchange rate, fixing the older 100-KOIN deposit cap that blocked larger purchases. The amount field displays the $1,000 maximum, and requests above it are rejected before wallet signing.
 
